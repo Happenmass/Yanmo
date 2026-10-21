@@ -1,0 +1,58 @@
+[
+  {
+    "model": "Qwen/Qwen3-8B-MLX-4bit",
+    "target": "en",
+    "source": "预算是3500元，周五交付，不是周四。",
+    "result": "The budget is 3500 yuan, to be delivered on Friday, not Thursday.",
+    "seconds": 5.836
+  },
+  {
+    "model": "Qwen/Qwen3-8B-MLX-4bit",
+    "target": "zh-Hans",
+    "source": "The budget is 3500 yuan. Deliver on Friday, not Thursday.",
+    "result": "预算为3500元。请在星期五送达，不要在星期四。",
+    "seconds": 0.831
+  },
+  {
+    "model": "Qwen/Qwen3-8B-MLX-4bit",
+    "target": "ja",
+    "source": "预算是3500元，周五交付，不是周四。",
+    "result": "予算は3500元で、金曜日に納品し、木曜日ではありません。",
+    "seconds": 0.862
+  },
+  {
+    "model": "Qwen/Qwen3-8B-MLX-4bit",
+    "target": "de",
+    "source": "预算是3500元，周五交付，不是周四。",
+    "result": "Der Budget beträgt 3500 Yuan, wird am Freitag geliefert, nicht am Donnerstag.",
+    "seconds": 0.94
+  },
+  {
+    "model": "mlx-community/Qwen3.5-9B-4bit",
+    "target": "en",
+    "source": "预算是3500元，周五交付，不是周四。",
+    "result": "The budget is 3500 yuan, with delivery on Friday, not Thursday.",
+    "seconds": 3.163
+  },
+  {
+    "model": "mlx-community/Qwen3.5-9B-4bit",
+    "target": "zh-Hans",
+    "source": "The budget is 3500 yuan. Deliver on Friday, not Thursday.",
+    "result": "预算为 3500 元。请在周五交付，而不是周四。",
+    "seconds": 1.008
+  },
+  {
+    "model": "mlx-community/Qwen3.5-9B-4bit",
+    "target": "ja",
+    "source": "预算是3500元，周五交付，不是周四。",
+    "result": "予算は 3500 元で、金曜日に納品します。木曜日ではありません。",
+    "seconds": 1.179
+  },
+  {
+    "model": "mlx-community/Qwen3.5-9B-4bit",
+    "target": "de",
+    "source": "预算是3500元，周五交付，不是周四。",
+    "result": "Das Budget beträgt 3500 Yuan, die Lieferung erfolgt am Freitag, nicht am Donnerstag.",
+    "seconds": 1.146
+  }
+]

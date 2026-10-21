@@ -75,7 +75,13 @@ def build_payload(request: dict) -> dict:
 def protect_numbers(text: str) -> tuple[str, dict[str, str]]:
     """Keep numeric literals out of probabilistic rewriting (including negated dates)."""
     protected = {}
+    # Lexical uses of 一 are not numeric literals. Locking them forces the LLM to
+    # preserve abandoned starts such as repeated indefinite quantifiers. Keep
+    # actual quantities/dates and multi-character numerals on the existing path.
+    lexical_ones = {m.start() for m in re.finditer(r"一(?=些|下|起|直|般|定|样|致|旦|边|方面)|(?<=[统唯万])一", text)}
     def replace(match):
+        if match.group() == "一" and match.start() in lexical_ones:
+            return match.group()
         token = f"⟦N{len(protected)}⟧"
         protected[token] = match.group()
         return token

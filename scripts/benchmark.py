@@ -42,7 +42,8 @@ for name, body, required, extra in CASES:
     rows.append(row)
     print(json.dumps(row, ensure_ascii=False), flush=True)
 
-report = {'model': args.model, 'cases': rows, 'passed': sum(row['passed'] for row in rows), 'total': len(rows), 'warm_median_seconds': statistics.median(row['seconds'] for row in rows[1:] if 'seconds' in row)}
+warm_timings = [row['seconds'] for row in rows[1:] if 'seconds' in row]
+report = {'model': args.model, 'cases': rows, 'passed': sum(row['passed'] for row in rows), 'total': len(rows), 'warm_median_seconds': statistics.median(warm_timings) if warm_timings else None}
 if args.audio:
     timings = []
     for i in range(2):
