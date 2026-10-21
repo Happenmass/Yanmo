@@ -148,7 +148,7 @@ class Engine:
             import mlx.core as mx
             mx.clear_cache()
 
-    def transcribe(self, request: dict) -> dict:
+    def load_asr(self, request: dict):
         model_path = resolve_model(request.get("asr_model") or DEFAULT_ASR)
         if self.asr_path != str(model_path):
             if self.large_llm:
@@ -158,6 +158,18 @@ class Engine:
             from mlx_audio.stt.utils import load_model
             self.asr = load_model(str(model_path))
             self.asr_path = str(model_path)
+
+    def warmup(self, request: dict) -> dict:
+        self.load_asr(request)
+        if request.get("include_llm"):
+            path = resolve_model(request.get("llm_model") or DEFAULT_LLM)
+            # Do not evict the ASR just preloaded for a large custom LLM.
+            if sum(p.stat().st_size for p in path.glob("*.safetensors")) <= 6_000_000_000:
+                self.load_llm(request)
+        return {"text": "模型已准备"}
+
+    def transcribe(self, request: dict) -> dict:
+        self.load_asr(request)
         audio = Path(request["audio"]).expanduser()
         if not audio.is_file():
             raise ValueError("音频文件不存在。")
@@ -229,6 +241,8 @@ class Engine:
             return {"models": models, "offline": True}
         if command == "transcribe":
             return self.transcribe(request)
+        if command == "warmup":
+            return self.warmup(request)
         if command == "translate":
             return self.translate(request)
         if command == "polish":

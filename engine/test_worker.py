@@ -6,6 +6,31 @@ from worker import build_payload, clean_output, resolve_model, protect_numbers, 
 
 
 class WorkerTests(unittest.TestCase):
+    def testWarmupLoadsOnlyNeededModelsAndDoesNotGenerate(self):
+        engine = Engine()
+        with TemporaryDirectory() as directory:
+            path = Path(directory)
+            (path / "weights.safetensors").write_bytes(b"small")
+            with patch.object(engine, "load_asr") as asr, patch.object(engine, "load_llm") as llm, patch("worker.resolve_model", return_value=path), patch.object(engine, "generate_text") as generate:
+                engine.handle({"command": "warmup", "include_llm": False})
+                asr.assert_called_once()
+                llm.assert_not_called()
+                engine.handle({"command": "warmup", "include_llm": True})
+                llm.assert_called_once()
+                generate.assert_not_called()
+
+    def testWarmupDoesNotEvictASRForLargeCustomLLM(self):
+        engine = Engine()
+        with TemporaryDirectory() as directory:
+            path = Path(directory)
+            # Sparse file: exercise the real size guard without allocating 6 GB.
+            with (path / "weights.safetensors").open("wb") as weights:
+                weights.truncate(6_000_000_001)
+            with patch.object(engine, "load_asr") as asr, patch.object(engine, "load_llm") as llm, patch("worker.resolve_model", return_value=path):
+                engine.handle({"command": "warmup", "include_llm": True})
+                asr.assert_called_once()
+                llm.assert_not_called()
+
     def testLexicalOneDoesNotLockDisfluenciesButQuantitiesRemainProtected(self):
         ordinary = "一些建议，一下就好，一起讨论，一直保持一致，统一格式，唯一入口。"
         self.assertEqual(protect_numbers(ordinary), (ordinary, {}))

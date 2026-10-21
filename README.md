@@ -12,6 +12,7 @@
 - 200×36 pt 黑墨浮层：真实音量、计时、取消、完成与处理结果。录音无提示音，无麦克风监听回放；界面仅做短暂淡入淡出。
 - 首页只呈现使用统计、落笔日历、快捷键指引和最近文稿，录音反馈集中在浮层。
 - Qwen3-ASR 本地语音识别，MLX-LM 本地文字整理；可以关闭整理或选择保留原话。
+- 连续空闲 1 小时后自动退出推理进程，释放模型与 GPU 缓存；下次录音启动后后台预加载，连续输入复用已加载模型。
 - 口述翻译：默认 ⌃⌥T 开始／结束，说完后直接译成目标语言并写入原输入框。
 - 划词翻译：选中文字后按 ⌃⌥S，在独立宣纸弹窗查看原文和译文，可切换语言、重新翻译或复制。
 - 翻译首版支持英语、简体中文、日语、德语。两种翻译入口各自保存目标语言与多组快捷键，在「设置 → 快捷键与翻译」中修改；默认目标均为英语。三种功能不允许绑定同一快捷键。
@@ -89,11 +90,15 @@ LLM 整理是概率输出，需要核对关键名称、金额、时间和否定�
 ```bash
 swift run YanmoChecks
 python3 -m unittest discover -s engine -v
+swiftc -parse-as-library Sources/Yanmo/LocalEngine.swift Tests/EngineLifecycleChecks.swift -o .build/EngineLifecycleChecks
+.build/EngineLifecycleChecks
 ```
 
 核心检查使用不依赖 XCTest 的可执行程序，兼容只安装 Command Line Tools 的开发环境。
 
-`engine/worker.py` 使用逐行 JSON 协议，支持 `check`、`transcribe`、`polish`、`translate`、`unload`。`translate` 接受 `text`、`target_language`（`en` / `zh-Hans` / `ja` / `de`），以及可选的 `llm_model` 和 `key_terms`。标准输出仅包含协议响应，诊断信息不持久保存。小模型与 ASR 分别驻留，连续输入免于反复加载；用户选择权重超过 6 GB 的 LLM 时仍会在识别与整理之间卸载切换。
+`engine/worker.py` 使用逐行 JSON 协议，支持 `check`、`warmup`、`transcribe`、`polish`、`translate`、`unload`。`translate` 接受 `text`、`target_language`（`en` / `zh-Hans` / `ja` / `de`），以及可选的 `llm_model` 和 `key_terms`。标准输出仅包含协议响应，诊断信息不持久保存。小模型与 ASR 分别驻留，连续输入免于反复加载；用户选择权重超过 6 GB 的 LLM 时仍会在识别与整理之间卸载切换。
+
+空闲计时由应用管理，生产值固定为 3600 秒。录音与完整处理流程会暂停倒计时，操作结束或请求完成后重新计时；到期在推理串行队列退出工作进程，不删除磁盘权重。睡眠跨过期限时，在唤醒后执行到期任务。录音先启动采集，再发出 `warmup`：加载 ASR，需要整理或翻译时一并加载不超过 6 GB 的 LLM；大型自选 LLM 保留按需加载，避免提前挤出 ASR。预加载失败不会中断录音，正式处理会重试并报告错误。生命周期检查使用缩短的超时和独立测试进程，验证退出、重启、录音保护、长请求保护与计时重置。
 
 当前小模型与体验修订记录见 [0.2 验证与功能对照](docs/iteration-0.2.md)，可复跑 `scripts/benchmark.py`。
 

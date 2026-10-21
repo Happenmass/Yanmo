@@ -289,6 +289,7 @@ struct PreferencesView: View {
                 }
                 section("本地模型", symbol: "externaldrive") {
                     Text("模型从用户级缓存加载。运行期间不联网，也不会自动下载模型。").font(.system(size: 11)).foregroundStyle(Ink.muted)
+                    Text("空闲 1 小时后自动释放模型内存；下次录音时后台加载。连续使用期间保持就绪。").font(.system(size: 11)).foregroundStyle(Ink.muted)
                     field("Python 解释器", text: $model.python)
                     field("语音识别模型", text: $model.asrModel)
                     field("文字整理模型", text: $model.llmModel)

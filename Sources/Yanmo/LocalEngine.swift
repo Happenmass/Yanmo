@@ -15,6 +15,53 @@ final class LocalEngine: @unchecked Sendable {
     private var output: FileHandle?
     private var buffer = Data()
     private var executable = ""
+    private let idleTimeout: TimeInterval
+    private let workerURL: URL?
+    private var active = false
+    private var idleTask: DispatchWorkItem?
+    private var idleGeneration = UUID()
+
+    init(idleTimeout: TimeInterval = 3600, workerURL: URL? = nil) {
+        self.idleTimeout = idleTimeout
+        self.workerURL = workerURL
+    }
+
+    /// Recording and the full processing pipeline count as activity, even when
+    /// no worker request is in flight (microphone permission, cursor insertion).
+    func setActive(_ active: Bool) {
+        queue.async {
+            self.active = active
+            self.cancelIdleUnload()
+            if !active { self.scheduleIdleUnload() }
+        }
+    }
+
+    private func cancelIdleUnload() {
+        idleGeneration = UUID()
+        idleTask?.cancel()
+        idleTask = nil
+    }
+
+    private func scheduleIdleUnload() {
+        cancelIdleUnload()
+        guard !active, process?.isRunning == true else { return }
+        let generation = idleGeneration
+        let task = DispatchWorkItem { [weak self] in
+            guard let self, self.idleGeneration == generation, !self.active else { return }
+            // Run on the same serial queue as inference: never interrupt a request.
+            // Exiting also releases Metal buffers and allocator caches completely.
+            self.stop()
+            self.process?.waitUntilExit()
+            self.lock.lock()
+            self.process = nil
+            self.lock.unlock()
+            self.input = nil; self.output = nil; self.buffer.removeAll()
+            self.idleTask = nil
+        }
+        idleTask = task
+        // A sleeping Mac should release overdue models when it wakes.
+        queue.asyncAfter(wallDeadline: .now() + idleTimeout, execute: task)
+    }
 
     func stop() {
         lock.lock()
@@ -26,6 +73,8 @@ final class LocalEngine: @unchecked Sendable {
     func request(_ payload: [String: Any], python: String) async throws -> [String: Any] {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
+                self.cancelIdleUnload()
+                defer { self.scheduleIdleUnload() }
                 do {
                     try self.startIfNeeded(python: python)
                     let id = UUID().uuidString
@@ -77,7 +126,7 @@ final class LocalEngine: @unchecked Sendable {
         guard FileManager.default.isExecutableFile(atPath: path) else {
             throw EngineError(message: "找不到可执行的 Python。请在设置中选择已安装 MLX 的 Python 解释器。")
         }
-        let worker = Bundle.main.resourceURL!.appendingPathComponent("engine/worker.py")
+        let worker = workerURL ?? Bundle.main.resourceURL!.appendingPathComponent("engine/worker.py")
         guard FileManager.default.fileExists(atPath: worker.path) else {
             throw EngineError(message: "缺少本地引擎。请运行 scripts/build.sh 构建完整的言墨.app。")
         }

@@ -44,7 +44,11 @@ final class AudioMeter: ObservableObject {
 final class AppModel: ObservableObject {
     static let shared = AppModel()
     @Published var page: Page = .desk
-    @Published var stage: Stage = .idle
+    @Published var stage: Stage = .idle {
+        didSet {
+            if stage.busy != oldValue.busy { engine.setActive(stage.busy) }
+        }
+    }
     @Published var library = Library()
     @Published var selectedID: UUID?
     @Published var draft = ""
@@ -259,6 +263,17 @@ final class AppModel: ObservableObject {
                 try await recorder.start(deviceUID: microphone)
                 guard operation == token else { recorder.cancel(); return }
                 stage = .recording
+                let warmup: [String: Any] = [
+                    "command": "warmup", "asr_model": asrModel, "llm_model": llmModel,
+                    "include_llm": activeAction == .voiceTranslation || (polishEnabled && style != .verbatim)
+                ]
+                let interpreter = python
+                Task {
+                    guard operation == token else { return }
+                    // Audio capture starts first. Loading overlaps with speaking;
+                    // failures are retried and reported by the actual input request.
+                    _ = try? await engine.request(warmup, python: interpreter)
+                }
                 started = Date()
                 timer = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in
                     Task { @MainActor in
