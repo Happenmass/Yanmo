@@ -9,17 +9,17 @@ struct DeskView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
                 VStack(alignment: .leading, spacing: 9) {
-                    Text("言语之间，自有笔墨。").font(Ink.serif(32)).tracking(1)
-                    Text("让表达回到自然，让文字留有余地。").font(.system(size: 12)).foregroundStyle(Ink.muted)
+                    Text("言语之间，自有笔墨。").font(Ink.serif(32)).tracking(1).brushReveal(delay: 0.1)
+                    Text("让表达回到自然，让文字留有余地。").font(.system(size: 12)).foregroundStyle(Ink.muted).inkIn(delay: 0.75)
                 }.padding(.top, 12)
                 HStack(alignment: .top, spacing: 28) {
                     VStack(alignment: .leading, spacing: 22) {
                         Text("表达概览").font(Ink.serif(20))
                         LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 22) {
-                            statistic("累计落笔", value: usage.characters.formatted(), unit: "字")
-                            statistic("音频时长", value: duration, unit: durationUnit)
-                            statistic("平均口述速度", value: usage.charactersPerMinute == 0 ? "—" : "\(usage.charactersPerMinute)", unit: "字 / 分钟")
-                            statistic("活跃天数", value: "\(usage.activeDays)", unit: "天")
+                            statistic("累计落笔", value: usage.characters.formatted(), unit: "字").inkIn(delay: 0.25)
+                            statistic("音频时长", value: duration, unit: durationUnit).inkIn(delay: 0.33)
+                            statistic("平均口述速度", value: usage.charactersPerMinute == 0 ? "—" : "\(usage.charactersPerMinute)", unit: "字 / 分钟").inkIn(delay: 0.41)
+                            statistic("活跃天数", value: "\(usage.activeDays)", unit: "天").inkIn(delay: 0.49)
                         }
                         Rectangle().fill(Ink.line).frame(height: 0.5)
                         ActivityCalendar(days: usage.dailyCharacters)
@@ -58,6 +58,7 @@ struct DeskView: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(value).font(Ink.serif(32)).monospacedDigit()
+                    .contentTransition(.numericText()).animation(.easeOut(duration: 0.4), value: value)
                 Text(unit).font(.system(size: 10)).foregroundStyle(Ink.muted)
             }
             Text(title).font(.system(size: 11)).foregroundStyle(Ink.muted)
@@ -73,14 +74,14 @@ struct DeskView: View {
             if model.library.manuscripts.isEmpty {
                 Text("第一段文字，从开口开始。").font(Ink.serif(16)).foregroundStyle(Ink.muted).padding(.vertical, 16)
             } else {
-                ForEach(model.library.manuscripts.prefix(3)) { item in
+                ForEach(Array(model.library.manuscripts.prefix(3).enumerated()), id: \.element.id) { index, item in
                     Button { model.select(item); model.page = .manuscripts } label: {
                         HStack(spacing: 16) {
                             Text(item.text).font(.system(size: 12)).lineLimit(1)
                             Spacer(minLength: 0)
                             Text(item.date, format: .dateTime.month().day().hour().minute()).font(.system(size: 10)).foregroundStyle(Ink.muted)
                         }.padding(.vertical, 5).contentShape(Rectangle())
-                    }.buttonStyle(.plain).disabled(model.stage.busy)
+                    }.buttonStyle(.plain).disabled(model.stage.busy).inkIn(delay: 0.55 + Double(index) * 0.1)
                 }
             }
         }
@@ -116,6 +117,8 @@ private struct ActivityCalendar: View {
                             RoundedRectangle(cornerRadius: 2)
                                 .fill(Ink.black.opacity(date > today ? 0.025 : opacity(count)))
                                 .frame(height: 12)
+                                // Days soak in column by column, the way ink spreads along paper fibre.
+                                .inkIn(delay: 0.45 + Double(week) * 0.03 + Double(row) * 0.012, duration: 0.5)
                                 .help("\(date.formatted(date: .abbreviated, time: .omitted)) · \(count) 字")
                                 .accessibilityLabel("\(date.formatted(date: .abbreviated, time: .omitted))，\(count) 字")
                         }

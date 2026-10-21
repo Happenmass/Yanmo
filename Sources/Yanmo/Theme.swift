@@ -39,6 +39,22 @@ struct Seal: View {
     }
 }
 
+private struct Stamped: ViewModifier {
+    var delay: Double
+    @State private var pressed = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func body(content: Content) -> some View {
+        content.scaleEffect(pressed || reduceMotion ? 1 : 1.28).opacity(pressed ? 1 : 0)
+            .blur(radius: pressed || reduceMotion ? 0 : 2)
+            // A seal is pressed down once, quickly and firmly: ease in, no rebound.
+            .onAppear { withAnimation(.easeIn(duration: 0.2).delay(delay)) { pressed = true } }
+    }
+}
+
+extension View {
+    func stamped(delay: Double = 0) -> some View { modifier(Stamped(delay: delay)) }
+}
+
 struct Keycap: View {
     var text: String
     var body: some View {

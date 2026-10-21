@@ -4,6 +4,7 @@ import YanmoCore
 struct ShellView: View {
     @ObservedObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
+    @Namespace private var selection
     var body: some View {
         HStack(spacing: 0) {
             sidebar.frame(width: 210)
@@ -19,14 +20,15 @@ struct ShellView: View {
                     }.foregroundStyle(Ink.muted).padding(.horizontal, 9).padding(.vertical, 6)
                         .overlay(RoundedRectangle(cornerRadius: 5).stroke(Ink.line, lineWidth: 0.6))
                 }.padding(.horizontal, 35).padding(.top, 32).padding(.bottom, 15)
-                Group {
+                ZStack {
                     switch model.page {
-                    case .desk: DeskView(model: model)
-                    case .manuscripts: ManuscriptsView(model: model)
-                    case .dictionary: DictionaryView(model: model)
-                    case .settings: PreferencesView(model: model)
+                    case .desk: DeskView(model: model).transition(.inkBleed)
+                    case .manuscripts: ManuscriptsView(model: model).transition(.inkBleed)
+                    case .dictionary: DictionaryView(model: model).transition(.inkBleed)
+                    case .settings: PreferencesView(model: model).transition(.inkBleed)
                     }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .animation(.easeOut(duration: 0.42), value: model.page)
                 if !model.notice.isEmpty {
                     HStack(alignment: .top, spacing: 9) {
                         Image(systemName: "info.circle").foregroundStyle(Ink.red)
@@ -34,9 +36,14 @@ struct ShellView: View {
                         Spacer(minLength: 0)
                         Button { model.notice = "" } label: { Image(systemName: "xmark").font(.system(size: 10)) }.buttonStyle(.plain).accessibilityLabel("关闭提示")
                     }.padding(12).background(Ink.sidebar.opacity(0.7)).padding(.horizontal, 35).padding(.bottom, 8)
+                        .transition(.inkBleed)
                 }
                 footer
-            }.background(Paper())
+            }.animation(.easeOut(duration: 0.3), value: model.notice.isEmpty)
+                .background(alignment: .bottom) {
+                    InkMountains().frame(height: 260).padding(.bottom, 40).inkIn(delay: 0.35, duration: 2.2)
+                }
+                .background(Paper())
         }.foregroundStyle(Ink.black)
             .frame(minWidth: 980, minHeight: 720)
             .preferredColorScheme(.light)
@@ -53,7 +60,7 @@ struct ShellView: View {
     var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
-                Seal()
+                Seal().stamped(delay: 0.2)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("言墨").font(Ink.serif(26)).tracking(3)
                     Text("YANMO").font(.system(size: 9, weight: .medium)).tracking(4).foregroundStyle(Ink.muted)
@@ -69,13 +76,19 @@ struct ShellView: View {
                             Spacer()
                         }.foregroundStyle(model.page == page ? Ink.red : Ink.black)
                             .padding(.horizontal, 21).frame(height: 47)
-                            .background(model.page == page ? Ink.line.opacity(0.28) : .clear, in: RoundedRectangle(cornerRadius: 6))
-                            .overlay(alignment: .leading) {
-                                if model.page == page { UnevenRoundedRectangle(topLeadingRadius: 2, bottomLeadingRadius: 2).fill(Ink.red).frame(width: 3).padding(.vertical, 1) }
+                            .background {
+                                // One wash and one cinnabar stroke glide to the chosen page instead of blinking.
+                                if model.page == page {
+                                    RoundedRectangle(cornerRadius: 6).fill(Ink.line.opacity(0.28))
+                                        .overlay(alignment: .leading) { UnevenRoundedRectangle(topLeadingRadius: 2, bottomLeadingRadius: 2).fill(Ink.red).frame(width: 3).padding(.vertical, 1) }
+                                        .matchedGeometryEffect(id: "page", in: selection)
+                                }
                             }
+                            .contentShape(Rectangle())
                     }.buttonStyle(.plain)
                 }
             }.padding(.horizontal, 14).padding(.top, 32)
+                .animation(.smooth(duration: 0.38), value: model.page)
             Spacer()
             Rectangle().fill(Ink.line).frame(height: 0.5).padding(.horizontal, 27)
             HStack(spacing: 8) {

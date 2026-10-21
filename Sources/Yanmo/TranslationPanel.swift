@@ -75,7 +75,12 @@ private struct TranslationView: View {
                     }.font(.system(size: 12)).tint(Ink.muted)
                     Rectangle().fill(Ink.line).frame(height: 0.5)
                     Text("译文 · \(result.language.label)").font(.system(size: 11)).foregroundStyle(Ink.muted)
-                    if result.loading { Text("正在本机翻译…").foregroundStyle(Ink.muted).font(.system(size: 13)) }
+                    if result.loading {
+                        HStack(spacing: 10) {
+                            InkDrop(color: Ink.black).frame(width: 18, height: 18)
+                            Text("正在本机翻译…").foregroundStyle(Ink.muted).font(.system(size: 13))
+                        }
+                    }
                     else if !result.error.isEmpty { Text(result.error).foregroundStyle(Ink.red).font(.system(size: 13)) }
                     else { document(result.result, size: 15) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
