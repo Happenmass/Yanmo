@@ -1,0 +1,3 @@
+mlx-audio==0.4.6
+mlx-lm==0.31.3
+huggingface-hub==1.25.1
