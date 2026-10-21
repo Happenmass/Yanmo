@@ -47,6 +47,26 @@ struct Checks {
         try require(shortcuts[2].validationError == nil && InputShortcut.fn.validationError == nil, "Explicit dictation shortcuts must be allowed")
         print("PASS: shortcut persistence and editing/system-key protection")
 
+        var chord = ModifierChord()
+        try require(chord.update(key: 59, down: true) == nil, "Do not trigger before release")
+        let leftControl = chord.update(key: 59, down: false)!
+        try require(leftControl.modifierKeys == [59] && leftControl.validationError == nil, "Single left Control must record")
+        try require(leftControl.id != InputShortcut.modifierOnly([62]).id, "Left and right Control are distinct")
+        try require(JSONDecoder().decode(InputShortcut.self, from: JSONEncoder().encode(leftControl)) == leftControl, "Modifier-only shortcuts must persist")
+        _ = chord.update(key: 59, down: true); _ = chord.update(key: 56, down: true)
+        try require(chord.update(key: 59, down: false) == nil, "Wait until the entire chord is released")
+        try require(chord.update(key: 56, down: false)?.modifierKeys == [56, 59], "Control + Shift must record as one chord")
+        _ = chord.update(key: 59, down: true); chord.cancel()
+        try require(chord.update(key: 59, down: false) == nil, "Control+C or a mouse click must not start recording")
+        _ = chord.update(key: 59, down: true); _ = chord.update(key: 62, down: true)
+        _ = chord.update(key: 59, down: false)
+        try require(chord.update(key: 62, down: false)?.modifierKeys == [59, 62], "Both Controls preserve physical key identity")
+        _ = chord.update(key: 59, down: true); _ = chord.update(key: 56, down: true)
+        _ = chord.update(key: 56, down: false); _ = chord.update(key: 58, down: true)
+        _ = chord.update(key: 58, down: false)
+        try require(chord.update(key: 59, down: false) == nil, "Changing a chord mid-release must not trigger")
+        print("PASS: modifier-only capture, release, persistence and typing suppression")
+
         let now = Date(timeIntervalSince1970: 1_000_000)
         try require(HistoryRetention.week.includes(now.addingTimeInterval(-6 * 86400), now: now), "Recent history must remain")
         try require(!HistoryRetention.week.includes(now.addingTimeInterval(-8 * 86400), now: now), "Expired history must be pruned")
@@ -60,6 +80,6 @@ struct Checks {
         try require(usage.characters == 8 && usage.audioSeconds == 30 && usage.charactersPerMinute == 8, "Only timed records contribute to speaking speed")
         try require(usage.activeDays == 1 && UsageSummary([]).charactersPerMinute == 0, "Activity groups by day and handles empty history")
         print("PASS: usage totals, speaking speed and active days")
-        print("6 core checks passed")
+        print("7 core checks passed")
     }
 }

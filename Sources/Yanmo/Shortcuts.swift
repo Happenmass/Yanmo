@@ -8,13 +8,14 @@ final class HotKeys {
     var onCancel: (() -> Void)?
     var onCaptureFn: (() -> Void)?
     var isActive: (() -> Bool)?
-    var capturing = false { didSet { fnDown = false; combined = false; pressed.removeAll() } }
+    var capturing = false { didSet { fnDown = false; combined = false; pressed.removeAll(); modifierChord.reset() } }
     private var shortcuts: [InputShortcut] = []
     private var keys: [EventHotKeyRef] = []
     private var pressed = Set<UInt32>()
     private var handler: EventHandlerRef?
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
+    private var modifierChord = ModifierChord()
     private var fnDown = false
     private var combined = false
 
@@ -52,7 +53,7 @@ final class HotKeys {
     }
 
     private func register(_ values: [InputShortcut]) throws {
-        for (index, shortcut) in values.enumerated() where !shortcut.isFn {
+        for (index, shortcut) in values.enumerated() where !shortcut.needsEventTap {
             var key: EventHotKeyRef?
             let status = RegisterEventHotKey(shortcut.keyCode, shortcut.modifiers, EventHotKeyID(signature: 0x59414E4D, id: UInt32(index + 1)), GetApplicationEventTarget(), 0, &key)
             guard status == noErr, let key else { throw EngineError(message: "\(shortcut.label) 无法注册，可能已被其他应用占用。原快捷键已保留。") }
@@ -65,16 +66,20 @@ final class HotKeys {
     func enableFn() -> Bool {
         if let tap { CGEvent.tapEnable(tap: tap, enable: true); return true }
         guard AXIsProcessTrusted() else { return false }
-        let mask = (CGEventMask(1) << CGEventType.flagsChanged.rawValue) | (CGEventMask(1) << CGEventType.keyDown.rawValue)
+        let mask = [CGEventType.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown].reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
         tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, eventsOfInterest: mask, callback: { _, type, event, pointer in
             guard let pointer else { return Unmanaged.passUnretained(event) }
             let owner = Unmanaged<HotKeys>.fromOpaque(pointer).takeUnretainedValue()
             if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-                owner.fnDown = false; owner.pressed.removeAll()
+                owner.fnDown = false; owner.pressed.removeAll(); owner.modifierChord.reset()
                 if let tap = owner.tap { CGEvent.tapEnable(tap: tap, enable: true) }
                 return Unmanaged.passUnretained(event)
             }
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+            if type == .flagsChanged, let mask = ModifierChord.masks[UInt16(keyCode)] {
+                let chord = owner.modifierChord.update(key: UInt16(keyCode), down: event.flags.rawValue & mask != 0)
+                if !owner.capturing, let chord, owner.shortcuts.contains(where: { $0.id == chord.id }) { owner.onToggle?() }
+            } else { owner.modifierChord.cancel() }
             if type == .flagsChanged && keyCode == 63 && (owner.capturing || owner.shortcuts.contains(.fn)) {
                 let down = event.flags.contains(.maskSecondaryFn)
                 if down {
@@ -113,13 +118,25 @@ final class HotKeys {
 /// Capture only while the explicit recorder is focused; normal typing remains untouched.
 struct ShortcutRecorder: NSViewRepresentable {
     var onCapture: (InputShortcut?) -> Void
+    var onPreview: (String) -> Void
     func makeNSView(context: Context) -> RecorderView {
-        let view = RecorderView(); view.onCapture = onCapture
+        let view = RecorderView(); view.onCapture = onCapture; view.onPreview = onPreview
         return view
     }
-    func updateNSView(_ view: RecorderView, context: Context) { view.onCapture = onCapture }
+    func updateNSView(_ view: RecorderView, context: Context) { view.onCapture = onCapture; view.onPreview = onPreview }
     final class RecorderView: NSView {
         var onCapture: ((InputShortcut?) -> Void)?
+        var onPreview: ((String) -> Void)?
+        private var modifiers = ModifierChord()
+        override func flagsChanged(with event: NSEvent) {
+            guard let mask = ModifierChord.masks[event.keyCode] else { modifiers.cancel(); return }
+            if let shortcut = modifiers.update(key: event.keyCode, down: event.modifierFlags.rawValue & UInt(mask) != 0) {
+                onCapture?(shortcut)
+            } else if !modifiers.pressed.isEmpty {
+                onPreview?(InputShortcut.modifierOnly(modifiers.pressed).label + "，松开保存，或继续按其他键")
+            }
+        }
+        override func resignFirstResponder() -> Bool { modifiers.reset(); return super.resignFirstResponder() }
         override var acceptsFirstResponder: Bool { true }
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -127,6 +144,7 @@ struct ShortcutRecorder: NSViewRepresentable {
         }
         override func performKeyEquivalent(with event: NSEvent) -> Bool { keyDown(with: event); return true }
         override func keyDown(with event: NSEvent) {
+            modifiers.cancel()
             if event.keyCode == 53 { onCapture?(nil); return }
             guard !event.isARepeat else { return }
             var modifiers: UInt32 = 0

@@ -85,7 +85,7 @@ final class AppModel: ObservableObject {
     private var saveAllowed = true
 
     var destinationName: String { destination?.name ?? "言墨文稿" }
-    var shortcutLabel: String { shortcuts.first(where: { !$0.isFn || fnReady })?.label ?? "开始录音" }
+    var shortcutLabel: String { shortcuts.first(where: { !$0.needsEventTap || fnReady })?.label ?? "开始录音" }
     var todayCharacters: Int {
         library.manuscripts.filter { Calendar.current.isDateInToday($0.date) }.reduce(0) { $0 + $1.text.count }
     }

@@ -45,22 +45,33 @@ public enum HistoryRetention: Int, Codable, CaseIterable {
 
 /// Carbon modifier bits are persisted rather than a keyboard-layout-dependent string.
 public struct InputShortcut: Codable, Equatable, Identifiable {
-    public var id: String { "\(keyCode):\(modifiers)" }
+    public var id: String { modifierKeys.map { "mod:" + $0.sorted().map(String.init).joined(separator: "+") } ?? "\(keyCode):\(modifiers)" }
     public var keyCode: UInt32
     public var modifiers: UInt32
     public var keyLabel: String
+    public var modifierKeys: [UInt16]?
+    public var needsEventTap: Bool { isFn || modifierKeys != nil }
     public init(keyCode: UInt32, modifiers: UInt32, keyLabel: String) {
         self.keyCode = keyCode; self.modifiers = modifiers; self.keyLabel = keyLabel
+    }
+    public static func modifierOnly(_ keys: Set<UInt16>) -> InputShortcut {
+        var result = InputShortcut(keyCode: 0, modifiers: 0, keyLabel: keys.sorted().compactMap { ModifierChord.names[$0] }.joined(separator: " + "))
+        result.modifierKeys = keys.sorted()
+        return result
     }
     public static let fn = InputShortcut(keyCode: 63, modifiers: 0, keyLabel: "Fn")
     public static let standard = InputShortcut(keyCode: 49, modifiers: 4096 | 2048, keyLabel: "Space")
     public static let defaults = [fn, standard]
     public var isFn: Bool { self == .fn }
     public var label: String {
-        (modifiers & 4096 != 0 ? "⌃" : "") + (modifiers & 2048 != 0 ? "⌥" : "") +
+        if modifierKeys != nil { return keyLabel }
+        return (modifiers & 4096 != 0 ? "⌃" : "") + (modifiers & 2048 != 0 ? "⌥" : "") +
         (modifiers & 512 != 0 ? "⇧" : "") + (modifiers & 256 != 0 ? "⌘" : "") + keyLabel
     }
     public var validationError: String? {
+        if let keys = modifierKeys {
+            return !keys.isEmpty && keys.allSatisfy { ModifierChord.names[$0] != nil } ? nil : "请选择有效的修饰键。"
+        }
         if isFn { return nil }
         if modifiers & (256 | 4096) == 0 { return "请搭配 Control 或 Command，避免影响正常打字。" }
         if [36, 48, 51, 53, 63, 117].contains(keyCode) { return "请选一个字母、数字、空格或功能键。" }

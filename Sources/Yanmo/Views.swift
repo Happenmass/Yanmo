@@ -251,7 +251,7 @@ struct PreferencesView: View {
                         HStack {
                             Keycap(text: shortcut.label)
                             Spacer()
-                            if shortcut.isFn { ModelDot(ready: model.fnReady, text: model.fnReady ? "已启用" : "待授权") }
+                            if shortcut.needsEventTap { ModelDot(ready: model.fnReady, text: model.fnReady ? "已启用" : "待授权") }
                             Button("移除") { model.setShortcuts(model.shortcuts.filter { $0.id != shortcut.id }) }.buttonStyle(.link).disabled(model.shortcuts.count == 1 || model.recordingShortcut)
                                 .accessibilityLabel("移除快捷键 \(shortcut.label)")
                         }
@@ -259,7 +259,7 @@ struct PreferencesView: View {
                     if model.recordingShortcut {
                         HStack {
                             Text("请按下一组快捷键，Esc 取消…").font(.system(size: 12)).foregroundStyle(Ink.red)
-                            ShortcutRecorder { model.captureShortcut($0) }.frame(width: 1, height: 1).accessibilityLabel("录制快捷键")
+                            ShortcutRecorder(onCapture: { model.captureShortcut($0) }, onPreview: { model.shortcutNotice = $0 }).frame(width: 1, height: 1).accessibilityLabel("录制快捷键")
                             Spacer()
                             Button("取消录制") { model.endShortcutCapture() }.buttonStyle(.link)
                         }.padding(12).background(Ink.red.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
@@ -272,7 +272,7 @@ struct PreferencesView: View {
                         }
                     }
                     if !model.shortcutNotice.isEmpty { Text(model.shortcutNotice).font(.system(size: 11)).foregroundStyle(Ink.red) }
-                    Text("组合键需包含 Control 或 Command。若其他工具也使用 Fn，请只保留一个工具响应。").font(.system(size: 11)).foregroundStyle(Ink.muted)
+                    Text("支持单独左／右修饰键、Control＋Shift，或包含 Control／Command 的普通组合键。按下后松开保存。").font(.system(size: 11)).foregroundStyle(Ink.muted)
                 }
                 section("麦克风", symbol: "mic") {
                     HStack {
