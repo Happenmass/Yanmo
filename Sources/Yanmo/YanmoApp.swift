@@ -9,7 +9,7 @@ final class YanmoDelegate: NSObject, NSApplicationDelegate {
         let overlay = OverlayController(model: model)
         self.overlay = overlay
         model.overlay = overlay
-        NSApp.setActivationPolicy(.regular)
+        NSApp.setActivationPolicy(model.showDock ? .regular : .accessory)
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
             Task { @MainActor in AppModel.shared.refreshPermissions() }
         }
@@ -49,11 +49,12 @@ struct YanmoApp: App {
                     Button("导入音频…") { model.importAudio() }.keyboardShortcut("o")
                     #if DEBUG
                     Button("验证文本编辑写入") { model.verifyTextEditInsertion() }
+                    Button("验证麦克风采集（三秒）") { model.verifyMicrophoneCapture() }
                     #endif
                 }
             }
         MenuBarExtra("言墨", systemImage: "waveform") {
-            Button(model.stage == .recording ? "结束录音" : "开始录音（⌃⌥ Space）") { model.toggleRecording() }.disabled(model.stage.busy && model.stage != .recording)
+            Button(model.stage == .recording ? "结束录音" : "开始录音（\(model.shortcutLabel)）") { model.toggleRecording() }.disabled(model.stage.busy && model.stage != .recording)
             if model.stage.busy { Button("取消") { model.cancel() } }
             Divider()
             Button("打开言墨") { model.showWindow() }

@@ -38,6 +38,28 @@ struct Checks {
         try require(ApplicationCategory.detect(bundleID: "com.tencent.xinWeChat") == "messaging", "WeChat categorization")
         try require(ApplicationCategory.detect(bundleID: "com.microsoft.VSCode") == "code_editor", "VS Code categorization")
         print("PASS: application context classification")
-        print("3 core checks passed")
+
+        let shortcuts = InputShortcut.defaults + [InputShortcut(keyCode: 2, modifiers: 4096 | 512, keyLabel: "D")]
+        let decoded = try JSONDecoder().decode([InputShortcut].self, from: JSONEncoder().encode(shortcuts))
+        try require(decoded == shortcuts && decoded[2].label == "⌃⇧D", "Custom shortcuts must survive restart with modifier semantics")
+        try require(InputShortcut(keyCode: 12, modifiers: 256, keyLabel: "Q").validationError != nil, "Do not capture Cmd-Q")
+        try require(InputShortcut(keyCode: 0, modifiers: 0, keyLabel: "A").validationError != nil, "Do not capture ordinary typing")
+        try require(shortcuts[2].validationError == nil && InputShortcut.fn.validationError == nil, "Explicit dictation shortcuts must be allowed")
+        print("PASS: shortcut persistence and editing/system-key protection")
+
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        try require(HistoryRetention.week.includes(now.addingTimeInterval(-6 * 86400), now: now), "Recent history must remain")
+        try require(!HistoryRetention.week.includes(now.addingTimeInterval(-8 * 86400), now: now), "Expired history must be pruned")
+        let legacy = Data("{\"id\":\"00000000-0000-0000-0000-000000000001\",\"term\":\"言墨\",\"hint\":\"产品\"}".utf8)
+        try require(JSONDecoder().decode(LexiconEntry.self, from: legacy).aliases == nil, "Existing 0.1 dictionary entries must remain readable")
+        print("PASS: retention boundaries and legacy dictionary migration")
+        var timed = Manuscript(original: "测试", text: "测试文本", seconds: 30, application: "言墨", polished: false)
+        timed.date = now
+        var untimed = timed; untimed.seconds = 0
+        let usage = UsageSummary([timed, untimed])
+        try require(usage.characters == 8 && usage.audioSeconds == 30 && usage.charactersPerMinute == 8, "Only timed records contribute to speaking speed")
+        try require(usage.activeDays == 1 && UsageSummary([]).charactersPerMinute == 0, "Activity groups by day and handles empty history")
+        print("PASS: usage totals, speaking speed and active days")
+        print("6 core checks passed")
     }
 }

@@ -18,7 +18,7 @@ os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 DEFAULT_ASR = "mlx-community/Qwen3-ASR-1.7B-8bit"
-DEFAULT_LLM = "mlx-community/Qwen3-4B-4bit"
+DEFAULT_LLM = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
 SYSTEM_PROMPT = Path(__file__).with_name("prompt.txt").read_text(encoding="utf-8")
 
 
@@ -42,11 +42,53 @@ def build_payload(request: dict) -> dict:
         "AUDIO_CONTEXT": {
             "application": {"name": request.get("application", "言墨"), "categories": [request.get("category", "general")]},
             "key_terms": request.get("key_terms", []),
+            "term_notes": request.get("term_notes", []),
             "background_screen_text": [],
         },
         "ASR_RESULTS": request.get("asr_results") or [{"engine_name": "Qwen3-ASR", "transcript": request.get("text", "")}],
         "context": {"text_before_cursor": request.get("before", ""), "text_after_cursor": request.get("after", "")},
     }
+
+
+def protect_numbers(text: str) -> tuple[str, dict[str, str]]:
+    """Keep numeric literals out of probabilistic rewriting (including negated dates)."""
+    protected = {}
+    def replace(match):
+        token = f"⟦N{len(protected)}⟧"
+        protected[token] = match.group()
+        return token
+    # ASCII digits in identifiers are protected too, e.g. v2 or user_123.
+    return re.sub(r"\d+(?:[.,:/-]\d+)*|[零〇一二两三四五六七八九十百千万亿]+(?:点[零〇一二两三四五六七八九]+)?", replace, text), protected
+
+
+def restore_numbers(text: str, protected: dict[str, str]) -> str:
+    found = re.findall(r"⟦N\d+⟧", text)
+    if found != list(protected):
+        raise ValueError("整理没有完整保留数字，已保留原始转写。")
+    # Reject any new literal before restoring the protected ones.
+    remainder = re.sub(r"⟦N\d+⟧", "", text)
+    if protect_numbers(remainder)[1]:
+        raise ValueError("整理新增了数字，已保留原始转写。")
+    return re.sub(r"⟦N\d+⟧", lambda m: protected[m.group()], text)
+
+
+def apply_aliases(text: str, entries: list[dict]) -> str:
+    aliases = {}
+    ambiguous = set()
+    for entry in entries:
+        for alias in entry.get("aliases") or []:
+            if alias in aliases and aliases[alias] != entry["term"]:
+                ambiguous.add(alias)
+            if alias and alias != entry["term"]:
+                aliases[alias] = entry["term"]
+    aliases = {k: v for k, v in aliases.items() if k not in ambiguous}
+    if not aliases:
+        return text
+    def pattern(alias):
+        # Do not replace a Latin alias inside a larger identifier.
+        return (r"(?<![\w])" if alias[0].isascii() and alias[0].isalnum() else "") + re.escape(alias) + (r"(?![\w])" if alias[-1].isascii() and alias[-1].isalnum() else "")
+    expression = "|".join(pattern(k) for k in sorted(aliases, key=len, reverse=True))
+    return re.sub(expression, lambda m: aliases[m.group()], text)
 
 
 def clean_output(output: str) -> str:
@@ -64,12 +106,15 @@ def clean_output(output: str) -> str:
 
 class Engine:
     def __init__(self):
-        self.model = None
+        self.asr = None
+        self.llm = None
         self.tokenizer = None
-        self.loaded = None
+        self.asr_path = self.llm_path = None
+        self.large_llm = False
 
     def unload(self):
-        self.model = self.tokenizer = self.loaded = None
+        self.asr = self.llm = self.tokenizer = None
+        self.asr_path = self.llm_path = None
         gc.collect()
         if "mlx.core" in sys.modules:
             import mlx.core as mx
@@ -77,16 +122,18 @@ class Engine:
 
     def transcribe(self, request: dict) -> dict:
         model_path = resolve_model(request.get("asr_model") or DEFAULT_ASR)
-        key = ("asr", str(model_path))
-        if self.loaded != key:
-            self.unload()
+        if self.asr_path != str(model_path):
+            if self.large_llm:
+                self.llm = self.tokenizer = self.llm_path = None
+            self.asr = None
+            gc.collect()
             from mlx_audio.stt.utils import load_model
-            self.model = load_model(str(model_path))
-            self.loaded = key
+            self.asr = load_model(str(model_path))
+            self.asr_path = str(model_path)
         audio = Path(request["audio"]).expanduser()
         if not audio.is_file():
             raise ValueError("音频文件不存在。")
-        result = self.model.generate(str(audio), language=request.get("language") or None, verbose=False)
+        result = self.asr.generate(str(audio), language=request.get("language") or None, verbose=False)
         text = result.text.strip()
         if not text:
             raise ValueError("没有识别到语音，请靠近麦克风后重试。")
@@ -94,15 +141,27 @@ class Engine:
 
     def polish(self, request: dict) -> dict:
         path = resolve_model(request.get("llm_model") or DEFAULT_LLM)
-        key = ("llm", str(path))
-        if self.loaded != key:
-            self.unload()
+        if self.llm_path != str(path):
+            self.llm = self.tokenizer = None
+            # Large user-selected models retain the previous low-memory behavior.
+            self.large_llm = sum(p.stat().st_size for p in path.glob("*.safetensors")) > 6_000_000_000
+            if self.large_llm:
+                self.asr = self.asr_path = None
+            gc.collect()
             from mlx_lm import load
-            self.model, self.tokenizer = load(str(path))
-            self.loaded = key
+            self.llm, self.tokenizer = load(str(path))
+            self.llm_path = str(path)
         from mlx_lm import stream_generate
         from mlx_lm.sample_utils import make_sampler
         payload = build_payload(request)
+        protected = {}
+        # A single transcript is the current recording path. Fusion candidates must
+        # keep their original wording and use the normal conservative prompt.
+        if len(payload["ASR_RESULTS"]) == 1:
+            candidate = dict(payload["ASR_RESULTS"][0])
+            candidate["transcript"] = apply_aliases(candidate["transcript"], request.get("lexicon") or [])
+            candidate["transcript"], protected = protect_numbers(candidate["transcript"])
+            payload["ASR_RESULTS"] = [candidate]
         messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
         prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
         original = "\n".join(r["transcript"] for r in payload["ASR_RESULTS"])
@@ -110,11 +169,14 @@ class Engine:
         max_tokens = min(4096, max(512, len(original) * 3 + 128))
         pieces = []
         last = None
-        for last in stream_generate(self.model, self.tokenizer, prompt, max_tokens=max_tokens, sampler=make_sampler(temp=0)):
+        for last in stream_generate(self.llm, self.tokenizer, prompt, max_tokens=max_tokens, sampler=make_sampler(temp=0)):
             pieces.append(last.text)
         if last is None or last.finish_reason != "stop":
             raise ValueError("整理超出长度上限；已保留原始转写，可分段后重试。")
-        return {"text": clean_output("".join(pieces)), "engine": path.name}
+        text = clean_output("".join(pieces))
+        if len(payload["ASR_RESULTS"]) == 1:
+            text = restore_numbers(text, protected)
+        return {"text": text, "engine": path.name}
 
     def handle(self, request: dict) -> dict:
         command = request.get("command")

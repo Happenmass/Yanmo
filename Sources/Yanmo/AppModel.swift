@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import SwiftUI
 import UniformTypeIdentifiers
+import ServiceManagement
 import YanmoCore
 
 enum Page: String, CaseIterable {
@@ -28,6 +29,17 @@ enum Stage: Equatable {
 }
 
 @MainActor
+final class AudioMeter: ObservableObject {
+    @Published var samples = Array(repeating: 0.0, count: 17)
+    private var level = 0.0
+    func append(_ value: Double) {
+        level += (value - level) * (value > level ? 0.65 : 0.25)
+        samples = Array(samples.dropFirst()) + [level]
+    }
+    func reset() { level = 0; samples = Array(repeating: 0, count: 17) }
+}
+
+@MainActor
 final class AppModel: ObservableObject {
     static let shared = AppModel()
     @Published var page: Page = .desk
@@ -37,20 +49,28 @@ final class AppModel: ObservableObject {
     @Published var draft = ""
     @Published var original = ""
     @Published var notice = ""
-    @Published var level = 0.0
+    let meter = AudioMeter()
     @Published var seconds = 0.0
     @Published var asrReady = false
     @Published var llmReady = false
     @Published var checking = false
     @Published var checked = false
     @Published var fnReady = false
+    @Published var shortcuts: [InputShortcut]
+    @Published var recordingShortcut = false
+    @Published var shortcutNotice = ""
+    @Published var audioInputs = AudioInput.available()
+    @Published var microphone: String { didSet { defaults.set(microphone, forKey: "microphone") } }
+    @Published var showDock: Bool { didSet { defaults.set(showDock, forKey: "showDock"); NSApp.setActivationPolicy(showDock ? .regular : .accessory) } }
+    @Published var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @Published var retention: HistoryRetention { didSet { defaults.set(retention.rawValue, forKey: "retention") } }
     @Published var python: String { didSet { defaults.set(python, forKey: "python"); invalidateCheck() } }
     @Published var asrModel: String { didSet { defaults.set(asrModel, forKey: "asr"); invalidateCheck() } }
     @Published var llmModel: String { didSet { defaults.set(llmModel, forKey: "llm"); invalidateCheck() } }
     @Published var polishEnabled: Bool { didSet { defaults.set(polishEnabled, forKey: "polish") } }
     @Published var readContext: Bool { didSet { defaults.set(readContext, forKey: "context") } }
     @Published var keepHistory: Bool { didSet { defaults.set(keepHistory, forKey: "history") } }
-    @Published var style: WritingStyle = .natural
+    @Published var style: WritingStyle { didSet { defaults.set(style.rawValue, forKey: "style") } }
     weak var overlay: OverlayController?
     var openMainWindow: (() -> Void)?
     private let defaults = UserDefaults.standard
@@ -65,6 +85,7 @@ final class AppModel: ObservableObject {
     private var saveAllowed = true
 
     var destinationName: String { destination?.name ?? "言墨文稿" }
+    var shortcutLabel: String { shortcuts.first(where: { !$0.isFn || fnReady })?.label ?? "开始录音" }
     var todayCharacters: Int {
         library.manuscripts.filter { Calendar.current.isDateInToday($0.date) }.reduce(0) { $0 + $1.text.count }
     }
@@ -74,10 +95,15 @@ final class AppModel: ObservableObject {
     private init() {
         python = defaults.string(forKey: "python") ?? ProcessInfo.processInfo.environment["YANMO_PYTHON"] ?? Bundle.main.object(forInfoDictionaryKey: "YanmoPython") as? String ?? "/usr/bin/python3"
         asrModel = defaults.string(forKey: "asr") ?? "mlx-community/Qwen3-ASR-1.7B-8bit"
-        llmModel = defaults.string(forKey: "llm") ?? ProcessInfo.processInfo.environment["YANMO_LLM"] ?? Bundle.main.object(forInfoDictionaryKey: "YanmoLLM") as? String ?? "mlx-community/Qwen3-4B-4bit"
+        llmModel = defaults.string(forKey: "llm") ?? ProcessInfo.processInfo.environment["YANMO_LLM"] ?? Bundle.main.object(forInfoDictionaryKey: "YanmoLLM") as? String ?? "mlx-community/Qwen3-4B-Instruct-2507-4bit"
         polishEnabled = defaults.object(forKey: "polish") as? Bool ?? true
         readContext = defaults.bool(forKey: "context")
         keepHistory = defaults.object(forKey: "history") as? Bool ?? true
+        microphone = defaults.string(forKey: "microphone") ?? ""
+        showDock = defaults.object(forKey: "showDock") as? Bool ?? true
+        retention = HistoryRetention(rawValue: defaults.integer(forKey: "retention")) ?? .forever
+        style = WritingStyle(rawValue: defaults.string(forKey: "style") ?? "") ?? .natural
+        shortcuts = defaults.data(forKey: "shortcuts").flatMap { try? JSONDecoder().decode([InputShortcut].self, from: $0) } ?? InputShortcut.defaults
         let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Yanmo")
         storage = LibraryFile(url: folder.appendingPathComponent("library.json"))
         do { library = try storage.read() }
@@ -85,6 +111,7 @@ final class AppModel: ObservableObject {
             saveAllowed = false
             notice = "文稿库读取失败，已保留原文件并暂停覆盖保存。请先备份并检查：\(storage.url.path)"
         }
+        pruneHistory()
     }
 
     func start() {
@@ -95,19 +122,69 @@ final class AppModel: ObservableObject {
         keys.onToggle = { [weak self] in self?.toggleRecording() }
         keys.onCancel = { [weak self] in self?.cancel() }
         keys.isActive = { [weak self] in self?.stage.busy == true }
+        keys.onCaptureFn = { [weak self] in self?.captureShortcut(.fn) }
+        do { try keys.configure(shortcuts) }
+        catch { shortcutNotice = error.localizedDescription }
         fnReady = keys.enableFn()
         hotkeys = keys
+        NSApp.setActivationPolicy(showDock ? .regular : .accessory)
         Task { await checkModels() }
     }
 
     func refreshPermissions() { fnReady = hotkeys?.enableFn() ?? false }
+
+    func beginShortcutCapture() {
+        guard !stage.busy else { return }
+        shortcutNotice = ""; recordingShortcut = true; hotkeys?.suspend()
+    }
+    func endShortcutCapture() {
+        recordingShortcut = false
+        do { try hotkeys?.resume(); shortcutNotice = "" }
+        catch { shortcutNotice = error.localizedDescription }
+    }
+    func captureShortcut(_ shortcut: InputShortcut?) {
+        guard let shortcut else { endShortcutCapture(); return }
+        if let error = shortcut.validationError { shortcutNotice = error; return }
+        guard !shortcuts.contains(where: { $0.id == shortcut.id }) else { shortcutNotice = "这组快捷键已存在。"; return }
+        endShortcutCapture()
+        setShortcuts(shortcuts + [shortcut])
+    }
+    func setShortcuts(_ values: [InputShortcut]) {
+        guard !values.isEmpty else { shortcutNotice = "请至少保留一组语音输入快捷键。"; return }
+        do {
+            try hotkeys?.configure(values)
+            shortcuts = values
+            defaults.set(try JSONEncoder().encode(values), forKey: "shortcuts")
+            shortcutNotice = "快捷键已保存。轻按开始，再按结束；Esc 取消。"
+        } catch { shortcutNotice = error.localizedDescription }
+    }
+    func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+            launchAtLogin = SMAppService.mainApp.status == .enabled
+            if SMAppService.mainApp.status == .requiresApproval {
+                notice = "请在系统设置的登录项中允许言墨。"
+                SMAppService.openSystemSettingsLoginItems()
+            }
+        } catch { notice = "登录时启动设置未完成：\(error.localizedDescription)" }
+    }
+
+    func setRetention(_ value: HistoryRetention) { retention = value; pruneHistory() }
+    private func pruneHistory() {
+        let count = library.manuscripts.count
+        library.manuscripts.removeAll { !retention.includes($0.date) }
+        if count != library.manuscripts.count {
+            if let selectedID, !library.manuscripts.contains(where: { $0.id == selectedID }) { self.selectedID = nil; draft = ""; original = "" }
+            save()
+        }
+    }
 
     func invalidateCheck() {
         asrReady = false; llmReady = false; checked = false
     }
 
     func checkModels() async {
-        guard !stage.busy, !checking else { return }
+        guard !stage.busy, !checking, !recordingShortcut else { return }
         checking = true
         defer { checking = false }
         let config = (python, asrModel, llmModel)
@@ -123,7 +200,7 @@ final class AppModel: ObservableObject {
 
     func toggleRecording() {
         if stage == .recording { finishRecording(); return }
-        guard !stage.busy, !checking else { return }
+        guard !stage.busy, !checking, !recordingShortcut else { return }
         destination = InputDestination.capture(readContext: readContext)
         if destination?.secure == true {
             notice = "密码输入框中不启动语音输入。"
@@ -131,21 +208,23 @@ final class AppModel: ObservableObject {
         }
         notice = ""
         draft = ""; original = ""; selectedID = nil
-        seconds = 0; level = 0
+        seconds = 0; meter.reset()
         let token = UUID(); operation = token
         stage = .preparing
         overlay?.show()
         Task {
             do {
-                try await recorder.start()
+                guard operation == token else { return }
+                try await recorder.start(deviceUID: microphone)
                 guard operation == token else { recorder.cancel(); return }
                 stage = .recording
                 started = Date()
                 timer = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in
                     Task { @MainActor in
                         guard let self, self.stage == .recording else { return }
-                        self.seconds = Date().timeIntervalSince(self.started)
-                        self.level = self.recorder.level
+                        let elapsed = Date().timeIntervalSince(self.started)
+                        if Int(elapsed) != Int(self.seconds) { self.seconds = elapsed }
+                        self.meter.append(self.recorder.level)
                         if self.seconds >= 300 { self.finishRecording() }
                     }
                 }
@@ -161,6 +240,7 @@ final class AppModel: ObservableObject {
         timer?.invalidate(); timer = nil
         seconds = Date().timeIntervalSince(started)
         guard let url = recorder.finish() else { fail("录音没有生成，请重试。"); return }
+        meter.reset()
         if seconds < 0.35 {
             try? FileManager.default.removeItem(at: url)
             fail("录音太短，请再说一句。"); return
@@ -261,6 +341,8 @@ final class AppModel: ObservableObject {
             "command": "polish", "text": text, "llm_model": llmModel,
             "instruction": instruction, "application": destinationName,
             "category": destination?.category ?? "general", "key_terms": library.lexicon.map(\.term),
+            "term_notes": library.lexicon.map { ["term": $0.term, "hint": $0.hint] },
+            "lexicon": library.lexicon.map { ["term": $0.term, "aliases": $0.aliases ?? []] as [String: Any] },
             "before": destination?.before ?? "", "after": destination?.after ?? ""
         ], python: python)
         guard let text = response["text"] as? String, !text.isEmpty else { throw EngineError(message: "整理结果为空。") }
@@ -333,7 +415,7 @@ final class AppModel: ObservableObject {
     private func saveManuscript(polished: Bool) {
         let item = Manuscript(original: original, text: draft, seconds: seconds, application: destinationName, polished: polished)
         selectedID = item.id
-        if keepHistory { library.manuscripts.insert(item, at: 0); save() }
+        if keepHistory { library.manuscripts.insert(item, at: 0); pruneHistory(); save() }
     }
 
     func updateSelected(polished: Bool? = nil) {
@@ -362,13 +444,22 @@ final class AppModel: ObservableObject {
         notice = "正文已复制。"
     }
 
-    func addTerm(_ term: String, hint: String) {
-        let entry = LexiconEntry(term: term, hint: hint)
-        guard !entry.term.isEmpty else { return }
-        guard !library.lexicon.contains(where: { $0.term.localizedCaseInsensitiveCompare(entry.term) == .orderedSame }) else {
-            notice = "词库中已有这个词。"; return
+    @discardableResult
+    func addTerm(_ term: String, hint: String, aliases: [String] = [], editing id: UUID? = nil) -> Bool {
+        var entry = LexiconEntry(term: term, hint: hint, aliases: aliases)
+        guard !entry.term.isEmpty else { return false }
+        guard !library.lexicon.contains(where: { $0.id != id && $0.term.localizedCaseInsensitiveCompare(entry.term) == .orderedSame }) else {
+            notice = "词库中已有这个词。"; return false
         }
-        library.lexicon.append(entry); save()
+        let others = library.lexicon.filter { $0.id != id }
+        guard !(entry.aliases ?? []).contains(where: { alias in others.contains(where: { ($0.aliases ?? []).contains(alias) || $0.term == alias }) }) else {
+            notice = "这条误识别已属于另一个词条，请避免冲突。"; return false
+        }
+        if let id, let index = library.lexicon.firstIndex(where: { $0.id == id }) {
+            entry.id = id; library.lexicon[index] = entry
+        } else { library.lexicon.append(entry) }
+        save()
+        return true
     }
 
     func removeTerm(_ entry: LexiconEntry) { library.lexicon.removeAll { $0.id == entry.id }; save() }
@@ -405,6 +496,29 @@ final class AppModel: ObservableObject {
     }
 
     #if DEBUG
+    /// Finite capture check: validates the actual selected device and WAV output,
+    /// then deletes the recording. It never transcribes or inserts any captured speech.
+    func verifyMicrophoneCapture() {
+        guard !stage.busy else { return }
+        let token = UUID(); operation = token
+        stage = .preparing
+        notice = "正在检查麦克风，三秒后自动结束。"
+        Task {
+            do {
+                try await recorder.start(deviceUID: microphone)
+                guard operation == token else { recorder.cancel(); return }
+                try await Task.sleep(nanoseconds: 3_000_000_000)
+                guard operation == token else { return }
+                guard let url = recorder.finish() else { throw EngineError(message: "麦克风未生成音频。") }
+                defer { try? FileManager.default.removeItem(at: url) }
+                let file = try AVAudioFile(forReading: url)
+                guard file.length > 0 else { throw EngineError(message: "录音文件为空。") }
+                notice = "采集自检通过：已录制 \(String(format: "%.1f", Double(file.length) / file.fileFormat.sampleRate)) 秒，临时音频已删除。"
+            } catch { recorder.cancel(); notice = "采集自检失败：\(error.localizedDescription)" }
+            if operation == token { stage = .idle }
+        }
+    }
+
     /// Development check at the actual capture/insert seam; no audio or inference.
     func verifyTextEditInsertion() {
         guard !stage.busy, let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.TextEdit").first else {

@@ -33,7 +33,7 @@ struct Seal: View {
         Text("言")
             .font(Ink.serif(size * 0.8)).foregroundStyle(Ink.paper)
             .frame(width: size, height: size)
-            .background(Ink.red.gradient, in: RoundedRectangle(cornerRadius: size * 0.10))
+            .background(Ink.red, in: RoundedRectangle(cornerRadius: size * 0.10))
             .overlay(RoundedRectangle(cornerRadius: size * 0.10).stroke(Ink.paper.opacity(0.15), lineWidth: 1).padding(2))
             .accessibilityHidden(true)
     }
@@ -53,12 +53,26 @@ struct Keycap: View {
 struct InkButton: ButtonStyle {
     var primary = false
     func makeBody(configuration: Configuration) -> some View {
+        InkButtonBody(configuration: configuration, primary: primary)
+    }
+}
+
+private struct InkButtonBody: View {
+    let configuration: ButtonStyle.Configuration
+    let primary: Bool
+    @State private var hovering = false
+    @Environment(\.isEnabled) private var enabled
+    var body: some View {
         configuration.label.font(.system(size: 13, weight: .medium))
             .padding(.horizontal, 19).padding(.vertical, 11)
             .foregroundStyle(primary ? Ink.paper : Ink.black)
             .background(primary ? Ink.red : Color.white.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
             .overlay(RoundedRectangle(cornerRadius: 6).stroke(primary ? Ink.red : Ink.line, lineWidth: 0.8))
-            .opacity(configuration.isPressed ? 0.7 : 1)
+            .overlay(RoundedRectangle(cornerRadius: 6).fill(primary ? .white.opacity(hovering ? 0.07 : 0) : Ink.black.opacity(hovering ? 0.025 : 0)))
+            .opacity(enabled ? (configuration.isPressed ? 0.82 : 1) : 0.45)
+            .animation(.easeOut(duration: 0.14), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.16), value: hovering)
+            .onHover { hovering = $0 }
     }
 }
 
@@ -70,21 +84,5 @@ struct ModelDot: View {
             Circle().fill(ready ? Ink.jade : Ink.muted.opacity(0.35)).frame(width: 7, height: 7)
             Text(text).font(.system(size: 11))
         }.foregroundStyle(Ink.muted)
-    }
-}
-
-struct InkRing: View {
-    var active: Bool
-    var body: some View {
-        ZStack {
-            ForEach(0..<5) { index in
-                Circle().trim(from: 0.02 + Double(index) * 0.025, to: 0.91 + Double(index) * 0.015)
-                    .stroke(Ink.black.opacity(0.18 + Double(index) * 0.08), style: StrokeStyle(lineWidth: index == 2 ? 1.6 : 0.5, lineCap: .round))
-                    .padding(CGFloat(index) * 1.1).rotationEffect(.degrees(Double(index) * 9 - 36))
-            }
-            Image(systemName: "mic").font(.system(size: 34, weight: .light)).foregroundStyle(Ink.red)
-        }.frame(width: 106, height: 106)
-            .scaleEffect(active ? 1.04 : 1)
-            .animation(active ? .easeInOut(duration: 1).repeatForever(autoreverses: true) : .default, value: active)
     }
 }

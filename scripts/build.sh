@@ -10,7 +10,7 @@ mkdir -p "$YANMO_APP/Contents/MacOS" "$YANMO_APP/Contents/Resources/engine"
 cp "$YANMO_BIN/Yanmo" "$YANMO_APP/Contents/MacOS/Yanmo"
 cp engine/worker.py engine/prompt.txt "$YANMO_APP/Contents/Resources/engine/"
 YANMO_PYTHON="${YANMO_PYTHON:-$YANMO_ROOT/.venv/bin/python}"
-YANMO_LLM="${YANMO_LLM:-mlx-community/Qwen3-4B-4bit}"
+YANMO_LLM="${YANMO_LLM:-mlx-community/Qwen3-4B-Instruct-2507-4bit}"
 export YANMO_APP YANMO_PYTHON YANMO_LLM
 python3 - <<'PY'
 import os, plistlib
@@ -19,8 +19,8 @@ app = Path(os.environ['YANMO_APP'])
 info = {
     'CFBundleName': '言墨', 'CFBundleDisplayName': '言墨',
     'CFBundleIdentifier': 'org.yanmo.desktop', 'CFBundleExecutable': 'Yanmo',
-    'CFBundlePackageType': 'APPL', 'CFBundleVersion': '1',
-    'CFBundleShortVersionString': '0.1.0', 'LSMinimumSystemVersion': '14.0',
+    'CFBundlePackageType': 'APPL', 'CFBundleVersion': '2',
+    'CFBundleShortVersionString': '0.2.0', 'LSMinimumSystemVersion': '14.0',
     'NSHighResolutionCapable': True,
     'NSMicrophoneUsageDescription': '言墨需要录音，将你的声音在本机转换为文字。音频不会上传，处理结束后删除临时录音。',
     'NSPrincipalClass': 'NSApplication',

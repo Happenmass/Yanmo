@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from worker import build_payload, clean_output, resolve_model
+from worker import build_payload, clean_output, resolve_model, protect_numbers, restore_numbers, apply_aliases
 
 
 class WorkerTests(unittest.TestCase):
@@ -27,6 +27,20 @@ class WorkerTests(unittest.TestCase):
             Path(directory, "config.json").write_text("{}")
             with self.assertRaises(ValueError):
                 resolve_model(directory)
+
+    def testMoneyDatesNegationAndIdentifiersSurvivePolishing(self):
+        text = "不是周四，是周五，预算三千五百元，接口/v2/users_123。"
+        masked, numbers = protect_numbers(text)
+        self.assertEqual(restore_numbers(masked, numbers), text)
+        tokens = list(numbers)
+        for corrupted in [masked.replace(tokens[0], ""), masked + tokens[0], masked + "1350元", masked.replace(tokens[0], "XX").replace(tokens[1], tokens[0]).replace("XX", tokens[1])]:
+            with self.assertRaises(ValueError):
+                restore_numbers(corrupted, numbers)
+
+    def testExplicitDictionaryCorrectionsDoNotCascadeOrChangeIdentifiers(self):
+        entries = [{"term": "言墨", "aliases": ["研墨"]}, {"term": "SwiftUI", "aliases": ["swift ui"]}, {"term": "API", "aliases": ["api"]}]
+        self.assertEqual(apply_aliases("研墨用 swift ui 调用 api 和 myapi。", entries), "言墨用 SwiftUI 调用 API 和 myapi。")
+        self.assertEqual(apply_aliases("同名", [{"term": "甲", "aliases": ["同名"]}, {"term": "乙", "aliases": ["同名"]}]), "同名")
 
 
 if __name__ == "__main__":
