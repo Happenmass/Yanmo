@@ -19,8 +19,8 @@ app = Path(os.environ['YANMO_APP'])
 info = {
     'CFBundleName': '言墨', 'CFBundleDisplayName': '言墨',
     'CFBundleIdentifier': 'org.yanmo.desktop', 'CFBundleExecutable': 'Yanmo',
-    'CFBundlePackageType': 'APPL', 'CFBundleVersion': '2',
-    'CFBundleShortVersionString': '0.2.0', 'LSMinimumSystemVersion': '14.0',
+    'CFBundlePackageType': 'APPL', 'CFBundleVersion': '3',
+    'CFBundleShortVersionString': '0.3.0', 'LSMinimumSystemVersion': '14.0',
     'NSHighResolutionCapable': True,
     'NSMicrophoneUsageDescription': '言墨需要录音，将你的声音在本机转换为文字。音频不会上传，处理结束后删除临时录音。',
     'NSPrincipalClass': 'NSApplication',

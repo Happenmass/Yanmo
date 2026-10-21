@@ -67,6 +67,13 @@ struct Checks {
         try require(chord.update(key: 59, down: false) == nil, "Changing a chord mid-release must not trigger")
         print("PASS: modifier-only capture, release, persistence and typing suppression")
 
+        let bindings = InputAction.allCases.flatMap { action in action.defaults.map { ShortcutBinding(action: action, shortcut: $0) } }
+        try require(ShortcutBinding.conflict(in: bindings) == nil, "Default action shortcuts must not collide")
+        try require(ShortcutBinding.conflict(in: bindings + [ShortcutBinding(action: .selectionTranslation, shortcut: .fn)]) != nil, "Cross-action duplicate must be rejected")
+        try require(TranslationLanguage.allCases.count == 4, "First release has exactly four target languages")
+        try require(JSONDecoder().decode(TranslationLanguage.self, from: JSONEncoder().encode(TranslationLanguage.german)) == .german, "Target language must survive persistence")
+        print("PASS: translation targets and independent shortcut conflict detection")
+
         let now = Date(timeIntervalSince1970: 1_000_000)
         try require(HistoryRetention.week.includes(now.addingTimeInterval(-6 * 86400), now: now), "Recent history must remain")
         try require(!HistoryRetention.week.includes(now.addingTimeInterval(-8 * 86400), now: now), "Expired history must be pruned")
@@ -80,6 +87,6 @@ struct Checks {
         try require(usage.characters == 8 && usage.audioSeconds == 30 && usage.charactersPerMinute == 8, "Only timed records contribute to speaking speed")
         try require(usage.activeDays == 1 && UsageSummary([]).charactersPerMinute == 0, "Activity groups by day and handles empty history")
         print("PASS: usage totals, speaking speed and active days")
-        print("7 core checks passed")
+        print("8 core checks passed")
     }
 }

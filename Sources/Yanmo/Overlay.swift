@@ -79,7 +79,8 @@ struct VoiceOverlay: View {
                     if preview { model.overlay?.hide() } else { model.cancel() }
                 }
                 if stage == .recording {
-                    MeterWaveform(meter: model.meter, preview: preview).frame(width: 66, height: 16)
+                    MeterWaveform(meter: model.meter, preview: preview).frame(width: !preview && model.activeAction == .voiceTranslation ? 44 : 66, height: 16)
+                    if !preview && model.activeAction == .voiceTranslation { Text("译").font(.system(size: 9)).frame(width: 14) }
                     Text(preview ? "预览" : model.timeLabel)
                         .font(.system(size: 9, design: .monospaced)).monospacedDigit()
                         .foregroundStyle(Ink.paper.opacity(0.65)).frame(width: 29)
@@ -87,7 +88,7 @@ struct VoiceOverlay: View {
                         if preview { model.overlay?.hide() } else { model.finishRecording() }
                     }
                 } else {
-                    Text(stage == .polishing ? "整理中…" : stage == .transcribing ? "识别中…" : "准备中…")
+                    Text(stage == .translating ? "翻译中…" : stage == .polishing ? "整理中…" : stage == .transcribing ? "识别中…" : "准备中…")
                         .font(.system(size: 11)).frame(maxWidth: .infinity)
                     Color.clear.frame(width: 16, height: 1)
                 }
@@ -97,7 +98,7 @@ struct VoiceOverlay: View {
             .background(Ink.black, in: Capsule())
             .overlay(Capsule().stroke(Ink.paper.opacity(0.15), lineWidth: 0.5))
             .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
-            .help(preview ? "输入浮层预览" : "输入到 · \(model.destinationName)；Esc 取消")
+            .help(preview ? "输入浮层预览" : "\(model.activeAction.label) · 输入到 \(model.destinationName)；Esc 取消")
             .accessibilityLabel(preview ? "输入浮层预览" : "输入到 \(model.destinationName)")
             .opacity(appearance.visible ? 1 : 0)
             .animation(.easeOut(duration: 0.1), value: appearance.visible)

@@ -245,34 +245,14 @@ struct PreferencesView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 23) {
                 Text("一方书案，随你心意。").font(Ink.serif(29))
-                section("快捷键", symbol: "keyboard") {
-                    Text("轻按开始，再按结束；Esc 取消。可保留多组组合，也可移除 Fn。").font(.system(size: 11)).foregroundStyle(Ink.muted)
-                    ForEach(model.shortcuts) { shortcut in
-                        HStack {
-                            Keycap(text: shortcut.label)
-                            Spacer()
-                            if shortcut.needsEventTap { ModelDot(ready: model.fnReady, text: model.fnReady ? "已启用" : "待授权") }
-                            Button("移除") { model.setShortcuts(model.shortcuts.filter { $0.id != shortcut.id }) }.buttonStyle(.link).disabled(model.shortcuts.count == 1 || model.recordingShortcut)
-                                .accessibilityLabel("移除快捷键 \(shortcut.label)")
-                        }
-                    }
-                    if model.recordingShortcut {
-                        HStack {
-                            Text("请按下一组快捷键，Esc 取消…").font(.system(size: 12)).foregroundStyle(Ink.red)
-                            ShortcutRecorder(onCapture: { model.captureShortcut($0) }, onPreview: { model.shortcutNotice = $0 }).frame(width: 1, height: 1).accessibilityLabel("录制快捷键")
-                            Spacer()
-                            Button("取消录制") { model.endShortcutCapture() }.buttonStyle(.link)
-                        }.padding(12).background(Ink.red.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
-                    } else {
-                        HStack {
-                            Button("添加快捷键") { model.beginShortcutCapture() }.buttonStyle(InkButton())
-                            if !model.shortcuts.contains(.fn) { Button("添加 Fn") { model.setShortcuts(model.shortcuts + [.fn]) }.buttonStyle(.link) }
-                            Spacer()
-                            Button("恢复默认") { model.setShortcuts(InputShortcut.defaults) }.buttonStyle(.link)
-                        }
+                section("快捷键与翻译", symbol: "keyboard") {
+                    ForEach(InputAction.allCases) { action in
+                        shortcutEditor(action)
+                        if action != .selectionTranslation { Rectangle().fill(Ink.line).frame(height: 0.5).padding(.vertical, 4) }
                     }
                     if !model.shortcutNotice.isEmpty { Text(model.shortcutNotice).font(.system(size: 11)).foregroundStyle(Ink.red) }
-                    Text("支持单独左／右修饰键、Control＋Shift，或包含 Control／Command 的普通组合键。按下后松开保存。").font(.system(size: 11)).foregroundStyle(Ink.muted)
+                    Text("支持单独左／右修饰键、Control＋Shift，或包含 Control／Command 的普通组合键。三种功能的快捷键不能重复。")
+                        .font(.system(size: 11)).foregroundStyle(Ink.muted)
                 }
                 section("麦克风", symbol: "mic") {
                     HStack {
@@ -336,7 +316,7 @@ struct PreferencesView: View {
                     Toggle("在 Dock 中显示言墨", isOn: $model.showDock).font(.system(size: 12))
                     Text("关闭主窗口后仍可从菜单栏使用言墨。").font(.system(size: 11)).foregroundStyle(Ink.muted)
                 }
-                Text("言墨 0.2.0  ·  MIT 开源  ·  为中文表达留一方清静之地")
+                Text("言墨 0.3.0  ·  MIT 开源  ·  为中文表达留一方清静之地")
                     .font(.system(size: 10)).foregroundStyle(Ink.muted).padding(.bottom, 15)
             }.padding(.horizontal, 35).padding(.top, 12)
         }.disabled(model.stage.busy)
@@ -345,6 +325,45 @@ struct PreferencesView: View {
                 Button("更改并删除超期文稿", role: .destructive) { if let value = proposedRetention { model.setRetention(value) }; proposedRetention = nil }
                 Button("取消", role: .cancel) { proposedRetention = nil }
             }
+    }
+
+    @ViewBuilder
+    private func shortcutEditor(_ action: InputAction) -> some View {
+        HStack {
+            Text(action.label).font(.system(size: 13, weight: .medium))
+            Spacer()
+            if action == .voiceTranslation {
+                Picker("译为", selection: $model.voiceTarget) { ForEach(TranslationLanguage.allCases) { Text($0.label).tag($0) } }.frame(width: 170)
+            } else if action == .selectionTranslation {
+                Picker("译为", selection: $model.selectionTarget) { ForEach(TranslationLanguage.allCases) { Text($0.label).tag($0) } }.frame(width: 170)
+            }
+        }
+        Text(action == .dictation ? "轻按开始，再按结束；Esc 取消。" : action == .voiceTranslation ? "说完后翻译成目标语言，并粘贴到原输入框。" : "选中文字后按快捷键，在独立弹窗查看译文。")
+            .font(.system(size: 11)).foregroundStyle(Ink.muted)
+        ForEach(model.shortcuts(for: action)) { shortcut in
+            HStack {
+                Keycap(text: shortcut.label)
+                Spacer()
+                if shortcut.needsEventTap { ModelDot(ready: model.fnReady, text: model.fnReady ? "已启用" : "待授权") }
+                Button("移除") { model.setShortcuts(model.shortcuts(for: action).filter { $0.id != shortcut.id }, for: action) }
+                    .buttonStyle(.link).disabled((action == .dictation && model.shortcuts.count == 1) || model.recordingShortcut)
+                    .accessibilityLabel("移除\(action.label)快捷键 \(shortcut.label)")
+            }
+        }
+        if model.recordingShortcut && model.captureAction == action {
+            HStack {
+                Text("请按下一组快捷键，松开保存；Esc 取消…").font(.system(size: 12)).foregroundStyle(Ink.red)
+                ShortcutRecorder(onCapture: { model.captureShortcut($0) }, onPreview: { model.shortcutNotice = $0 }).frame(width: 1, height: 1).accessibilityLabel("录制快捷键")
+                Spacer()
+                Button("取消录制") { model.endShortcutCapture() }.buttonStyle(.link)
+            }.padding(12).background(Ink.red.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+        } else {
+            HStack {
+                Button("添加快捷键") { model.beginShortcutCapture(for: action) }.buttonStyle(InkButton()).accessibilityLabel("添加\(action.label)快捷键")
+                Spacer()
+                Button("恢复默认") { model.setShortcuts(action.defaults, for: action) }.buttonStyle(.link).accessibilityLabel("恢复\(action.label)默认快捷键")
+            }.disabled(model.recordingShortcut)
+        }
     }
 
     func field(_ title: String, text: Binding<String>) -> some View {

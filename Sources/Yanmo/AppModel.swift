@@ -13,8 +13,8 @@ enum Page: String, CaseIterable {
 }
 
 enum Stage: Equatable {
-    case idle, preparing, recording, transcribing, polishing, success, failure
-    var busy: Bool { [.preparing, .recording, .transcribing, .polishing].contains(self) }
+    case idle, preparing, recording, transcribing, polishing, translating, success, failure
+    var busy: Bool { [.preparing, .recording, .transcribing, .polishing, .translating].contains(self) }
     var label: String {
         switch self {
         case .idle: return "等待开口"
@@ -22,6 +22,7 @@ enum Stage: Equatable {
         case .recording: return "正在聆听"
         case .transcribing: return "正在识别…"
         case .polishing: return "正在落笔…"
+        case .translating: return "正在翻译…"
         case .success: return "文字已写入"
         case .failure: return "文稿已保留"
         }
@@ -57,6 +58,15 @@ final class AppModel: ObservableObject {
     @Published var checked = false
     @Published var fnReady = false
     @Published var shortcuts: [InputShortcut]
+    @Published var voiceTranslationShortcuts: [InputShortcut]
+    @Published var selectionTranslationShortcuts: [InputShortcut]
+    @Published var captureAction: InputAction = .dictation
+    @Published var activeAction: InputAction = .dictation
+    @Published var voiceTarget: TranslationLanguage { didSet { defaults.set(voiceTarget.rawValue, forKey: "voiceTarget") } }
+    @Published var selectionTarget: TranslationLanguage { didSet { defaults.set(selectionTarget.rawValue, forKey: "selectionTarget") } }
+    let translation = TranslationResult()
+    weak var translationPanel: TranslationPanelController?
+    private var recordingLanguage: TranslationLanguage = .english
     @Published var recordingShortcut = false
     @Published var shortcutNotice = ""
     @Published var audioInputs = AudioInput.available()
@@ -104,8 +114,18 @@ final class AppModel: ObservableObject {
         retention = HistoryRetention(rawValue: defaults.integer(forKey: "retention")) ?? .forever
         style = WritingStyle(rawValue: defaults.string(forKey: "style") ?? "") ?? .natural
         shortcuts = defaults.data(forKey: "shortcuts").flatMap { try? JSONDecoder().decode([InputShortcut].self, from: $0) } ?? InputShortcut.defaults
+        voiceTranslationShortcuts = defaults.data(forKey: "voiceTranslationShortcuts").flatMap { try? JSONDecoder().decode([InputShortcut].self, from: $0) } ?? InputAction.voiceTranslation.defaults
+        selectionTranslationShortcuts = defaults.data(forKey: "selectionTranslationShortcuts").flatMap { try? JSONDecoder().decode([InputShortcut].self, from: $0) } ?? InputAction.selectionTranslation.defaults
+        voiceTarget = TranslationLanguage(rawValue: defaults.string(forKey: "voiceTarget") ?? "") ?? .english
+        selectionTarget = TranslationLanguage(rawValue: defaults.string(forKey: "selectionTarget") ?? "") ?? .english
         let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Yanmo")
         storage = LibraryFile(url: folder.appendingPathComponent("library.json"))
+        if defaults.data(forKey: "voiceTranslationShortcuts") == nil {
+            voiceTranslationShortcuts.removeAll { candidate in shortcuts.contains { $0.id == candidate.id } }
+        }
+        if defaults.data(forKey: "selectionTranslationShortcuts") == nil {
+            selectionTranslationShortcuts.removeAll { candidate in (shortcuts + voiceTranslationShortcuts).contains { $0.id == candidate.id } }
+        }
         do { library = try storage.read() }
         catch {
             saveAllowed = false
@@ -119,11 +139,11 @@ final class AppModel: ObservableObject {
         let keys = HotKeys()
         // Carbon and the event tap run on the main run loop. Capture focus in the
         // key callback, before deferring microphone access or inference to a task.
-        keys.onToggle = { [weak self] in self?.toggleRecording() }
+        keys.onAction = { [weak self] action in self?.perform(action) }
         keys.onCancel = { [weak self] in self?.cancel() }
         keys.isActive = { [weak self] in self?.stage.busy == true }
         keys.onCaptureFn = { [weak self] in self?.captureShortcut(.fn) }
-        do { try keys.configure(shortcuts) }
+        do { try keys.configure(shortcutBindings) }
         catch { shortcutNotice = error.localizedDescription }
         fnReady = keys.enableFn()
         hotkeys = keys
@@ -133,9 +153,19 @@ final class AppModel: ObservableObject {
 
     func refreshPermissions() { fnReady = hotkeys?.enableFn() ?? false }
 
-    func beginShortcutCapture() {
+    func shortcuts(for action: InputAction) -> [InputShortcut] {
+        switch action { case .dictation: return shortcuts; case .voiceTranslation: return voiceTranslationShortcuts; case .selectionTranslation: return selectionTranslationShortcuts }
+    }
+    private var shortcutBindings: [ShortcutBinding] {
+        InputAction.allCases.flatMap { action in shortcuts(for: action).map { ShortcutBinding(action: action, shortcut: $0) } }
+    }
+    func perform(_ action: InputAction) {
+        if action == .selectionTranslation { translateSelection() }
+        else { toggleRecording(action: action) }
+    }
+    func beginShortcutCapture(for action: InputAction = .dictation) {
         guard !stage.busy else { return }
-        shortcutNotice = ""; recordingShortcut = true; hotkeys?.suspend()
+        captureAction = action; shortcutNotice = ""; recordingShortcut = true; hotkeys?.suspend()
     }
     func endShortcutCapture() {
         recordingShortcut = false
@@ -145,17 +175,23 @@ final class AppModel: ObservableObject {
     func captureShortcut(_ shortcut: InputShortcut?) {
         guard let shortcut else { endShortcutCapture(); return }
         if let error = shortcut.validationError { shortcutNotice = error; return }
-        guard !shortcuts.contains(where: { $0.id == shortcut.id }) else { shortcutNotice = "这组快捷键已存在。"; return }
+        guard !shortcutBindings.contains(where: { $0.shortcut.id == shortcut.id }) else { shortcutNotice = "这组快捷键已用于其他入口或已存在，请换一组。"; return }
         endShortcutCapture()
-        setShortcuts(shortcuts + [shortcut])
+        setShortcuts(shortcuts(for: captureAction) + [shortcut], for: captureAction)
     }
-    func setShortcuts(_ values: [InputShortcut]) {
-        guard !values.isEmpty else { shortcutNotice = "请至少保留一组语音输入快捷键。"; return }
+    func setShortcuts(_ values: [InputShortcut], for action: InputAction = .dictation) {
+        guard action != .dictation || !values.isEmpty else { shortcutNotice = "请至少保留一组语音输入快捷键。"; return }
         do {
-            try hotkeys?.configure(values)
-            shortcuts = values
-            defaults.set(try JSONEncoder().encode(values), forKey: "shortcuts")
-            shortcutNotice = "快捷键已保存。轻按开始，再按结束；Esc 取消。"
+            let proposed = shortcutBindings.filter { $0.action != action } + values.map { ShortcutBinding(action: action, shortcut: $0) }
+            try hotkeys?.configure(proposed)
+            let key: String
+            switch action {
+            case .dictation: shortcuts = values; key = "shortcuts"
+            case .voiceTranslation: voiceTranslationShortcuts = values; key = "voiceTranslationShortcuts"
+            case .selectionTranslation: selectionTranslationShortcuts = values; key = "selectionTranslationShortcuts"
+            }
+            defaults.set(try JSONEncoder().encode(values), forKey: key)
+            shortcutNotice = action == .selectionTranslation ? "快捷键已保存。选中文字后按下，即可查看译文。" : "快捷键已保存。轻按开始，再按结束；Esc 取消。"
         } catch { shortcutNotice = error.localizedDescription }
     }
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -198,9 +234,14 @@ final class AppModel: ObservableObject {
         } catch { notice = error.localizedDescription }
     }
 
-    func toggleRecording() {
-        if stage == .recording { finishRecording(); return }
+    func toggleRecording(action: InputAction = .dictation) {
+        if stage == .recording {
+            if activeAction == action { finishRecording() }
+            return
+        }
         guard !stage.busy, !checking, !recordingShortcut else { return }
+        activeAction = action
+        recordingLanguage = voiceTarget
         destination = InputDestination.capture(readContext: readContext)
         if destination?.secure == true {
             notice = "密码输入框中不启动语音输入。"
@@ -263,6 +304,7 @@ final class AppModel: ObservableObject {
 
     func importFile(_ url: URL) {
         guard !stage.busy, !checking else { return }
+        activeAction = .dictation
         destination = nil
         selectedID = nil; draft = ""; original = ""; notice = ""
         let token = UUID(); operation = token
@@ -290,7 +332,15 @@ final class AppModel: ObservableObject {
             draft = original
             var polished = false
             var polishFailure: String?
-            if polishEnabled && style != .verbatim {
+            if activeAction == .voiceTranslation {
+                stage = .translating
+                do {
+                    let result = try await translateText(original, to: recordingLanguage)
+                    guard operation == token else { return }
+                    draft = result
+                    polished = true
+                } catch { polishFailure = "翻译未完成，已保留原文。\(error.localizedDescription)" }
+            } else if polishEnabled && style != .verbatim {
                 stage = .polishing
                 do {
                     let result = try await polishText(original)
@@ -333,6 +383,64 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func translateText(_ text: String, to language: TranslationLanguage) async throws -> String {
+        let response = try await engine.request([
+            "command": "translate", "text": text, "target_language": language.rawValue,
+            "llm_model": llmModel, "key_terms": library.lexicon.map(\.term)
+        ], python: python)
+        guard let result = response["text"] as? String, !result.isEmpty else { throw EngineError(message: "翻译结果为空。") }
+        return result
+    }
+
+    func translateSelection(in application: NSRunningApplication? = nil) {
+        guard !stage.busy, !checking, !recordingShortcut else { return }
+        let target = InputDestination.capture(readContext: false, in: application)
+        let token = UUID(); operation = token
+        activeAction = .selectionTranslation; stage = .translating
+        overlay?.hide()
+        translation.reset(language: selectionTarget)
+        Task {
+            do {
+                guard let target else { throw EngineError(message: "请先在其他应用中选中文字，再按划词翻译快捷键。") }
+                let source = try await target.selectedText()
+                guard operation == token else { return }
+                translation.source = source
+                translationPanel?.show()
+                await runSelectionTranslation(token: token)
+            } catch {
+                guard operation == token else { return }
+                stage = .idle; translation.loading = false; translation.error = error.localizedDescription
+                translationPanel?.show()
+            }
+        }
+    }
+
+    func retrySelectionTranslation() {
+        guard !stage.busy, !translation.source.isEmpty else { return }
+        let token = UUID(); operation = token
+        activeAction = .selectionTranslation; stage = .translating
+        translation.loading = true; translation.error = ""; translation.result = ""; translation.copied = false
+        Task { await runSelectionTranslation(token: token) }
+    }
+
+    private func runSelectionTranslation(token: UUID) async {
+        let source = translation.source, language = translation.language
+        do {
+            let result = try await translateText(source, to: language)
+            guard operation == token else { return }
+            translation.result = result
+        } catch {
+            guard operation == token else { return }
+            translation.error = error.localizedDescription
+        }
+        stage = .idle; translation.loading = false
+    }
+
+    func closeTranslation() {
+        if activeAction == .selectionTranslation && stage.busy { cancel() }
+        translation.reset(language: selectionTarget); translation.loading = false
+    }
+
     private func polishText(_ text: String) async throws -> String {
         var instruction = "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。"
         if style == .message { instruction += "输出适合即时通讯的自然短句，不添加问候。" }
@@ -351,6 +459,7 @@ final class AppModel: ObservableObject {
 
     func retryPolish() {
         guard !stage.busy, !draft.isEmpty else { return }
+        activeAction = .dictation
         let token = UUID(); operation = token
         let input = draft
         stage = .polishing
@@ -370,6 +479,11 @@ final class AppModel: ObservableObject {
     }
 
     func cancel() {
+        if activeAction == .selectionTranslation && stage.busy {
+            operation = UUID(); engine.stop(); stage = .idle
+            translation.loading = false; translation.error = "已取消翻译。"
+            return
+        }
         guard stage.busy else { overlay?.hide(); return }
         operation = UUID()
         timer?.invalidate(); timer = nil
@@ -496,6 +610,30 @@ final class AppModel: ObservableObject {
     }
 
     #if DEBUG
+    func verifySelectedTranslation() {
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.TextEdit").first else {
+            notice = "请先在文本编辑中选中测试文字。"; return
+        }
+        translateSelection(in: app)
+    }
+
+    func verifyTranslationInsertion() {
+        guard !stage.busy, let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.TextEdit").first,
+              let target = InputDestination.capture(readContext: false, in: app) else { notice = "请先打开文本编辑测试文稿。"; return }
+        activeAction = .voiceTranslation; stage = .translating
+        let token = UUID(); operation = token
+        Task {
+            do {
+                let text = try await translateText("预算是3500元，周五交付，不是周四。", to: voiceTarget)
+                guard operation == token else { return }
+                try await target.insert(text)
+                guard operation == token else { return }
+                notice = "翻译写入自检通过。"
+            } catch { if operation == token { notice = "翻译写入自检失败：\(error.localizedDescription)" } }
+            if operation == token { stage = .idle }
+        }
+    }
+
     /// Finite capture check: validates the actual selected device and WAV output,
     /// then deletes the recording. It never transcribes or inserts any captured speech.
     func verifyMicrophoneCapture() {

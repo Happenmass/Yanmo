@@ -32,6 +32,10 @@ struct DeskView: View {
                         ForEach(model.shortcuts) { shortcut in
                             Keycap(text: shortcut.label)
                         }
+                        ForEach([InputAction.voiceTranslation, .selectionTranslation]) { action in
+                            Text(action.label).font(.system(size: 11)).foregroundStyle(Ink.muted)
+                            ForEach(model.shortcuts(for: action)) { Keycap(text: $0.label) }
+                        }
                         Text("Esc 取消本次输入").font(.system(size: 11)).foregroundStyle(Ink.muted)
                         Button("自定义快捷键 →") { model.page = .settings }.buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Ink.red)
                         Rectangle().fill(Ink.line).frame(height: 0.5).padding(.vertical, 4)

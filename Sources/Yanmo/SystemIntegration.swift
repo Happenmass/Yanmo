@@ -54,6 +54,75 @@ struct InputDestination {
         return InputDestination(application: app, element: element, selection: range, before: before, after: after, secure: secure)
     }
 
+    /// Read only the explicit selection. Never substitute the whole field or an
+    /// existing clipboard value when an application does not expose selected text.
+    func selectedText() async throws -> String {
+        guard !secure else { throw EngineError(message: "密码输入框中的内容不支持划词翻译。") }
+        guard AXIsProcessTrusted() else { throw EngineError(message: "划词翻译需要辅助功能权限，请在设置中允许言墨。") }
+        func checked(_ text: String) throws -> String {
+            let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { throw EngineError(message: "没有读取到选中文字，请先选中一段可复制的文本。") }
+            guard value.count <= 4000 else { throw EngineError(message: "单次支持 4000 字以内的翻译，请缩小选区。") }
+            return value
+        }
+        if let element {
+            var selected: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selected) == .success,
+               let text = selected as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return try checked(text) }
+            if let selection, selection.length > 0 {
+                var value: CFTypeRef?
+                AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value)
+                if let text = value as? String {
+                    let ns = text as NSString
+                    if selection.location >= 0, selection.location <= ns.length, selection.length <= ns.length - selection.location {
+                        return try checked(ns.substring(with: NSRange(location: selection.location, length: selection.length)))
+                    }
+                }
+            }
+        }
+        if let selection, selection.length == 0 {
+            throw EngineError(message: "请先选中文字，再按划词翻译快捷键。")
+        }
+        guard !application.isTerminated, NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier else {
+            throw EngineError(message: "原应用已切换，请重新选中文字再翻译。")
+        }
+        let clipboard = NSPasteboard.general
+        let saved: [[NSPasteboard.PasteboardType: Data]] = (clipboard.pasteboardItems ?? []).map { item in
+            Dictionary(uniqueKeysWithValues: item.types.compactMap { type in item.data(forType: type).map { (type, $0) } })
+        }
+        clipboard.clearContents()
+        let cleared = clipboard.changeCount
+        var ownedChange = cleared
+        defer {
+            if clipboard.changeCount == ownedChange {
+                clipboard.clearContents()
+                let items = saved.map { values -> NSPasteboardItem in
+                    let item = NSPasteboardItem()
+                    for (type, data) in values { item.setData(data, forType: type) }
+                    return item
+                }
+                if !items.isEmpty { clipboard.writeObjects(items) }
+            }
+        }
+        guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 8, keyDown: true),
+              let up = CGEvent(keyboardEventSource: nil, virtualKey: 8, keyDown: false) else {
+            throw EngineError(message: "无法读取选区，请重试。")
+        }
+        down.flags = .maskCommand; up.flags = .maskCommand
+        down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
+        for _ in 0..<20 {
+            try await Task.sleep(nanoseconds: 40_000_000)
+            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier else {
+                throw EngineError(message: "读取时切换了应用，请重新选择文字。")
+            }
+            if clipboard.changeCount != cleared {
+                ownedChange = clipboard.changeCount
+                return try checked(clipboard.string(forType: .string) ?? "")
+            }
+        }
+        throw EngineError(message: "没有读取到选中文字。请确认文本可复制；图片中的文字暂不支持。")
+    }
+
     /// Writes only to the original focused field. Read back before reporting success.
     func insert(_ text: String) async throws {
         guard !secure else { throw EngineError(message: "密码输入框中不写入语音文字。正文已保留在文稿中。") }

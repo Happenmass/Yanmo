@@ -4,12 +4,13 @@ import SwiftUI
 import YanmoCore
 
 final class HotKeys {
-    var onToggle: (() -> Void)?
+    var onAction: ((InputAction) -> Void)?
     var onCancel: (() -> Void)?
     var onCaptureFn: (() -> Void)?
     var isActive: (() -> Bool)?
     var capturing = false { didSet { fnDown = false; combined = false; pressed.removeAll(); modifierChord.reset() } }
-    private var shortcuts: [InputShortcut] = []
+    private var bindings: [ShortcutBinding] = []
+    private var actions: [UInt32: InputAction] = [:]
     private var keys: [EventHotKeyRef] = []
     private var pressed = Set<UInt32>()
     private var handler: EventHandlerRef?
@@ -27,16 +28,17 @@ final class HotKeys {
             var id = EventHotKeyID()
             GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &id)
             if GetEventKind(event) == UInt32(kEventHotKeyReleased) { owner.pressed.remove(id.id) }
-            else if !owner.capturing && owner.pressed.insert(id.id).inserted { owner.onToggle?() }
+            else if !owner.capturing && owner.pressed.insert(id.id).inserted { if let action = owner.actions[id.id] { owner.onAction?(action) } }
             return noErr
         }, types.count, &types, Unmanaged.passUnretained(self).toOpaque(), &handler)
     }
 
     /// Registration is transactional: a rejected new combination leaves the old keys active.
-    func configure(_ proposed: [InputShortcut]) throws {
-        let old = shortcuts
+    func configure(_ proposed: [ShortcutBinding]) throws {
+        if let conflict = ShortcutBinding.conflict(in: proposed) { throw EngineError(message: conflict) }
+        let old = bindings
         unregister()
-        do { try register(proposed); shortcuts = proposed }
+        do { try register(proposed); bindings = proposed }
         catch {
             unregister()
             try? register(old)
@@ -48,19 +50,21 @@ final class HotKeys {
     func resume() throws {
         capturing = false
         unregister()
-        do { try register(shortcuts) }
+        do { try register(bindings) }
         catch { unregister(); throw error }
     }
 
-    private func register(_ values: [InputShortcut]) throws {
-        for (index, shortcut) in values.enumerated() where !shortcut.needsEventTap {
+    private func register(_ values: [ShortcutBinding]) throws {
+        for (index, binding) in values.enumerated() where !binding.shortcut.needsEventTap {
+            let shortcut = binding.shortcut
             var key: EventHotKeyRef?
             let status = RegisterEventHotKey(shortcut.keyCode, shortcut.modifiers, EventHotKeyID(signature: 0x59414E4D, id: UInt32(index + 1)), GetApplicationEventTarget(), 0, &key)
             guard status == noErr, let key else { throw EngineError(message: "\(shortcut.label) 无法注册，可能已被其他应用占用。原快捷键已保留。") }
             keys.append(key)
+            actions[UInt32(index + 1)] = binding.action
         }
     }
-    private func unregister() { keys.forEach { UnregisterEventHotKey($0) }; keys = []; pressed = [] }
+    private func unregister() { keys.forEach { UnregisterEventHotKey($0) }; keys = []; pressed = []; actions = [:] }
 
     @discardableResult
     func enableFn() -> Bool {
@@ -78,9 +82,9 @@ final class HotKeys {
             let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
             if type == .flagsChanged, let mask = ModifierChord.masks[UInt16(keyCode)] {
                 let chord = owner.modifierChord.update(key: UInt16(keyCode), down: event.flags.rawValue & mask != 0)
-                if !owner.capturing, let chord, owner.shortcuts.contains(where: { $0.id == chord.id }) { owner.onToggle?() }
+                if !owner.capturing, let chord, let binding = owner.bindings.first(where: { $0.shortcut.id == chord.id }) { owner.onAction?(binding.action) }
             } else { owner.modifierChord.cancel() }
-            if type == .flagsChanged && keyCode == 63 && (owner.capturing || owner.shortcuts.contains(.fn)) {
+            if type == .flagsChanged && keyCode == 63 && (owner.capturing || owner.bindings.contains(where: { $0.shortcut.isFn })) {
                 let down = event.flags.contains(.maskSecondaryFn)
                 if down {
                     owner.fnDown = true
@@ -89,7 +93,7 @@ final class HotKeys {
                     let trigger = !owner.combined
                     owner.fnDown = false
                     if trigger {
-                        if owner.capturing { owner.onCaptureFn?() } else { owner.onToggle?() }
+                        if owner.capturing { owner.onCaptureFn?() } else if let binding = owner.bindings.first(where: { $0.shortcut.isFn }) { owner.onAction?(binding.action) }
                     }
                 }
                 return nil

@@ -4,11 +4,14 @@ import SwiftUI
 @MainActor
 final class YanmoDelegate: NSObject, NSApplicationDelegate {
     private var overlay: OverlayController?
+    private var translationPanel: TranslationPanelController?
     func applicationDidFinishLaunching(_ notification: Notification) {
         let model = AppModel.shared
         let overlay = OverlayController(model: model)
         self.overlay = overlay
         model.overlay = overlay
+        let translationPanel = TranslationPanelController(model: model)
+        self.translationPanel = translationPanel; model.translationPanel = translationPanel
         NSApp.setActivationPolicy(model.showDock ? .regular : .accessory)
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
             Task { @MainActor in AppModel.shared.refreshPermissions() }
@@ -49,12 +52,18 @@ struct YanmoApp: App {
                     Button("导入音频…") { model.importAudio() }.keyboardShortcut("o")
                     #if DEBUG
                     Button("验证文本编辑写入") { model.verifyTextEditInsertion() }
+                    Button("验证文本编辑划词翻译") { model.verifySelectedTranslation() }
+                    Button("验证翻译写入") { model.verifyTranslationInsertion() }
                     Button("验证麦克风采集（三秒）") { model.verifyMicrophoneCapture() }
                     #endif
                 }
             }
         MenuBarExtra("言墨", systemImage: "waveform") {
-            Button(model.stage == .recording ? "结束录音" : "开始录音（\(model.shortcutLabel)）") { model.toggleRecording() }.disabled(model.stage.busy && model.stage != .recording)
+            Button(model.stage == .recording ? "结束录音" : "开始录音（\(model.shortcutLabel)）") {
+                if model.stage == .recording { model.finishRecording() }
+                else { model.toggleRecording() }
+            }.disabled(model.stage.busy && model.stage != .recording)
+            Button("口述翻译 → \(model.voiceTarget.label)") { model.toggleRecording(action: .voiceTranslation) }.disabled(model.stage.busy && model.stage != .recording)
             if model.stage.busy { Button("取消") { model.cancel() } }
             Divider()
             Button("打开言墨") { model.showWindow() }
