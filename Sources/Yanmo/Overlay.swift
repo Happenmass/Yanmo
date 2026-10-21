@@ -74,7 +74,7 @@ struct VoiceOverlay: View {
                 Button { model.overlay?.hide(); model.revealDraft() } label: {
                     HStack(spacing: 7) {
                         Image(systemName: "exclamationmark.circle")
-                        Text(model.selectedDeliveryNote?.hasPrefix("未确认") == true ? "请检查输入框" : "未完成 · 查看文稿")
+                        Text("未完成 · 查看文稿")
                     }.font(.system(size: 11))
                 }.buttonStyle(.plain)
             } else {

@@ -385,9 +385,17 @@ final class AppModel: ObservableObject {
                     dismissOverlay(after: 1.5, token: token)
                 } catch {
                     guard operation == token else { return }
-                    let status = (error as? EngineError)?.writeAttempted == true ? "未确认写入：" : "未写入："
-                    updateDelivery(status + error.localizedDescription)
-                    fail(error.localizedDescription)
+                    if (error as? EngineError)?.writeAttempted == true {
+                        // Some editors accept paste without exposing a readable AX value.
+                        // Keep the diagnostic in history, but finish quietly without retrying.
+                        updateDelivery("未确认写入：" + error.localizedDescription)
+                        notice = ""
+                        stage = .idle
+                        overlay?.hide()
+                    } else {
+                        updateDelivery("未写入：" + error.localizedDescription)
+                        fail(error.localizedDescription)
+                    }
                 }
             } else {
                 stage = .idle
