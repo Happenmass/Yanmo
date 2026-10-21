@@ -97,6 +97,36 @@ struct Checks {
         try require(usage.characters == 8 && usage.audioSeconds == 30 && usage.charactersPerMinute == 8, "Only timed records contribute to speaking speed")
         try require(usage.activeDays == 1 && UsageSummary([]).charactersPerMinute == 0, "Activity groups by day and handles empty history")
         print("PASS: usage totals, speaking speed and active days")
-        print("9 core checks passed")
+        let markdown = MarkdownDocument("""
+        # Title **bold**
+
+        - First `value`
+          - Nested
+
+        > A quote
+
+        ```python
+        print("hello")
+        ```
+
+        | Key | Value |
+        | --- | ---: |
+        | timeout | 30 |
+
+        ---
+        """)
+        try require(markdown.blocks.count == 7, "Markdown blocks must preserve headings, nesting, quotes, code, tables and rule")
+        if case .heading(1) = markdown.blocks[0].kind {} else { throw CheckFailure(description: "Heading level lost") }
+        try require(markdown.blocks[0].text.runs.contains { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true }, "Bold span must survive parsing")
+        try require(markdown.blocks[1].marker == "•" && markdown.blocks[2].depth == 2 && markdown.blocks[3].quoted, "Nested list and quote structure must survive")
+        if case .code("python") = markdown.blocks[4].kind {} else { throw CheckFailure(description: "Code fence language lost") }
+        try require(String(markdown.blocks[4].text.characters) == "print(\"hello\")\n", "Code content must remain literal")
+        if case .table(let rows, let columns) = markdown.blocks[5].kind {
+            try require(rows.count == 2 && rows[0].header && rows[1].cells.count == 2 && columns[1].alignment == .right, "Table cells and alignment must survive")
+        } else { throw CheckFailure(description: "GFM table lost") }
+        let plain = MarkdownDocument("普通文本 & <script>alert(1)</script>")
+        try require(!plain.blocks.isEmpty, "Untrusted text must render locally as content")
+        print("PASS: structured Markdown parsing and literal code preservation")
+        print("10 core checks passed")
     }
 }

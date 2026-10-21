@@ -27,11 +27,11 @@ final class TranslationPanelController: NSObject, NSWindowDelegate {
     private weak var model: AppModel?
     init(model: AppModel) {
         self.model = model
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 520, height: 490), styleMask: [.titled, .closable, .resizable, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 740, height: 650), styleMask: [.titled, .closable, .resizable, .nonactivatingPanel], backing: .buffered, defer: false)
         super.init()
         panel.title = "言墨 · 划词翻译"
         panel.identifier = NSUserInterfaceItemIdentifier("translation-result")
-        panel.minSize = NSSize(width: 440, height: 360)
+        panel.minSize = NSSize(width: 520, height: 400)
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false
@@ -52,6 +52,8 @@ final class TranslationPanelController: NSObject, NSWindowDelegate {
 private struct TranslationView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var result: TranslationResult
+    @State private var showMarkdown = false
+    @State private var showSource = false
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
@@ -61,20 +63,25 @@ private struct TranslationView: View {
                     ForEach(TranslationLanguage.allCases) { Text($0.label).tag($0) }
                 }.frame(width: 160).disabled(result.loading || model.stage.busy)
             }
+            HStack(spacing: 2) {
+                displayMode("排版", markdown: false)
+                displayMode("Markdown", markdown: true)
+            }
+            .padding(3).background(Ink.black.opacity(0.045), in: RoundedRectangle(cornerRadius: 6))
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("原文").font(.system(size: 11)).foregroundStyle(Ink.muted)
-                    Text(result.source.isEmpty ? "选中其他应用中的文字，再按划词翻译快捷键。" : result.source)
-                        .font(.system(size: 13)).lineSpacing(4).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                    DisclosureGroup("原文", isExpanded: $showSource) {
+                        document(result.source.isEmpty ? "选中其他应用中的文字，再按划词翻译快捷键。" : result.source, size: 13).padding(.top, 8)
+                    }.font(.system(size: 12)).tint(Ink.muted)
                     Rectangle().fill(Ink.line).frame(height: 0.5)
                     Text("译文 · \(result.language.label)").font(.system(size: 11)).foregroundStyle(Ink.muted)
                     if result.loading { Text("正在本机翻译…").foregroundStyle(Ink.muted).font(.system(size: 13)) }
                     else if !result.error.isEmpty { Text(result.error).foregroundStyle(Ink.red).font(.system(size: 13)) }
-                    else { Text(result.result).font(.system(size: 15)).lineSpacing(5).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                    else { document(result.result, size: 15) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack {
-                Text("本地翻译 · 不自动替换原文").font(.system(size: 10)).foregroundStyle(Ink.muted)
+                Text("本地翻译 · 复制保留 Markdown").font(.system(size: 10)).foregroundStyle(Ink.muted)
                 Spacer()
                 if result.loading { Button("取消") { model.cancel() }.buttonStyle(InkButton()) }
                 else {
@@ -88,5 +95,23 @@ private struct TranslationView: View {
                 result.result = ""; result.copied = false
                 if !result.loading { model.retrySelectionTranslation() }
             }
+    }
+
+    private func displayMode(_ title: String, markdown: Bool) -> some View {
+        Button { showMarkdown = markdown } label: {
+            Text(title).font(.system(size: 12, weight: showMarkdown == markdown ? .semibold : .regular))
+                .foregroundStyle(showMarkdown == markdown ? Ink.red : Ink.muted)
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .background(showMarkdown == markdown ? Color.white.opacity(0.65) : .clear, in: RoundedRectangle(cornerRadius: 4))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(showMarkdown == markdown ? .isSelected : [])
+    }
+
+    @ViewBuilder private func document(_ text: String, size: CGFloat) -> some View {
+        if showMarkdown {
+            Text(text).font(.system(size: size - 1, design: .monospaced)).lineSpacing(4)
+                .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+        } else { MarkdownView(text, size: size) }
     }
 }

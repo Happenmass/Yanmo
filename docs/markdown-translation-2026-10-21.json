@@ -1,0 +1,26 @@
+[
+  {
+    "target": "zh-Hans",
+    "source": "# Quick start\n\nUse **local mode** with `timeout=30`.\n\n1. Install the package.\n2. Run the example.\n\n> Keep your data local.\n\n```python\n# Keep this comment unchanged\ndef greet(name):\n    return f\"Hello, {name}\"\n```\n\n| Option | Default |\n| --- | --- |\n| Timeout | 30 seconds |\n\nSee [documentation](https://example.com/docs).",
+    "result": "# 快速开始\n\n使用 **本地模式** 与 `timeout=30`。\n\n1. 安装包。\n2. 运行示例。\n\n> 保持数据本地化。\n\n```python\n# Keep this comment unchanged\ndef greet(name):\n    return f\"Hello, {name}\"\n```\n\n| 选项       | 默认值     |\n| ---------- | ---------- |\n| 超时时间   | 30 秒       |\n\n查看 [文档](https://example.com/docs)。",
+    "seconds": 4.521,
+    "preservation_pass": true,
+    "missing": []
+  },
+  {
+    "target": "en",
+    "source": "## 部署说明\n\n**先检查配置**，不要修改 `user_id`。\n\n- 启动服务\n  - 检查状态\n- 阅读[文档](https://example.com/guide)\n\n```json\n{\"port\": 8080, \"message\": \"你好\"}\n```",
+    "result": "## Deployment Instructions\n\n**First check the configuration**; do not modify `user_id`.\n\n- Start the service\n  - Check the status\n- Read the [guide](https://example.com/guide)\n\n```json\n{\"port\": 8080, \"message\": \"你好\"}\n```",
+    "seconds": 1.118,
+    "preservation_pass": true,
+    "missing": []
+  },
+  {
+    "target": "zh-Hans",
+    "source": "```python\n# Keep this comment unchanged\ndef greet(name):\n    return f\"Hello, {name}\"\n```",
+    "result": "```python\n# Keep this comment unchanged\ndef greet(name):\n    return f\"Hello, {name}\"\n```",
+    "seconds": 0.0,
+    "preservation_pass": true,
+    "missing": []
+  }
+]
