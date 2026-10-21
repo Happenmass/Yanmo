@@ -74,6 +74,16 @@ struct Checks {
         try require(JSONDecoder().decode(TranslationLanguage.self, from: JSONEncoder().encode(TranslationLanguage.german)) == .german, "Target language must survive persistence")
         print("PASS: translation targets and independent shortcut conflict detection")
 
+        let controlSpace = InputShortcut(keyCode: 49, modifiers: 4096, keyLabel: "Space")
+        try require(controlSpace.validationError == nil && controlSpace.needsEventTap, "Control+Space must bypass Carbon/system hotkey interception through the event tap")
+        try require(ShortcutBinding.conflict(in: [
+            ShortcutBinding(action: .dictation, shortcut: .modifierOnly([59])),
+            ShortcutBinding(action: .voiceTranslation, shortcut: .modifierOnly([56, 59])),
+            ShortcutBinding(action: .selectionTranslation, shortcut: controlSpace)
+        ]) == nil, "Control+Space must coexist with bare Control and Control+Shift")
+        try require(!InputShortcut.standard.needsEventTap, "Unrelated Control+Option+Space must retain Carbon registration")
+        print("PASS: Control+Space routing and modifier-only coexistence")
+
         let now = Date(timeIntervalSince1970: 1_000_000)
         try require(HistoryRetention.week.includes(now.addingTimeInterval(-6 * 86400), now: now), "Recent history must remain")
         try require(!HistoryRetention.week.includes(now.addingTimeInterval(-8 * 86400), now: now), "Expired history must be pruned")
@@ -87,6 +97,6 @@ struct Checks {
         try require(usage.characters == 8 && usage.audioSeconds == 30 && usage.charactersPerMinute == 8, "Only timed records contribute to speaking speed")
         try require(usage.activeDays == 1 && UsageSummary([]).charactersPerMinute == 0, "Activity groups by day and handles empty history")
         print("PASS: usage totals, speaking speed and active days")
-        print("8 core checks passed")
+        print("9 core checks passed")
     }
 }

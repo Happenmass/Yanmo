@@ -179,7 +179,10 @@ final class AppModel: ObservableObject {
     func captureShortcut(_ shortcut: InputShortcut?) {
         guard let shortcut else { endShortcutCapture(); return }
         if let error = shortcut.validationError { shortcutNotice = error; return }
-        guard !shortcutBindings.contains(where: { $0.shortcut.id == shortcut.id }) else { shortcutNotice = "这组快捷键已用于其他入口或已存在，请换一组。"; return }
+        if let existing = shortcutBindings.first(where: { $0.shortcut.id == shortcut.id }) {
+            shortcutNotice = "\(shortcut.label) 已用于\(existing.action.label)，请选择不同的快捷键。"
+            return
+        }
         endShortcutCapture()
         setShortcuts(shortcuts(for: captureAction) + [shortcut], for: captureAction)
     }

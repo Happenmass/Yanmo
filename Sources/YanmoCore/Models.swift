@@ -50,7 +50,8 @@ public struct InputShortcut: Codable, Equatable, Identifiable {
     public var modifiers: UInt32
     public var keyLabel: String
     public var modifierKeys: [UInt16]?
-    public var needsEventTap: Bool { isFn || modifierKeys != nil }
+    // macOS may consume Control+Space before it reaches AppKit/Carbon.
+    public var needsEventTap: Bool { isFn || modifierKeys != nil || (keyCode == 49 && modifiers == 4096) }
     public init(keyCode: UInt32, modifiers: UInt32, keyLabel: String) {
         self.keyCode = keyCode; self.modifiers = modifiers; self.keyLabel = keyLabel
     }
