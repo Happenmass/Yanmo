@@ -65,25 +65,29 @@ struct InputDestination {
             guard value.count <= 4000 else { throw EngineError(message: "单次支持 4000 字以内的翻译，请缩小选区。") }
             return value
         }
+        var accessibleText: String?
         if let element {
             var selected: CFTypeRef?
             if AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &selected) == .success,
-               let text = selected as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return try checked(text) }
+               let text = selected as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { accessibleText = text }
             if let selection, selection.length > 0 {
                 var value: CFTypeRef?
                 AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value)
                 if let text = value as? String {
                     let ns = text as NSString
                     if selection.location >= 0, selection.location <= ns.length, selection.length <= ns.length - selection.location {
-                        return try checked(ns.substring(with: NSRange(location: selection.location, length: selection.length)))
+                        if accessibleText == nil { accessibleText = ns.substring(with: NSRange(location: selection.location, length: selection.length)) }
                     }
                 }
             }
         }
-        if let selection, selection.length == 0 {
+        if let accessibleText { _ = try checked(accessibleText) }
+        if accessibleText == nil, let selection, selection.length == 0 {
             throw EngineError(message: "请先选中文字，再按划词翻译快捷键。")
         }
         guard !application.isTerminated, NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier else {
+            // Explicit background verification/native selections can still use AX.
+            if let accessibleText { return try checked(accessibleText) }
             throw EngineError(message: "原应用已切换，请重新选中文字再翻译。")
         }
         let clipboard = NSPasteboard.general
@@ -117,9 +121,14 @@ struct InputDestination {
             }
             if clipboard.changeCount != cleared {
                 ownedChange = clipboard.changeCount
-                return try checked(clipboard.string(forType: .string) ?? "")
+                let plain = clipboard.string(forType: .string) ?? ""
+                // A custom Copy handler must not expand an explicit AX selection.
+                func compact(_ text: String) -> String { text.filter { !$0.isWhitespace } }
+                if let accessibleText, compact(plain) != compact(accessibleText) { return try checked(accessibleText) }
+                return try checked(SelectionMarkdown.fromCopiedText(plain, html: clipboard.string(forType: .html)))
             }
         }
+        if let accessibleText { return try checked(accessibleText) }
         throw EngineError(message: "没有读取到选中文字。请确认文本可复制；图片中的文字暂不支持。")
     }
 

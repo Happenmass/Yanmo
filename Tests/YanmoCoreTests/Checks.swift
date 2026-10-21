@@ -127,6 +127,36 @@ struct Checks {
         let plain = MarkdownDocument("普通文本 & <script>alert(1)</script>")
         try require(!plain.blocks.isEmpty, "Untrusted text must render locally as content")
         print("PASS: structured Markdown parsing and literal code preservation")
-        print("10 core checks passed")
+        let copiedHTML = """
+        <meta charset="utf-8"><h2>Setup &amp; usage</h2><p>Use <strong>local mode</strong> and <em>check</em> <code>retry_count</code>.</p>
+        <ol start="3"><li>Install<ul><li>Keep data local</li></ul></li><li>Run</li></ol>
+        <blockquote><p>Remember the configuration.</p></blockquote>
+        <pre><code class="language-python"><span>def</span> greet():
+            return &quot;Hello&quot;
+
+        # keep blank line
+        </code></pre>
+        <table><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody><tr><td>Retries</td><td>3</td></tr></tbody></table>
+        <p><a href="https://example.com/docs">Docs</a></p>
+        """
+        let converted = SelectionMarkdown.fromHTML(copiedHTML) ?? ""
+        try require(converted.contains("## Setup & usage") && converted.contains("**local mode**") && converted.contains("*check*") && converted.contains("`retry_count`"), "Copied HTML must retain heading, emphasis and inline code")
+        let richDocument = MarkdownDocument(converted)
+        try require(richDocument.blocks.contains { $0.depth == 2 } && richDocument.blocks.contains { $0.marker == "3." } && richDocument.blocks.contains { $0.quoted }, "Copied nested lists, numbering and quotes must render structurally")
+        try require(richDocument.blocks.contains { if case .table = $0.kind { return true }; return false }, "Copied HTML table must become a Markdown table")
+        try require(converted.contains("[Docs](https://example.com/docs)"), "Link labels and addresses retained")
+        try require(converted.contains("    return \"Hello\"\n\n# keep blank line"), "Highlighted code must preserve exact whitespace and decoded entities")
+        print("PASS: copied rich HTML becomes structured Markdown with literal code")
+        let fragment = SelectionMarkdown.fromHTML("<div>outside<!--StartFragment--><h3>Selected</h3><p><b>Only this</b></p><!--EndFragment-->outside</div>") ?? ""
+        try require(fragment.contains("### Selected") && !fragment.contains("outside"), "Copy context outside selection must be excluded")
+        try require(SelectionMarkdown.fromHTML("<p>Literal *star* _name_ [label]</p>")?.contains("\\*star\\*") == true, "Literal punctuation must not create new Markdown formatting")
+        print("PASS: selection fragment boundary and literal text escaping")
+        try require(SelectionMarkdown.fromCopiedText("# Title **bold**", html: "<p># Title **bold**</p>") == "# Title **bold**", "Plain HTML wrappers must not escape existing Markdown source")
+        try require(SelectionMarkdown.fromCopiedText("Plain fallback", html: nil) == "Plain fallback", "Applications without HTML must retain the plain-text path")
+        try require(SelectionMarkdown.fromHTML("<!DOCTYPE html [<!ENTITY file SYSTEM 'file:///etc/passwd'>]><p>&file;</p>") == nil, "External entity declarations must not be read")
+        let inert = SelectionMarkdown.fromHTML("<h1>Safe</h1><script>secret()</script><img src='https://example.com/pixel'><button>Copy</button><a href='javascript:alert(1)'>Label</a>") ?? ""
+        try require(inert == "# Safe\n\nLabel", "Scripts, controls, remote resources and unsafe link targets must be dropped")
+        print("PASS: inert HTML conversion and entity/resource exclusion")
+        print("13 core checks passed")
     }
 }

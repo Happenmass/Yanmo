@@ -53,6 +53,12 @@ struct YanmoApp: App {
                     #if DEBUG
                     Button("验证文本编辑写入") { model.verifyTextEditInsertion() }
                     Button("验证文本编辑划词翻译") { model.verifySelectedTranslation() }
+                    Button("验证前台划词翻译（三秒后）") {
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 3_000_000_000)
+                            model.translateSelection()
+                        }
+                    }
                     Button("验证翻译写入") { model.verifyTranslationInsertion() }
                     Button("验证麦克风采集（三秒）") { model.verifyMicrophoneCapture() }
                     #endif
