@@ -16,11 +16,17 @@
 
 从 [Releases](https://github.com/Happenmass/Yanmo/releases/latest) 下载 `Yanmo-<版本>-mac-arm64.zip`，解压后把 `言墨.app` 拖入「应用程序」。要求 Apple Silicon、macOS 14+。
 
-当前为 ad-hoc 签名、未经 Apple 公证的预览版，首次打开会被 Gatekeeper 拦截。确认来源后执行：
+言墨是个人开源项目，未加入 Apple 开发者计划，应用为 ad-hoc 签名、未经 Apple 公证，首次打开会被 Gatekeeper 拦截。确认来源后任选一种方式放行：
 
-```bash
-xattr -dr com.apple.quarantine /Applications/言墨.app
-```
+- 终端执行：
+
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/言墨.app
+  ```
+
+- 或先双击打开一次，在提示框点「完成」，再到「系统设置 → 隐私与安全性」底部点「仍要打开」，并输入密码确认。macOS 15 起右键「打开」不再能绕过拦截。
+
+ad-hoc 签名每次构建都会变化，更新版本后若辅助功能显示已授权却无法使用，请在系统设置中移除旧条目后重新添加。
 
 然后在「设置 → 本地模型」点击「准备模型」（默认从 ModelScope 下载约 5 GB 权重到用户全局缓存，仅此一步需要联网），并按提示授予麦克风与辅助功能权限。
 
