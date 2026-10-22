@@ -25,7 +25,9 @@ struct ShortcutCaptureChecks {
         precondition(actions.isEmpty)
         precondition(send(.flagsChanged, 63))
         precondition(actions == [.dictation])
-        print("PASS: FN triggers once on release and is suppressed from the system")
+        precondition(send(.keyDown, 0xB3) && send(.keyUp, 0xB3))
+        precondition(actions == [.dictation])
+        print("PASS: FN triggers once on release; FN and the following Globe key are suppressed from the system")
 
         // Either Shift key and either press/release order must produce exactly
         // one translation, with no extra bare FN when the last key is released.
@@ -86,6 +88,7 @@ struct ShortcutCaptureChecks {
         _ = send(.flagsChanged, 56, control); _ = send(.flagsChanged, 59)
         precondition(send(.keyDown, 49, control)); _ = send(.keyUp, 49, control)
         precondition(actions == [.dictation, .voiceTranslation, .selectionTranslation])
+        precondition(!send(.keyDown, 0xB3) && !send(.keyUp, 0xB3))
         let functionKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.control, .function], timestamp: 0, windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 122)!
         precondition(HotKeys.shortcut(for: functionKey).modifiers == 4096)
         print("PASS: original custom shortcuts coexist; F-keys are not mistaken for physical FN")

@@ -67,3 +67,22 @@ test('首次使用引导依次介绍四项功能，完成后可在设置中重�
     expect(errors).toEqual([]);
   } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
 });
+
+test('首次使用时模型未就绪，先停在模型准备页而非快捷键引导', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'yanmo-setup-qa-'));
+  await writeFile(join(directory, 'settings.json'), JSON.stringify({ ...defaultSettings(), showDock: false, onboarded: false, asrModel: 'yanmo-qa/missing-asr' }));
+  const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')), YANMO_DATA_DIR: directory, YANMO_QA: '1' };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const application = await electron.launch({ args: process.env.YANMO_QA_APP ? [] : [resolve('.')], env, executablePath: process.env.YANMO_QA_APP, cwd: tmpdir() });
+  try {
+    const page = await application.firstWindow();
+    const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
+    await expect(page.getByRole('heading', { name: '先备好笔墨。' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '下载模型' })).toBeEnabled({ timeout: 60000 });
+    await expect(page.getByRole('navigation', { name: '引导步骤' })).toHaveCount(0);
+    if (process.env.YANMO_QA_SHOTS) await page.screenshot({ path: join(process.env.YANMO_QA_SHOTS, 'model-setup.png'), animations: 'disabled' });
+    await page.getByRole('button', { name: '跳过引导' }).click();
+    await expect.poll(async () => JSON.parse(await readFile(join(directory, 'settings.json'), 'utf8')).onboarded).toBe(true);
+    expect(errors).toEqual([]);
+  } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
+});

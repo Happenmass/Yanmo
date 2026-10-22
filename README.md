@@ -6,9 +6,9 @@
 
 > A local-first, offline voice input app for macOS (Apple Silicon). Press FN, speak, and the text lands in whatever input box has focus — ASR (Qwen3-ASR + SenseVoice) and the cleanup LLM (Qwen3-4B) run entirely on your Mac via MLX.
 
-[![宣传片](docs/promo-poster.jpg)](https://github.com/Happenmass/Yanmo/releases/download/v0.4.0/Yanmo-promo.mp4)
+[![宣传片](docs/promo-poster.jpg)](https://github.com/Happenmass/Yanmo/releases/latest/download/Yanmo-promo.mp4)
 
-▶ [观看 32 秒宣传片](https://github.com/Happenmass/Yanmo/releases/download/v0.4.0/Yanmo-promo.mp4)
+▶ [观看 32 秒宣传片](https://github.com/Happenmass/Yanmo/releases/latest/download/Yanmo-promo.mp4)
 
 ![主窗口](docs/design/main-window-v2.png)
 

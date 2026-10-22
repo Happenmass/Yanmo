@@ -26,7 +26,7 @@ export interface AppState {
   page: Page; stage: Stage; action: Action; settings: Settings; library: Library;
   selectedID: string | null; draft: string; original: string; notice: string;
   asrResults: ASRResult[];
-  seconds: number; level: number; destinationName: string; checking: boolean; overlayVisible: boolean;
+  seconds: number; level: number; destinationName: string; checking: boolean; modelsChecked: boolean; overlayVisible: boolean;
   models: { asr: boolean; sensevoice: boolean; llm: boolean; metal: boolean }; native: NativeStatus;
   translation: Translation; captureAction: Action | null; shortcutNotice: string; launchAtLogin: boolean;
   onlineKeys: Record<Capability, boolean>;

@@ -25,7 +25,7 @@ export class Controller extends EventEmitter {
     this.state = {
       page: 'desk', stage: 'idle', action: 'dictation', settings: store.settings, library: store.library,
       selectedID: null, draft: '', original: '', asrResults: [], notice: store.error, seconds: 0, level: 0,
-      destinationName: '言墨文稿', checking: false, overlayVisible: false, models: { asr: false, sensevoice: false, llm: false, metal: false },
+      destinationName: '言墨文稿', checking: false, modelsChecked: false, overlayVisible: false, models: { asr: false, sensevoice: false, llm: false, metal: false },
       native: { accessibility: false, eventTap: false, microphone: 0, devices: [] },
       translation: { source: '', result: '', language: store.settings.selectionTarget, loading: false, error: '' },
       captureAction: null, shortcutNotice: '', launchAtLogin: false, onlineKeys: { asr: false, text: false },
@@ -81,7 +81,7 @@ export class Controller extends EventEmitter {
       this.state.models = { asr: value.models?.asr?.ready === true, sensevoice: value.models?.sensevoice?.ready === true, llm: value.models?.llm?.ready === true, metal: value.metal === true };
       if (!value.metal) this.state.notice = 'MLX 尚未检测到可用的 Metal 环境。';
     } catch (error) { this.state.notice = (error as Error).message; }
-    finally { this.state.checking = false; this.changed(); }
+    finally { this.state.checking = false; this.state.modelsChecked = true; this.changed(); }
   }
   updateSettings(patch: Partial<Settings>) {
     const next = this.settingsQueue.then(() => this.applySettings(patch));

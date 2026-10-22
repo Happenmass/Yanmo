@@ -92,6 +92,9 @@ public final class HotKeys {
             return false
         }
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        // A lone FN release is followed by a Globe key (0xB3) down/up; that key,
+        // not FN's flagsChanged, triggers the system 🌐 action (emoji picker).
+        if (type == .keyDown || type == .keyUp) && keyCode == 0xB3 && (capturing || bindings.contains(where: { $0.shortcut.usesFn })) { return true }
         if type == .keyUp, suppressedKeys.remove(keyCode) != nil { return true }
         if type == .keyDown, suppressedKeys.contains(keyCode) { return true }
         if type == .flagsChanged, let mask = ModifierChord.masks[UInt16(keyCode)] {
