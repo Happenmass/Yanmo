@@ -105,6 +105,7 @@ async function importAudio() {
   const result = await dialog.showOpenDialog(mainWindow, { title: '导入音频', properties: ['openFile'], filters: [{ name: '音频', extensions: ['wav', 'mp3', 'm4a', 'aiff', 'aif', 'flac', 'ogg', 'aac', 'mp4'] }] });
   if (!result.canceled && result.filePaths[0]) await controller.importAudio(result.filePaths[0]);
 }
+const appBundle = () => resolve(process.execPath, '../../..');
 async function prepareModels() {
   if (busy(controller.state.stage) || controller.state.checking || preparation) return;
   const settings = structuredClone(controller.state.settings);
@@ -129,6 +130,8 @@ async function prepareModels() {
     });
     controller.notice('模型已准备，可在本机离线使用。');
   } finally { controller.state.checking = false; controller.changed(); await controller.checkModels(); }
+  // First run goes straight from the download to the Accessibility grant, so FN works when the guide asks for it.
+  if (!controller.state.settings.onboarded && !controller.state.native.accessibility) await controller.permissions(true, { app: appBundle() });
 }
 // API keys are encrypted with safeStorage, whose key lives in the macOS Keychain; the file alone cannot be read elsewhere.
 const keysPath = () => join(dataDirectory, 'online-keys.json');
@@ -168,7 +171,7 @@ async function invoke(action: string, value: any) {
       // The guide panel flies from the clicked button; renderer rects are relative to the window content.
       const bounds = mainWindow.getContentBounds();
       const source = value && ['x', 'y', 'width', 'height'].every(key => Number.isFinite(value[key])) ? { x: bounds.x + value.x, y: bounds.y + value.y, width: value.width, height: value.height } : undefined;
-      await controller.permissions(true, { app: resolve(process.execPath, '../../..'), source }); break;
+      await controller.permissions(true, { app: appBundle(), source }); break;
     }
     case 'settings': {
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('设置值无效。');
