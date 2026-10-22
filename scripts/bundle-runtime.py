@@ -19,6 +19,21 @@ def run(args, **kwargs):
     return subprocess.run(args, check=True, **kwargs)
 
 
+def scrub(python):
+    """Drop build-machine paths: console scripts with absolute shebangs and uv's sysconfig prefix."""
+    for folder in (TARGET / "bin", TARGET / "lib/python3.12/site-packages/bin"):
+        for script in folder.iterdir() if folder.is_dir() else ():
+            if script.is_file() and not script.is_symlink():
+                with script.open("rb") as handle:
+                    head = handle.readline()
+                if head.startswith(b"#!/") and b"python" in head:
+                    script.unlink()
+    prefix = run([str(python), "-I", "-c", "import _sysconfigdata__darwin_darwin as d; print(d.build_time_vars['prefix'])"], capture_output=True, text=True).stdout.strip()
+    if prefix != "/install":
+        for data in (TARGET / "lib/python3.12").glob("_sysconfigdata_*.py"):
+            data.write_text(data.read_text().replace(prefix, "/install"))
+
+
 def main():
     if sys.platform != "darwin" or platform.machine() != "arm64":
         raise SystemExit("This runtime is built on Apple Silicon macOS.")
@@ -28,6 +43,7 @@ def main():
     marker = TARGET / ".yanmo-runtime.json"
     if marker.is_file() and json.loads(marker.read_text()).get("lock_sha256") == fingerprint:
         run([str(TARGET / "bin/python3.12"), "-I", "-c", f"import platform; assert platform.python_version() == '{PYTHON_VERSION}'"])
+        scrub(TARGET / "bin/python3.12")
         print("Mac runtime already matches the dependency lock.")
         return
     base_python = Path(run(["uv", "python", "find", PYTHON_VERSION, "--managed-python", "--no-project"], capture_output=True, text=True).stdout.strip()).resolve()
@@ -44,6 +60,7 @@ def main():
     run(["uv", "pip", "install", "--python", str(python), "--target", str(site), "--require-hashes", "-r", str(LOCK)])
     env = {key: value for key, value in os.environ.items() if key not in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV")}
     run([str(python), "-I", "-c", "import sys, mlx.core as mx, mlx_audio, mlx_lm, fastapi, uvicorn, soundfile; assert mx.metal.is_available(); assert sys.prefix.startswith(sys.argv[1]); print('Standalone Python + MLX runtime verified')", str(TARGET)], env=env)
+    scrub(python)
     marker.write_text(json.dumps({"python": PYTHON_VERSION, "lock_sha256": fingerprint}) + "\n")
 
 

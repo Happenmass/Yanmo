@@ -75,7 +75,7 @@ npm run package:mac
 open dist-electron/mac-arm64/言墨.app
 ```
 
-产物 `dist-electron/mac-arm64/言墨.app` 可以移出项目目录运行，不需要另外安装 Python、uv 或 Homebrew。当前应用包约 800 MB（763 MiB），不含模型权重。发布到其他机器前仍需稳定签名、公证及系统权限验收。
+产物 `dist-electron/mac-arm64/言墨.app` 可以移出项目目录运行，不需要另外安装 Python、uv 或 Homebrew。当前应用包约 830 MB，不含模型权重。发布到其他机器前仍需稳定签名、公证及系统权限验收。
 
 旧 0.3 应用包已移除，当前只使用上述 0.4 应用。`./scripts/build.sh` 同样调用新版打包入口；原 SwiftUI 源码仅保留作迁移对照。
 
