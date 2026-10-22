@@ -1,3 +1,4 @@
+import YanmoNative
 import AppKit
 import AVFoundation
 import SwiftUI
@@ -146,6 +147,7 @@ final class AppModel: ObservableObject {
         keys.onAction = { [weak self] action in self?.perform(action) }
         keys.onCancel = { [weak self] in self?.cancel() }
         keys.isActive = { [weak self] in self?.stage.busy == true }
+        keys.onCaptureShortcut = { [weak self] in self?.captureShortcut($0) }
         keys.onCaptureFn = { [weak self] in self?.captureShortcut(.fn) }
         do { try keys.configure(shortcutBindings) }
         catch { shortcutNotice = error.localizedDescription }

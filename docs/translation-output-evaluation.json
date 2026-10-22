@@ -1,0 +1,957 @@
+{
+  "date": "2026-10-22T06:35:07.996212+00:00",
+  "method": "Synthetic transcripts with real offline Qwen3-4B; mock only ASR for text cases. Optional synthetic audio uses actual Qwen3-ASR + SenseVoice. Assert quality and exact model-body delivery offline; no runtime content rules.",
+  "source_sha256": {
+    "engine/prompt.txt": "d5aecd73a42f1ef34ccad72aaab317ed0bb712d34ff8d9fa4a52b12bc38e8b92",
+    "engine/fusion.py": "931e75b19549658a4e5d8a626ffd57b9c3a33d71ccf3f0e2fdfb84e6763723d3",
+    "engine/worker.py": "1a42444824e7837ea9c81260ed66d92527b160f8fc1286fde3c3873aaa4f8f13",
+    "backend/pipeline.py": "1b05543823e8774ec28d926d9e315ff9eb16492143be1870c8984d0fc1532c11"
+  },
+  "cases": [
+    {
+      "id": "zh_indefinite_a",
+      "passed": true,
+      "model_body_unchanged": true,
+      "fixture": {
+        "id": "zh_indefinite_a",
+        "text": "我想做一个新的动画效果。",
+        "contains": [
+          "animation"
+        ],
+        "article": true
+      },
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing"
+        },
+        {
+          "event": "transcript",
+          "text": "我想做一个新的动画效果。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "我想做一个新的动画效果。",
+              "language": "Chinese",
+              "language_source": "detected"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing"
+        },
+        {
+          "event": "transcript",
+          "text": "我想做一个新的动画效果。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "我想做一个新的动画效果。",
+              "language": "Chinese",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "我想做一个新的动画效果。",
+              "language": "Chinese",
+              "language_source": "forced"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "translating"
+        },
+        {
+          "event": "result",
+          "text": "I want to create a new animation effect.",
+          "original": "我想做一个新的动画效果。",
+          "processed": true
+        }
+      ],
+      "raw_output": "I want to create a new animation effect."
+    },
+    {
+      "id": "zh_indefinite_an",
+      "passed": true,
+      "model_body_unchanged": true,
+      "fixture": {
+        "id": "zh_indefinite_an",
+        "text": "我有一个想法。",
+        "contains": [
+          "idea"
+        ],
+        "article": true
+      },
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing"
+        },
+        {
+          "event": "transcript",
+          "text": "我有一个想法。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "我有一个想法。",
+              "language": "Chinese",
+              "language_source": "detected"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing"
+        },
+        {
+          "event": "transcript",
+          "text": "我有一个想法。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "我有一个想法。",
+              "language": "Chinese",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "我有一个想法。",
+              "language": "Chinese",
+              "language_source": "forced"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "translating"
+        },
+        {
+          "event": "result",
+          "text": "I have an idea.",
+          "original": "我有一个想法。",
+          "processed": true
+        }
+      ],
+      "raw_output": "I have an idea."
+    },
+    {
+      "id": "zh_two_different_spellings",
+      "passed": true,
+      "model_body_unchanged": true,
+      "fixture": {
+        "id": "zh_two_different_spellings",
+        "text": "嗯，我有一个问题，明天还需要开会吗？",
+        "secondary": "我有一个问题。明天还需要开会吗？",
+        "contains": [
+          "question",
+          "tomorrow"
+        ],
+        "article": true
+      },
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing"
+        },
+        {
+          "event": "transcript",
+          "text": "嗯，我有一个问题，明天还需要开会吗？",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "嗯，我有一个问题，明天还需要开会吗？",
+              "language": "Chinese",
+              "language_source": "detected"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing"
+        },
+        {
+          "event": "transcript",
+          "text": "嗯，我有一个问题，明天还需要开会吗？",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "嗯，我有一个问题，明天还需要开会吗？",
+              "language": "Chinese",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "我有一个问题。明天还需要开会吗？",
+              "language": "Chinese",
+              "language_source": "forced"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "translating"
+        },
+        {
+          "event": "result",
+          "text": "Hmm, I have a question—do we still need a meeting tomorrow?",
+          "original": "嗯，我有一个问题，明天还需要开会吗？",
+          "processed": true
+        }
+      ],
+      "raw_output": "Hmm, I have a question—do we still need a meeting tomorrow?"
+    },
+    {
+      "id": "zh_article_with_context",
+      "passed": true,
+      "model_body_unchanged": true,
+      "fixture": {
+        "id": "zh_article_with_context",
+        "text": "我想提出一个建议。",
+        "before": "以下是关于界面效果的中文讨论。",
+        "contains_any": [
+          [
+            "suggestion",
+            "suggest something"
+          ]
+        ],
+        "forbid": [
+          "1"
+        ]
+      },
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing"
+        },
+        {
+          "event": "transcript",
+          "text": "我想提出一个建议。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "我想提出一个建议。",
+              "language": "Chinese",
+              "language_source": "detected"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing"
+        },
+        {
+          "event": "transcript",
+          "text": "我想提出一个建议。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "我想提出一个建议。",
+              "language": "Chinese",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "我想提出一个建议。",
+              "language": "Chinese",
+              "language_source": "forced"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "translating"
+        },
+        {
+          "event": "result",
+          "text": "I would like to suggest something.",
+          "original": "我想提出一个建议。",
+          "processed": true
+        }
+      ],
+      "raw_output": "I would like to suggest something."
+    },
+    {
+      "id": "zh_explicit_quantity",
+      "passed": true,
+      "model_body_unchanged": true,
+      "fixture": {
+        "id": "zh_explicit_quantity",
+        "text": "这次预算一百元，需要买三件。",
+        "contains_any": [
+          [
+            "100 yuan",
+            "one hundred yuan"
+          ],
+          [
+            "3 items",
+            "three items"
+          ]
+        ]
+      },
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing"
+        },
+        {
+          "event": "transcript",
+          "text": "这次预算一百元，需要买三件。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "这次预算一百元，需要买三件。",
+              "language": "Chinese",
+              "language_source": "detected"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing"
+        },
+        {
+          "event": "transcript",
+          "text": "这次预算一百元，需要买三件。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "这次预算一百元，需要买三件。",
+              "language": "Chinese",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "这次预算一百元，需要买三件。",
+              "language": "Chinese",
+              "language_source": "forced"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "translating"
+        },
+        {
+          "event": "result",
+          "text": "This budget is 100 yuan and we need to buy three items.",
+          "original": "这次预算一百元，需要买三件。",
+          "processed": true
+        }
+      ],
+      "raw_output": "This budget is 100 yuan and we need to buy three items."
+    },
+    {
+      "id": "zh_number_context_correction",
+      "passed": true,
+      "model_body_unchanged": true,
+      "fixture": {
+        "id": "zh_number_context_correction",
+        "text": "预算100元。",
+        "secondary": "预算101元。",
+        "before": "本条预算已经确认为101元。",
+        "contains": [
+          "101"
+        ],
+        "forbid": [
+          "100"
+        ]
+      },
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing"
+        },
+        {
+          "event": "transcript",
+          "text": "预算100元。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "预算100元。",
+              "language": "Chinese",
+              "language_source": "detected"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing"
+        },
+        {
+          "event": "transcript",
+          "text": "预算100元。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "预算100元。",
+              "language": "Chinese",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "预算101元。",
+              "language": "Chinese",
+              "language_source": "forced"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "translating"
+        },
+        {
+          "event": "result",
+          "text": "The budget is 101 yuan.",
+          "original": "预算100元。",
+          "processed": true
+        }
+      ],
+      "raw_output": "The budget is 101 yuan."
+    },
+    {
+      "id": "en_to_zh_quantities",
+      "passed": true,
+      "model_body_unchanged": true,
+      "fixture": {
+        "id": "en_to_zh_quantities",
+        "text": "The budget is one hundred dollars for three items.",
+        "language": "English",
+        "target": "zh-Hans",
+        "contains_any": [
+          [
+            "100美元",
+            "一百美元"
+          ],
+          [
+            "3件",
+            "三件",
+            "3项",
+            "三项"
+          ]
+        ]
+      },
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing"
+        },
+        {
+          "event": "transcript",
+          "text": "The budget is one hundred dollars for three items.",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "The budget is one hundred dollars for three items.",
+              "language": "English",
+              "language_source": "detected"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing"
+        },
+        {
+          "event": "transcript",
+          "text": "The budget is one hundred dollars for three items.",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "The budget is one hundred dollars for three items.",
+              "language": "English",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "The budget is one hundred dollars for three items.",
+              "language": "English",
+              "language_source": "forced"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "translating"
+        },
+        {
+          "event": "result",
+          "text": "预算为一百美元，用于三项。",
+          "original": "The budget is one hundred dollars for three items.",
+          "processed": true
+        }
+      ],
+      "raw_output": "预算为一百美元，用于三项。"
+    },
+    {
+      "id": "en_to_zh_article",
+      "passed": true,
+      "model_body_unchanged": true,
+      "fixture": {
+        "id": "en_to_zh_article",
+        "text": "I have an idea.",
+        "language": "English",
+        "target": "zh-Hans",
+        "contains": [
+          "想法"
+        ]
+      },
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing"
+        },
+        {
+          "event": "transcript",
+          "text": "I have an idea.",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "I have an idea.",
+              "language": "English",
+              "language_source": "detected"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing"
+        },
+        {
+          "event": "transcript",
+          "text": "I have an idea.",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "I have an idea.",
+              "language": "English",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "I have an idea.",
+              "language": "English",
+              "language_source": "forced"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "translating"
+        },
+        {
+          "event": "result",
+          "text": "我有一个想法。",
+          "original": "I have an idea.",
+          "processed": true
+        }
+      ],
+      "raw_output": "我有一个想法。"
+    },
+    {
+      "id": "zh_to_ja",
+      "passed": true,
+      "model_body_unchanged": true,
+      "fixture": {
+        "id": "zh_to_ja",
+        "text": "明天的会议从下午三点开始。",
+        "target": "ja",
+        "contains": [
+          "会議",
+          "3"
+        ]
+      },
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing"
+        },
+        {
+          "event": "transcript",
+          "text": "明天的会议从下午三点开始。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "明天的会议从下午三点开始。",
+              "language": "Chinese",
+              "language_source": "detected"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing"
+        },
+        {
+          "event": "transcript",
+          "text": "明天的会议从下午三点开始。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "明天的会议从下午三点开始。",
+              "language": "Chinese",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "明天的会议从下午三点开始。",
+              "language": "Chinese",
+              "language_source": "forced"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "translating"
+        },
+        {
+          "event": "result",
+          "text": "明日の会議は午後3時から始まります。",
+          "original": "明天的会议从下午三点开始。",
+          "processed": true
+        }
+      ],
+      "raw_output": "明日の会議は午後3時から始まります。"
+    },
+    {
+      "id": "zh_to_de",
+      "passed": true,
+      "model_body_unchanged": true,
+      "fixture": {
+        "id": "zh_to_de",
+        "text": "明天的会议从十五点开始。",
+        "target": "de",
+        "contains": [
+          "15"
+        ],
+        "any_of": [
+          "morgen",
+          "nächsten Tag"
+        ]
+      },
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing"
+        },
+        {
+          "event": "transcript",
+          "text": "明天的会议从十五点开始。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "明天的会议从十五点开始。",
+              "language": "Chinese",
+              "language_source": "detected"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing"
+        },
+        {
+          "event": "transcript",
+          "text": "明天的会议从十五点开始。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "明天的会议从十五点开始。",
+              "language": "Chinese",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "明天的会议从十五点开始。",
+              "language": "Chinese",
+              "language_source": "forced"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "translating"
+        },
+        {
+          "event": "result",
+          "text": "Die Meeting ist am morgenden von 15 Uhr.",
+          "original": "明天的会议从十五点开始。",
+          "processed": true
+        }
+      ],
+      "raw_output": "Die Meeting ist am morgenden von 15 Uhr."
+    },
+    {
+      "id": "zh_idioms_keep_number_words",
+      "passed": true,
+      "model_body_unchanged": true,
+      "fixture": {
+        "id": "zh_idioms_keep_number_words",
+        "operation": "dictation",
+        "text": "做决定前要三思而后行，我们一起讨论。",
+        "contains": [
+          "三思而后行",
+          "一起"
+        ],
+        "forbid": [
+          "3思",
+          "1起"
+        ]
+      },
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing"
+        },
+        {
+          "event": "transcript",
+          "text": "做决定前要三思而后行，我们一起讨论。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "做决定前要三思而后行，我们一起讨论。",
+              "language": "Chinese",
+              "language_source": "detected"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing"
+        },
+        {
+          "event": "transcript",
+          "text": "做决定前要三思而后行，我们一起讨论。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "做决定前要三思而后行，我们一起讨论。",
+              "language": "Chinese",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "做决定前要三思而后行，我们一起讨论。",
+              "language": "Chinese",
+              "language_source": "forced"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "polishing"
+        },
+        {
+          "event": "result",
+          "text": "做决定前要三思而后行，我们一起讨论。",
+          "original": "做决定前要三思而后行，我们一起讨论。",
+          "processed": true
+        }
+      ],
+      "raw_output": "做决定前要三思而后行，我们一起讨论。"
+    },
+    {
+      "id": "zh_approximate_quantity",
+      "passed": true,
+      "model_body_unchanged": true,
+      "fixture": {
+        "id": "zh_approximate_quantity",
+        "operation": "dictation",
+        "text": "找三五个人一起商量，不用着急。",
+        "contains": [
+          "三五个人",
+          "一起"
+        ],
+        "forbid": [
+          "35",
+          "1起"
+        ]
+      },
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing"
+        },
+        {
+          "event": "transcript",
+          "text": "找三五个人一起商量，不用着急。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "找三五个人一起商量，不用着急。",
+              "language": "Chinese",
+              "language_source": "detected"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing"
+        },
+        {
+          "event": "transcript",
+          "text": "找三五个人一起商量，不用着急。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "找三五个人一起商量，不用着急。",
+              "language": "Chinese",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "找三五个人一起商量，不用着急。",
+              "language": "Chinese",
+              "language_source": "forced"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "polishing"
+        },
+        {
+          "event": "result",
+          "text": "找三五个人一起商量，不用着急。",
+          "original": "找三五个人一起商量，不用着急。",
+          "processed": true
+        }
+      ],
+      "raw_output": "找三五个人一起商量，不用着急。"
+    },
+    {
+      "id": "zh_fixed_names_weekdays",
+      "passed": true,
+      "model_body_unchanged": true,
+      "fixture": {
+        "id": "zh_fixed_names_weekdays",
+        "operation": "dictation",
+        "text": "一些建议，一起统一格式，四川周五开会。",
+        "contains": [
+          "一些",
+          "一起",
+          "统一",
+          "四川",
+          "周五"
+        ]
+      },
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing"
+        },
+        {
+          "event": "transcript",
+          "text": "一些建议，一起统一格式，四川周五开会。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "一些建议，一起统一格式，四川周五开会。",
+              "language": "Chinese",
+              "language_source": "detected"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing"
+        },
+        {
+          "event": "transcript",
+          "text": "一些建议，一起统一格式，四川周五开会。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "一些建议，一起统一格式，四川周五开会。",
+              "language": "Chinese",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "一些建议，一起统一格式，四川周五开会。",
+              "language": "Chinese",
+              "language_source": "forced"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "polishing"
+        },
+        {
+          "event": "result",
+          "text": "一些建议，一起统一格式，四川周五开会。",
+          "original": "一些建议，一起统一格式，四川周五开会。",
+          "processed": true
+        }
+      ],
+      "raw_output": "一些建议，一起统一格式，四川周五开会。"
+    },
+    {
+      "id": "audio_zh_dual_translation",
+      "passed": true,
+      "model_body_unchanged": true,
+      "fixture": {
+        "id": "audio_zh_dual_translation",
+        "contains": [
+          "animation"
+        ],
+        "article": true
+      },
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing"
+        },
+        {
+          "event": "transcript",
+          "text": "我想做一个新的动画效果。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "我想做一个新的动画效果。",
+              "language": "Chinese",
+              "language_source": "detected"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing"
+        },
+        {
+          "event": "transcript",
+          "text": "我想做一个新的动画效果。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "我想做一个新的动画效果。",
+              "language": "Chinese",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "我想做一个新的动画效果。",
+              "language": "Chinese",
+              "language_source": "forced"
+            }
+          ]
+        },
+        {
+          "event": "stage",
+          "stage": "translating"
+        },
+        {
+          "event": "result",
+          "text": "I want to create a new animation effect.",
+          "original": "我想做一个新的动画效果。",
+          "processed": true
+        }
+      ],
+      "raw_output": "I want to create a new animation effect."
+    }
+  ],
+  "failed": [],
+  "passed": 14
+}

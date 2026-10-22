@@ -1,0 +1,278 @@
+{
+  "date": "2026-10-22T06:34:40.047024+00:00",
+  "method": "Controlled synthetic ASR disagreements with known intended values. These are injected candidate errors, not claims of naturally occurring Qwen/SenseVoice mistakes or an ASR accuracy benchmark.",
+  "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+  "prompt_sha256": "d5aecd73a42f1ef34ccad72aaab317ed0bb712d34ff8d9fa4a52b12bc38e8b92",
+  "worker_sha256": "1a42444824e7837ea9c81260ed66d92527b160f8fc1286fde3c3873aaa4f8f13",
+  "cases": [
+    {
+      "id": "zh-secondary-corrects-qwen",
+      "result": {
+        "text": "预算3501元。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "预算3501元。",
+      "system_prompt_sha256": "c32d6791a7ad34ed420f1542dbad3e6fe3f30058808dc0e13fa0e233ac267661",
+      "elapsed": 3.043
+    },
+    {
+      "id": "en-secondary-corrects-qwen",
+      "result": {
+        "text": "The amount is 101 dollars.",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "The amount is 101 dollars.",
+      "system_prompt_sha256": "ae44fae17479fe5cdca9580d685cb6300c7fb09c93a9101f2dd439e5ce858b36",
+      "elapsed": 1.144
+    },
+    {
+      "id": "zh-primary-also-can-win",
+      "result": {
+        "text": "费用123元。  \n本条费用已经核对为123元。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "费用123元。  \n本条费用已经核对为123元。",
+      "system_prompt_sha256": "9f152be665c11620ef0cea71654ef0c03ea72e8d43ac7efcc5c5e30833325653",
+      "elapsed": 1.223
+    },
+    {
+      "id": "en-primary-also-can-win",
+      "result": {
+        "text": "The fee is 99 dollars.  \nThe confirmed fee for this entry is 99 dollars.",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "The fee is 99 dollars.  \nThe confirmed fee for this entry is 99 dollars.",
+      "system_prompt_sha256": "ae44fae17479fe5cdca9580d685cb6300c7fb09c93a9101f2dd439e5ce858b36",
+      "elapsed": 1.272
+    },
+    {
+      "id": "zh-candidate-order-swapped",
+      "result": {
+        "text": "预算3501元。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "预算3501元。",
+      "system_prompt_sha256": "c32d6791a7ad34ed420f1542dbad3e6fe3f30058808dc0e13fa0e233ac267661",
+      "elapsed": 1.118
+    },
+    {
+      "id": "en-candidate-order-swapped",
+      "result": {
+        "text": "The amount is 101 dollars.",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "The amount is 101 dollars.",
+      "system_prompt_sha256": "ae44fae17479fe5cdca9580d685cb6300c7fb09c93a9101f2dd439e5ce858b36",
+      "elapsed": 1.144
+    },
+    {
+      "id": "zh-no-evidence",
+      "result": {
+        "text": "预算3500元。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "预算3500元。",
+      "system_prompt_sha256": "c32d6791a7ad34ed420f1542dbad3e6fe3f30058808dc0e13fa0e233ac267661",
+      "elapsed": 1.13
+    },
+    {
+      "id": "en-no-evidence",
+      "result": {
+        "text": "The amount is 900 dollars.",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "The amount is 900 dollars.",
+      "system_prompt_sha256": "ae44fae17479fe5cdca9580d685cb6300c7fb09c93a9101f2dd439e5ce858b36",
+      "elapsed": 1.155
+    },
+    {
+      "id": "zh-equivalent-number-spelling",
+      "result": {
+        "text": "预算一百元，买三件。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "预算一百元，买三件。",
+      "system_prompt_sha256": "d28e8279e79ae2db6b3d29b2c781c9afce16dbd0ac8ae6c2c0fb720a001a90ff",
+      "elapsed": 1.156
+    },
+    {
+      "id": "en-equivalent-number-spelling",
+      "result": {
+        "text": "Pay 100 dollars for 3 items.",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "Pay 100 dollars for 3 items.",
+      "system_prompt_sha256": "ae44fae17479fe5cdca9580d685cb6300c7fb09c93a9101f2dd439e5ce858b36",
+      "elapsed": 1.202
+    },
+    {
+      "id": "zh-decimal-percentage",
+      "result": {
+        "text": "利率3.5%，余额-0.5元。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "利率3.5%，余额-0.5元。",
+      "system_prompt_sha256": "d28e8279e79ae2db6b3d29b2c781c9afce16dbd0ac8ae6c2c0fb720a001a90ff",
+      "elapsed": 1.222
+    },
+    {
+      "id": "en-decimal",
+      "result": {
+        "text": "The balance is -0.5 dollars.",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "The balance is -0.5 dollars.",
+      "system_prompt_sha256": "ae44fae17479fe5cdca9580d685cb6300c7fb09c93a9101f2dd439e5ce858b36",
+      "elapsed": 1.193
+    },
+    {
+      "id": "zh-utterance-confirmation",
+      "result": {
+        "text": "预算100元，最终确认金额是101元。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": false,
+      "model_body_unchanged": true,
+      "raw_output": "预算100元，最终确认金额是101元。",
+      "system_prompt_sha256": "d28e8279e79ae2db6b3d29b2c781c9afce16dbd0ac8ae6c2c0fb720a001a90ff",
+      "elapsed": 1.271
+    },
+    {
+      "id": "en-utterance-confirmation",
+      "result": {
+        "text": "The amount is 100 dollars. The final confirmed amount is 101 dollars.",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": false,
+      "model_body_unchanged": true,
+      "raw_output": "The amount is 100 dollars. The final confirmed amount is 101 dollars.",
+      "system_prompt_sha256": "ae44fae17479fe5cdca9580d685cb6300c7fb09c93a9101f2dd439e5ce858b36",
+      "elapsed": 1.366
+    },
+    {
+      "id": "zh-current-change-beats-old-context",
+      "result": {
+        "text": "预算改为102元。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "预算改为102元。",
+      "system_prompt_sha256": "d28e8279e79ae2db6b3d29b2c781c9afce16dbd0ac8ae6c2c0fb720a001a90ff",
+      "elapsed": 1.195
+    },
+    {
+      "id": "en-current-change-beats-old-context",
+      "result": {
+        "text": "Change the amount to 102 dollars.",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "Change the amount to 102 dollars.",
+      "system_prompt_sha256": "ae44fae17479fe5cdca9580d685cb6300c7fb09c93a9101f2dd439e5ce858b36",
+      "elapsed": 1.23
+    },
+    {
+      "id": "zh-user-edit-wins",
+      "result": {
+        "text": "预算200元。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "预算200元。",
+      "system_prompt_sha256": "c32d6791a7ad34ed420f1542dbad3e6fe3f30058808dc0e13fa0e233ac267661",
+      "elapsed": 1.198
+    },
+    {
+      "id": "en-user-edit-wins",
+      "result": {
+        "text": "The amount is 210 dollars.",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "The amount is 210 dollars.",
+      "system_prompt_sha256": "ae44fae17479fe5cdca9580d685cb6300c7fb09c93a9101f2dd439e5ce858b36",
+      "elapsed": 1.231
+    },
+    {
+      "id": "zh-voice-translation",
+      "result": {
+        "text": "The budget is 101 yuan.",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "The budget is 101 yuan.",
+      "system_prompt_sha256": "bece0ebc7b5f9b27de42d2c4526b7de0220e65f3d17469eafdc5b55c3a09f2d3",
+      "elapsed": 0.923
+    },
+    {
+      "id": "en-voice-translation",
+      "result": {
+        "text": "预算为101元。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "预算为101元。",
+      "system_prompt_sha256": "40c6929d4819ccae92f2c53d411072639dfe11dfa0cee60f95bd1eddd3edef09",
+      "elapsed": 0.912
+    },
+    {
+      "id": "zh-verbatim-numbers",
+      "result": {
+        "text": "呃，预算一百元。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "呃，预算一百元。",
+      "system_prompt_sha256": "23cef7a313b5ba4fd621d3daf4e494f15c2d866e9cc114979f213c6e122c84b9",
+      "elapsed": 1.077
+    },
+    {
+      "id": "zh-lexical-words",
+      "result": {
+        "text": "一些建议，一起统一格式，四川周五开会，预算100元。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "一些建议，一起统一格式，四川周五开会，预算100元。",
+      "system_prompt_sha256": "d28e8279e79ae2db6b3d29b2c781c9afce16dbd0ac8ae6c2c0fb720a001a90ff",
+      "elapsed": 1.376
+    }
+  ],
+  "passed": 20,
+  "failed": [
+    "zh-utterance-confirmation",
+    "en-utterance-confirmation"
+  ]
+}

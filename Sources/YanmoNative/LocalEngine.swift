@@ -1,13 +1,14 @@
 import Foundation
 
-struct EngineError: LocalizedError {
-    var message: String
-    var writeAttempted = false
-    var errorDescription: String? { message }
+public struct EngineError: LocalizedError {
+    public var message: String
+    public var writeAttempted = false
+    public var errorDescription: String? { message }
+    public init(message: String, writeAttempted: Bool = false) { self.message = message; self.writeAttempted = writeAttempted }
 }
 
 /// A private, serial stdin/stdout connection. No HTTP server or open port.
-final class LocalEngine: @unchecked Sendable {
+public final class LocalEngine: @unchecked Sendable {
     private let queue = DispatchQueue(label: "org.yanmo.inference", qos: .userInitiated)
     private let lock = NSLock()
     private var process: Process?
@@ -21,14 +22,14 @@ final class LocalEngine: @unchecked Sendable {
     private var idleTask: DispatchWorkItem?
     private var idleGeneration = UUID()
 
-    init(idleTimeout: TimeInterval = 3600, workerURL: URL? = nil) {
+    public init(idleTimeout: TimeInterval = 3600, workerURL: URL? = nil) {
         self.idleTimeout = idleTimeout
         self.workerURL = workerURL
     }
 
     /// Recording and the full processing pipeline count as activity, even when
     /// no worker request is in flight (microphone permission, cursor insertion).
-    func setActive(_ active: Bool) {
+    public func setActive(_ active: Bool) {
         queue.async {
             self.active = active
             self.cancelIdleUnload()
@@ -63,14 +64,14 @@ final class LocalEngine: @unchecked Sendable {
         queue.asyncAfter(wallDeadline: .now() + idleTimeout, execute: task)
     }
 
-    func stop() {
+    public func stop() {
         lock.lock()
         let running = process
         lock.unlock()
         if running?.isRunning == true { running?.terminate() }
     }
 
-    func request(_ payload: [String: Any], python: String) async throws -> [String: Any] {
+    public func request(_ payload: [String: Any], python: String) async throws -> [String: Any] {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
                 self.cancelIdleUnload()
@@ -133,7 +134,7 @@ final class LocalEngine: @unchecked Sendable {
         let process = Process()
         let stdin = Pipe(), stdout = Pipe()
         process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = ["-u", worker.path]
+        process.arguments = ["-B", "-u", worker.path]
         var environment = ProcessInfo.processInfo.environment
         environment["PYTHONUNBUFFERED"] = "1"
         environment["HF_HUB_OFFLINE"] = "1"

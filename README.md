@@ -2,114 +2,147 @@
 
 **言语之间，自有笔墨。**
 
-一个以中文表达为中心、采用宣纸与墨色视觉的开源本地语音输入工具。首版为 Apple Silicon macOS 原生应用，使用 SwiftUI / AppKit 构建；音频识别和文字整理通过独立的本机 MLX 进程完成。
+以中文表达为中心的本地语音输入工具，采用宣纸、墨色与朱砂视觉。0.4 开始使用 Electron + React 重建桌面端，Python 推理后端独立运行；当前已交付 Apple Silicon Mac 的 MLX 开发版本。
 
-![言墨主窗口设计参考](docs/design/main-window-v1.png)
+> A local-first, offline voice input app for macOS (Apple Silicon). Press FN, speak, and the text lands in whatever input box has focus — ASR (Qwen3-ASR + SenseVoice) and the cleanup LLM (Qwen3-4B) run entirely on your Mac via MLX.
 
-## 当前功能
+[![宣传片](docs/promo-poster.jpg)](https://github.com/Happenmass/Yanmo/releases/download/v0.4.0/Yanmo-promo.mp4)
 
-- 按 Fn 开始／结束录音，Esc 取消；支持录制、增删、保存多组自定义快捷键，包括单独左／右 Control、Control＋Shift 等纯修饰键；纯修饰键松开后触发，搭配普通按键或鼠标操作时不会触发。默认备用键为 ⌃⌥ Space。
-- 支持 Control＋空格作为划词翻译等入口的自定义快捷键，需要辅助功能权限。配置后该组合由言墨优先处理；移除该绑定后恢复系统原有行为，不修改系统快捷键设置。
-- 200×36 pt 黑墨浮层：真实音量、计时、取消、完成与处理结果。录音无提示音，无麦克风监听回放；界面仅做短暂淡入淡出。
-- 首页只呈现使用统计、落笔日历、快捷键指引和最近文稿，录音反馈集中在浮层。
-- Qwen3-ASR 本地语音识别，MLX-LM 本地文字整理；可以关闭整理或选择保留原话。
-- 连续空闲 1 小时后自动退出推理进程，释放模型与 GPU 缓存；下次录音启动后后台预加载，连续输入复用已加载模型。
-- 口述翻译：默认 ⌃⌥T 开始／结束，说完后直接译成目标语言并写入原输入框。
-- 划词翻译：选中文字后按 ⌃⌥S，在独立宣纸弹窗查看原文和译文，可切换语言、重新翻译或复制。
-- 翻译弹窗支持 Markdown 标题、粗体、列表、引用、表格、链接与代码着色；可切换排版／源码、展开原文、单独复制代码。复制译文保留 Markdown。
-- 翻译首版支持英语、简体中文、日语、德语。两种翻译入口各自保存目标语言与多组快捷键，在「设置 → 快捷键与翻译」中修改；默认目标均为英语。三种功能不允许绑定同一快捷键。
-- 导入 5 分钟以内音频；识别结果可编辑、复制、导出纯文本。
-- 本地文稿历史与保留周期；个人词库支持编辑、备注和明确的误识别词纠正。
-- 麦克风设备选择、整理风格持久化、登录启动与 Dock 显示设置。
-- 从快捷键启动时记录目标输入框，悬停浮层可查看目标应用。目标仍在前台时使用标准粘贴；支持的背景原生控件可直接写入原选区并读回校验。原选区改变或无法确认结果时，保留正文和写入说明。
+▶ [观看 32 秒宣传片](https://github.com/Happenmass/Yanmo/releases/download/v0.4.0/Yanmo-promo.mp4)
 
-0.3 是开发预览。当前一次使用一个 ASR；提示词支持融合多份候选，但没有启动多引擎投票。未实现屏幕 OCR、问答、跨平台客户端或云同步。
+![主窗口](docs/design/main-window-v2.png)
 
-## 本机运行
+## 下载安装
 
-要求：Apple Silicon、macOS 14+、Swift 5.9+（Xcode Command Line Tools）、Python 3.12。MLX 需要能访问 Metal 的本机环境。
+从 [Releases](https://github.com/Happenmass/Yanmo/releases/latest) 下载 `Yanmo-<版本>-mac-arm64.zip`，解压后把 `言墨.app` 拖入「应用程序」。要求 Apple Silicon、macOS 14+。
+
+当前为 ad-hoc 签名、未经 Apple 公证的预览版，首次打开会被 Gatekeeper 拦截。确认来源后执行：
 
 ```bash
-# 安装 Python 依赖（需要 uv；只在准备阶段联网）
-./scripts/setup.sh
-
-# 显式准备模型，优先检查和复用用户全局缓存
-.venv/bin/python scripts/prepare-models.py
-
-# 构建原生应用
-./scripts/build.sh
+xattr -dr com.apple.quarantine /Applications/言墨.app
 ```
 
-构建产物是 `dist/言墨.app`，双击即可打开。首版的 Python 解释器仍在应用外，由设置页指定；移动到另一台电脑后需准备该机器的环境并更新解释器路径。当前为本机 ad-hoc 签名开发构建，尚未公证或制作独立安装包。
+然后在「设置 → 本地模型」点击「准备模型」（默认从 ModelScope 下载约 5 GB 权重到用户全局缓存，仅此一步需要联网），并按提示授予麦克风与辅助功能权限。
 
-也可以复用已有 Python 环境和已缓存的 MLX 文本模型：
+## 当前版本
+
+Mac 版保留原型的主要功能：
+
+- 默认 FN 开始／结束语音输入，FN + Shift 口述翻译，FN + 空格划词翻译，Esc 取消；支持自定义多组快捷键和左右纯修饰键。键名使用 FN、Control、Option、Command、Shift；纯修饰键组合全部松开时触发，参与打字或鼠标组合时不触发。更新默认值不会覆盖已保存的自定义配置，设置中可逐项恢复默认。
+- 静音的 200×36 pt 黑墨浮层，显示真实音量、计时、取消和完成；不抢走原输入框焦点。
+- 本机 Qwen3-ASR 先识别并判断语言；中文、英文再用 SenseVoice Small 复核。两路对等结合上下文纠错，可在文稿中对照；数字按语义自然呈现，精确金额等优先使用阿拉伯数字。可关闭语气整理、保留原话或选择即时消息／文档风格。
+- 转录和本地整理保留识别原文的语言：日语仍输出日语，混合语言逐段保留；中文上下文和翻译目标设置不会把转录改成中文。只有翻译模式转换语言。
+- 口述翻译直接执行识别→翻译→写入；划词翻译在可拖动的独立宣纸窗口显示，按普通窗口层级切换，不替换选区、不保存历史。
+- 两种翻译分别保存目标语言和快捷键，支持英语、简体中文、日语、德语。
+- Markdown 译文排版／源码、代码着色和代码复制；围栏代码与行内代码由程序保护，不执行 HTML 或加载远程图片。
+- 统计首页、20 周落笔日历、文稿搜索／编辑／复制／导出、个人词库及误识别纠正。
+- 导入 5 分钟以内的音频、麦克风选择、历史保留周期和登录启动。关闭主窗口后隐藏程序坞图标，仅保留菜单栏及快捷键；菜单栏图标左键打开主窗口，右键打开菜单，重新打开窗口时按偏好恢复程序坞图标。
+- 录音与输入框可读性分离；可读正文只作上下文，读取失败仍正常录音。
+- 正文生成后向当时前台应用的当前焦点粘贴一次，允许途中切换应用、窗口和光标；文稿保留正文，导入音频仅生成文稿。
+- 连续空闲 1 小时退出推理进程；录音开始后后台预加载，连续输入复用已加载模型。
+
+模型下载来源默认 **ModelScope**，准备时先复用完整的全局缓存；日常推理不自动下载或上传输入。SenseVoice Small 共用一份多语言权重，按 Qwen 检测出的中文、英文分别指定 `zh`、`en`；其他语言或未知语言跳过复核。
+
+Electron、Swift 系统桥接和独立 Python/MLX 运行时均随应用包交付，权重另存用户全局缓存。当前是 ad-hoc 签名的本机开发构建，尚未完成公证及干净机器验收。Mac 可明确启用 OpenAI 兼容的在线接口，默认仍走本机；Windows WSL2/vLLM 与 CUDA 预检查留待后续。
+
+[重构方案](docs/architecture/electron_00_Overview_顶层架构.md) · [本轮实现与验证](docs/electron-mac-2026-10-21.md)
+
+## 构建与启动
+
+使用环境：Apple Silicon、macOS 14+；构建需要 Node.js 24、npm、Xcode Command Line Tools、Python 3 与 uv。当前实测环境为 macOS 26.6.2 / arm64，其他系统版本尚未逐一验收。
 
 ```bash
-YANMO_PYTHON=/absolute/path/to/python \
-YANMO_LLM=your-org/your-cached-mlx-model \
-./scripts/build.sh
+npm ci
+uv python install 3.12.12
+npm run runtime:mac
+npm run build
+npm start
 ```
 
-模型 ID 或完整目录均可在设置中修改。首次检查只验证模型文件缓存；首次推理会加载权重。
+首次进入「设置 → 本地模型」，点击「准备模型」。默认从 ModelScope 准备；也可以选择 Hugging Face，或填写完整的本地模型目录。已有完整缓存会直接复用。准备阶段需要网络，处理录音时保持离线。
 
-## 使用权限
+命令行准备模型：
 
-首次录音由系统请求麦克风权限。启用 Fn 监听和跨应用写入需要在「系统设置 → 隐私与安全性 → 辅助功能」中允许言墨；设置页提供入口，授权后点击「重新检查权限」。未授权时可导入音频、复制正文，并使用 ⌃⌥ Space 启动录音。
+```bash
+runtime/macos/python/bin/python3.12 scripts/prepare-models.py
+# 可选：--source huggingface --asr 模型ID --sensevoice 模型ID --llm 模型ID
+```
 
-本机 ad-hoc 开发签名随代码构建变化。如果系统显示已授权而当前版本仍未获得权限，请在辅助功能列表中移除旧的言墨条目，用「+」重新选择当前的 `dist/言墨.app`，然后回言墨检查权限。正式分发前需要稳定的发布签名。
+构建包含运行时的应用：
 
-如果 Typeless 或其他应用也使用 Fn，请只保留一个应用响应这个快捷键。言墨只拦截单独的 Fn，Fn 与其他键组合不会触发录音。特殊输入控件可能无法读回或验证写入结果，此时会提示用户检查，正文仍可复制。密码输入框不支持语音输入。
+```bash
+npm run package:mac
+open dist-electron/mac-arm64/言墨.app
+```
 
-在其他应用输入框中按快捷键启动，会尝试写入那个输入框；在言墨内发起时保留为文稿。失败或无法核验结果时以浮层提示，不主动弹出主窗口。
+产物 `dist-electron/mac-arm64/言墨.app` 可以移出项目目录运行，不需要另外安装 Python、uv 或 Homebrew。当前应用包约 800 MB（763 MiB），不含模型权重。发布到其他机器前仍需稳定签名、公证及系统权限验收。
 
-本机开发预览已由用户完成文本编辑和 ChatGPT 输入框的实体 Fn 口述验收；详细检查记录在 [验证文档](docs/verification-2026-10-21.md)。
+旧 0.3 应用包已移除，当前只使用上述 0.4 应用。`./scripts/build.sh` 同样调用新版打包入口；原 SwiftUI 源码仅保留作迁移对照。
 
-调试构建的「File → 验证麦克风采集（三秒）」可检查指定设备生成的 WAV 并立即删除临时音频。「File → 验证文本编辑写入」提供写入回归检查：对已打开的文本编辑测试文稿插入一行明确标注的测试文字，使用与语音输入相同的选区核验与写入路径，不录音、不调用模型。发布构建不包含该命令。
+## 权限与使用
 
-翻译调试命令：「File → 验证前台划词翻译（三秒后）」留出三秒切回目标应用并划选，之后走正常的前台富文本读取路径；「File → 验证文本编辑划词翻译」读取文本编辑当前选区并运行真实本地翻译；「验证翻译写入」把固定的合成测试句译为当前口述目标语言，再写入文本编辑。请使用测试文稿；这两个命令用于检查模型与跨应用读写，不替代实体快捷键和麦克风口述验收。
+首次录音由 macOS 请求麦克风权限。FN、纯修饰键与跨应用写入需要在「系统设置 → 隐私与安全性 → 辅助功能」中允许当前的言墨应用；设置页提供权限入口与重新检查。
 
-划词翻译支持单次 4000 字以内的可复制文本。前台应用会自动复制当前选区，优先将 HTML 富文本转换为 Markdown，并恢复原剪贴板；辅助功能选区用来校验范围及在复制失败时回退。没有选区时提示重新选择，不使用旧剪贴板作为输入。图片文字暂不支持。译文弹窗不会自动替换选区，关闭后清除本次原文与译文，不保存到历史。口述翻译仍遵循文稿保留设置，翻译失败时保留识别原文，不自动粘贴原文。
+ad-hoc 开发签名随构建变化。若系统显示已授权但当前版本仍无法使用，请移除旧条目，重新添加当前应用，再点击重新检查。与其他使用 FN 的软件同时运行时，快捷键可能冲突。
 
-Markdown 翻译保留原有结构，围栏代码块和行内代码在推理前暂存、校验后原样还原，避免翻译代码里的字符串或注释。纯代码无需调用 LLM。颜色由本机渲染器统一提供，不让模型生成 HTML/CSS；不执行代码、不下载远程图片。直接选中已渲染回答也可保留标题、加粗、列表、表格与代码块，前提是来源应用复制选区时提供 HTML。只提供纯文本时保持原有翻译流程；不复刻来源页面的 CSS、字号或配色。详细验证见 [Markdown 翻译](docs/markdown-translation-2026-10-21.md)。
+按快捷键开始录音，正文生成后粘贴到当时的当前输入位置；期间可以切换应用、窗口、聊天或光标。输入框不可读时仍正常录音，只是不提供其正文作为上下文。结果同时保留为文稿；导入音频仅生成文稿。
 
-## 隐私与模型
+划词翻译一次支持 4000 字以内的可复制文本。优先读取复制提供的 HTML 并转换为 Markdown，随后恢复剪贴板；无有效选区时不使用旧剪贴板。关闭译文窗口会清除本次原文与译文。
 
-运行阶段设置 `HF_HUB_OFFLINE=1` 和 `TRANSFORMERS_OFFLINE=1`；没有模型时直接提示，默认不上传音频、上下文或文本。应用与推理进程通过 stdin/stdout 通信，不启动 HTTP 服务。
+## 隐私、缓存与迁移
 
-- 默认 ASR：`mlx-community/Qwen3-ASR-1.7B-8bit`。
-- 默认整理模型：`mlx-community/Qwen3-4B-Instruct-2507-4bit`；可更换兼容 MLX-LM 的模型。
-- 两种翻译复用该模型，使用独立的翻译提示词。口述翻译走 ASR → 翻译，不额外执行文字整理；关闭文字整理不关闭翻译。
-- 权重默认位于 `~/.cache/huggingface/`，项目与应用包内均不复制模型。
-- 临时录音在正常处理结束或取消后删除；应用或系统意外崩溃时可能在系统临时目录留下录音文件。
-- 光标前后文读取默认关闭。启用后各读取最多 300 字，仅用于本机整理；不执行屏幕截图或 OCR。
-- 文稿与词库位于 `~/Library/Application Support/Yanmo/library.json`；设置保存在 macOS UserDefaults。
-- 保存历史默认开启，保留周期默认为一直保留。缩短周期涉及已有文稿时先确认；随后按所选周期清理。关闭新文稿保存不改变已有保留策略。
+- 默认 ASR：`mlx-community/Qwen3-ASR-1.7B-8bit`；中英复核：`mlx-community/SenseVoiceSmall`；文字模型：`mlx-community/Qwen3-4B-Instruct-2507-4bit`。SenseVoice 权重约 936 MB，首次准备时从 ModelScope 下载到全局缓存。
+- ModelScope 缓存：`~/.cache/codex/models/modelscope/`，可通过 `MODELSCOPE_CACHE` 指定其他用户全局位置；同时复用 SDK 既有缓存与 `~/.cache/huggingface/`。不在项目和安装包中复制权重。
+- Python 后端仅监听 `127.0.0.1` 动态端口，以每次启动的随机密钥认证；主进程通过私有管道取得端口。Renderer 不持有密钥或音频路径。
+- 运行时设置 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`，模型定位只使用本地缓存；显式准备模型在单独进程中执行。
+- 录音、正文、词库和上下文默认留在本机；光标上下文默认关闭，启用后在录音开始时读取输入框光标前后各最多 300 字，同一快照用于 Qwen ASR 和纠错 LLM，不截图或 OCR。SenseVoice 独立识别，不接收文本提示；输入框不支持辅助功能读取时上下文为空。
+- Electron 数据在 `~/Library/Application Support/Yanmo/electron/`；文件权限为 600，目录为 700，原子保存。
+- 首次启动复制旧版 `library.json`、保存迁移备份，并导入 macOS UserDefaults 中的快捷键、语言及隐私设置；保留旧数据源。损坏文件暂停覆盖保存。
+- 测试可用 `YANMO_DATA_DIR` 指定隔离数据目录，此时不导入个人数据。
+- 临时音频在正常结束、取消或受控退出后删除；系统强制终止时仍可能残留在系统临时目录。
 
-LLM 整理是概率输出，需要核对关键名称、金额、时间和否定。单路转写中的数字先替换为受保护标记，校验数量和顺序后原样还原；缺失或改写时拒绝自动写入。应用保留识别原文；整理失败时不会自动写入降级原文。
-
-数字保护会跳过“一些、一起、统一”等常见非数值用法，允许合并口语重复。断裂口语仍有已知质量不足；当前4B、候选8B/9B的实测与保留当前模型的依据见 [整理质量对照](docs/polish-evaluation-2026-10-21.md)。
+正文质量由提示词和模型负责：两路结合上下文纠错、保留转录原语言、翻译到指定语言，以及数字按语义自然呈现。模型只返回最终正文，程序原样采用；空输出、生成截断、取消和运行失败保留识别原文供重试。手动修改后，后续整理以用户修订为准。当前行为与评测入口见[双路识别与正文生成](docs/asr-fusion.md)。
 
 ## 开发与验证
 
 ```bash
+npm test
+npm run typecheck
+runtime/macos/python/bin/python3.12 -m unittest discover -s engine -v
+runtime/macos/python/bin/python3.12 -m unittest discover -s backend -v
+runtime/macos/python/bin/python3.12 scripts/evaluate-fusion.py
+runtime/macos/python/bin/python3.12 scripts/check-transcription-language.py
+runtime/macos/python/bin/python3.12 scripts/check-translation-output.py --output /tmp/yanmo-translation-output.json
 swift run YanmoChecks
-python3 -m unittest discover -s engine -v
-swiftc -parse-as-library Sources/Yanmo/LocalEngine.swift Tests/EngineLifecycleChecks.swift -o .build/EngineLifecycleChecks
-.build/EngineLifecycleChecks
+swift run YanmoInputChecks
+swift run YanmoLifecycleChecks
+npm run test:desktop
 ```
 
-核心检查使用不依赖 XCTest 的可执行程序，兼容只安装 Command Line Tools 的开发环境。
+不公开辅助功能输入控件的编辑器可用隔离窗口验证，需已有辅助功能授权；测试只粘贴合成文字，验证一次写入、切换窗口后写入新的当前焦点，并自动退出清理：
 
-`engine/worker.py` 使用逐行 JSON 协议，支持 `check`、`warmup`、`transcribe`、`polish`、`translate`、`unload`。`translate` 接受 `text`、`target_language`（`en` / `zh-Hans` / `ja` / `de`），以及可选的 `llm_model` 和 `key_terms`。标准输出仅包含协议响应，诊断信息不持久保存。小模型与 ASR 分别驻留，连续输入免于反复加载；用户选择权重超过 6 GB 的 LLM 时仍会在识别与整理之间卸载切换。
+```bash
+swift build -c release --product YanmoBridge
+node --import tsx scripts/check-opaque-input.mts
+```
 
-空闲计时由应用管理，生产值固定为 3600 秒。录音与完整处理流程会暂停倒计时，操作结束或请求完成后重新计时；到期在推理串行队列退出工作进程，不删除磁盘权重。睡眠跨过期限时，在唤醒后执行到期任务。录音先启动采集，再发出 `warmup`：加载 ASR，需要整理或翻译时一并加载不超过 6 GB 的 LLM；大型自选 LLM 保留按需加载，避免提前挤出 ASR。预加载失败不会中断录音，正式处理会重试并报告错误。生命周期检查使用缩短的超时和独立测试进程，验证退出、重启、录音保护、长请求保护与计时重置。
+只检查某个已运行应用能否保留录音目标（不读正文、不粘贴）：`node --import tsx scripts/check-input-capture.mts <bundle-id>`。`YANMO_QA_BRIDGE` 可指定打包后的 helper 路径。
 
-当前小模型与体验修订记录见 [0.2 验证与功能对照](docs/iteration-0.2.md)，可复跑 `scripts/benchmark.py`。
+真实模型界面检查使用合成音频及隔离文稿，不读取个人口述历史：
 
-翻译功能与验证范围见 [0.3 翻译验证](docs/translation-0.3.md)，可用具备 MLX 依赖的 Python 运行 `scripts/benchmark-translation.py` 复跑四种语言的真实模型检查。
+```bash
+say -v Tingting -o /tmp/yanmo-synthetic.aiff '今天测试语音输入。预算三千五百元，周五交付，不是周四。'
+YANMO_QA_AUDIO=/tmp/yanmo-synthetic.aiff npm run test:desktop
+```
 
-视觉最初依据用户在 2026-10-21 确认的 [主窗口与 Fn 浮层 v1](docs/design/README.md)，完整生成提示词一并保存；后续依据用户反馈改为统计首页、静音小浮层，去除装饰动效。代码和图标为独立实现，不包含 Typeless 客户端资产。
+设置 `YANMO_QA_APP=/完整路径/言墨.app/Contents/MacOS/言墨` 可检查打包应用。`swift run YanmoShortcutChecks`直接检查监听函数，不向系统发送输入。可选的旧版 `YANMO_QA_NATIVE=1` TextEdit 组合脚本使用 AppleScript，本轮未执行；当前原生交互经 CUA 检查。自动化不代替实体 FN 口述验收。
+
+桌面测试在隔离配置中默认关闭程序坞图标；只有显式设置 `YANMO_QA_DOCK=1` 才运行会反复切换程序坞的系统检查，避免常规回归影响当前桌面。测试结束后应确认没有遗留测试主进程。
+
+关键入口：`desktop/controller.ts` 管理任务，`desktop/processes.ts` 管理子进程及通信，`Sources/YanmoBridge/` 管理系统能力，`backend/server.py` 提供认证 HTTP/SSE，`backend/pipeline.py` 组织推理，`engine/mlx_provider.py` 实现 MLX。原逐行 JSON worker 仍用于原生原型。
+
+视觉与动效依据 [已确认设计](docs/design/README.md)。原生版本的 [输入验证](docs/verification-2026-10-21.md)、[翻译](docs/translation-0.3.md)、[Markdown](docs/markdown-translation-2026-10-21.md) 可作为迁移对照。
 
 ## 许可证
 
-项目代码使用 [MIT License](LICENSE)。模型权重和第三方依赖各自遵循原许可证，未随代码分发。
+项目代码使用 [MIT License](LICENSE)。模型权重和第三方依赖遵循各自许可证；ASR与LLM权重不随代码或应用包分发，轻量离线语种分类器随Python依赖提供。

@@ -1,3 +1,4 @@
+import YanmoNative
 import SwiftUI
 import YanmoCore
 
@@ -286,7 +287,7 @@ struct PreferencesView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("跨应用输入").font(.system(size: 13, weight: .medium))
-                            Text(model.fnReady ? "轻按开始，再按结束；Esc 取消。" : "辅助功能授权后启用 Fn；也可先用 ⌃⌥ Space。")
+                            Text(model.fnReady ? "轻按开始，再按结束；Esc 取消。" : "辅助功能授权后启用 FN 快捷键。")
                                 .font(.system(size: 11)).foregroundStyle(Ink.muted)
                         }
                         Spacer()

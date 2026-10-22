@@ -33,7 +33,7 @@
 
 选择依据：[Qwen 官方模型卡](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507)注明该版本是非思考模型、Apache 2.0；[MLX 量化仓库](https://huggingface.co/mlx-community/Qwen3-4B-Instruct-2507-4bit)提供本机加载格式。
 
-首次直接测试发现小模型会改写中文金额，因此单路转写先把数字替换为占位标记，检查输出标记的数量、顺序及新数字，再原样还原。违反校验时保留原文、不自动写入。词库明确别名在模型前替换，避免连锁替换。该保护只约束数字，不代表其他内容一定正确。
+当前正文生成与词库消歧统一由模型提示词负责，见[双路识别与正文生成](asr-fusion.md)。以下耗时是0.2原型的历史测量，不是当前流程的质量验收。
 
 实测脚本 `scripts/benchmark.py`；结果 `model-benchmark-2026-10-21.json`：
 

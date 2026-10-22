@@ -3,12 +3,12 @@ import AVFoundation
 import AudioToolbox
 import CoreAudio
 
-struct AudioInput: Identifiable {
-    var id: String
-    var deviceID: AudioDeviceID
-    var name: String
+public struct AudioInput: Identifiable {
+    public var id: String
+    public var deviceID: AudioDeviceID
+    public var name: String
 
-    static func available() -> [AudioInput] {
+    public static func available() -> [AudioInput] {
         var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var size: UInt32 = 0
         guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size) == noErr else { return [] }
@@ -32,15 +32,16 @@ struct AudioInput: Identifiable {
 }
 
 /// Per-process input selection; never changes the computer's default microphone.
-final class AudioRecorder: @unchecked Sendable {
+public final class AudioRecorder: @unchecked Sendable {
+    public init() {}
     private var engine: AVAudioEngine?
     private var url: URL?
     private let lock = NSLock()
     private var power = 0.0
     private var writeError: Error?
-    var level: Double { lock.lock(); defer { lock.unlock() }; return power }
+    public var level: Double { lock.lock(); defer { lock.unlock() }; return power }
 
-    func start(deviceUID: String = "") async throws {
+    public func start(deviceUID: String = "") async throws {
         let allowed = await AVCaptureDevice.requestAccess(for: .audio)
         guard allowed else { throw EngineError(message: "请在系统设置中允许言墨使用麦克风，或先导入音频体验。") }
         let engine = AVAudioEngine()
@@ -84,12 +85,12 @@ final class AudioRecorder: @unchecked Sendable {
             throw error
         }
     }
-    func finish() -> URL? {
+    public func finish() -> URL? {
         engine?.stop(); engine?.inputNode.removeTap(onBus: 0); engine = nil
         let result = url; url = nil
         lock.lock(); let failed = writeError != nil; power = 0; lock.unlock()
         if failed, let result { try? FileManager.default.removeItem(at: result); return nil }
         return result
     }
-    func cancel() { if let url = finish() { try? FileManager.default.removeItem(at: url) } }
+    public func cancel() { if let url = finish() { try? FileManager.default.removeItem(at: url) } }
 }

@@ -1,0 +1,531 @@
+{
+  "date": "2026-10-22T06:35:24.665201+00:00",
+  "method": "macOS say synthetic audio; real cached offline Qwen3-ASR + SenseVoice + Qwen3-4B; integration checks, not an accuracy benchmark",
+  "prompt_sha256": "d5aecd73a42f1ef34ccad72aaab317ed0bb712d34ff8d9fa4a52b12bc38e8b92",
+  "fixtures": {
+    "zh": {
+      "voice": "Tingting",
+      "spoken": "周五下午三点开会，预算三千五百元，不是周四。",
+      "language": "Chinese",
+      "contains_any": [
+        [
+          "3点",
+          "三点"
+        ],
+        [
+          "3500元",
+          "三千五百元"
+        ]
+      ]
+    },
+    "en": {
+      "voice": "Samantha",
+      "spoken": "Please schedule the meeting for Friday at three p.m. The budget is three thousand five hundred dollars, not four thousand.",
+      "language": "English",
+      "contains_any": [
+        [
+          "three p.m.",
+          "3 p.m.",
+          "3 PM",
+          "3pm",
+          "three PM"
+        ],
+        [
+          "3500",
+          "3,500",
+          "three thousand five hundred"
+        ],
+        [
+          "4000",
+          "4,000",
+          "four thousand"
+        ]
+      ]
+    },
+    "ja": {
+      "voice": "Kyoko",
+      "spoken": "金曜日の午後三時に会議を開きます。予算を確認してください。",
+      "language": "Japanese",
+      "contains_any": [
+        [
+          "3時",
+          "三時"
+        ]
+      ]
+    }
+  },
+  "cases": [
+    {
+      "id": "zh",
+      "context": {},
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing",
+          "elapsed": 0.0
+        },
+        {
+          "event": "transcript",
+          "text": "周五下午三点开会，预算三千五百元，不是周四。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "周五下午三点开会，预算三千五百元，不是周四。",
+              "language": "Chinese",
+              "language_source": "detected"
+            }
+          ],
+          "elapsed": 1.601
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing",
+          "elapsed": 1.601
+        },
+        {
+          "event": "transcript",
+          "text": "周五下午三点开会，预算三千五百元，不是周四。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "周五下午三点开会，预算三千五百元，不是周四。",
+              "language": "Chinese",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "周五下午3点开会预算3500元，不是周四。",
+              "language": "Chinese",
+              "language_source": "forced"
+            }
+          ],
+          "elapsed": 1.7
+        },
+        {
+          "event": "stage",
+          "stage": "polishing",
+          "elapsed": 1.7
+        },
+        {
+          "event": "result",
+          "text": "周五下午3点开会，预算3500元，不是周四。",
+          "original": "周五下午三点开会，预算三千五百元，不是周四。",
+          "processed": true,
+          "elapsed": 4.219
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "en",
+      "context": {},
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing",
+          "elapsed": 0.0
+        },
+        {
+          "event": "transcript",
+          "text": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+              "language": "English",
+              "language_source": "detected"
+            }
+          ],
+          "elapsed": 0.387
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing",
+          "elapsed": 0.387
+        },
+        {
+          "event": "transcript",
+          "text": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+              "language": "English",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "Please schedule a meeting for Friday at 3 pm. The budget is $3,500, not $4000.",
+              "language": "English",
+              "language_source": "forced"
+            }
+          ],
+          "elapsed": 0.417
+        },
+        {
+          "event": "stage",
+          "stage": "polishing",
+          "elapsed": 0.417
+        },
+        {
+          "event": "result",
+          "text": "Please schedule the meeting for Friday at 3 p.m. The budget is $3,500, not $4,000.",
+          "original": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+          "processed": true,
+          "elapsed": 1.858
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "ja",
+      "context": {},
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing",
+          "elapsed": 0.0
+        },
+        {
+          "event": "transcript",
+          "text": "金曜日の午後三時に会議を開きます。予算を確認してください。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "金曜日の午後三時に会議を開きます。予算を確認してください。",
+              "language": "Japanese",
+              "language_source": "detected"
+            }
+          ],
+          "elapsed": 0.3
+        },
+        {
+          "event": "stage",
+          "stage": "polishing",
+          "elapsed": 0.3
+        },
+        {
+          "event": "result",
+          "text": "金曜日の午後3時に会議を開きます。予算を確認してください。",
+          "original": "金曜日の午後三時に会議を開きます。予算を確認してください。",
+          "processed": true,
+          "elapsed": 1.582
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "zh-context",
+      "context": {
+        "before": "上一条旧会议预算9999元。现在记录新的时间与预算：",
+        "after": "请保留新口述中的否定和新决定。"
+      },
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing",
+          "elapsed": 0.0
+        },
+        {
+          "event": "transcript",
+          "text": "周五下午三点开会，预算三千五百元，不是周四。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "周五下午三点开会，预算三千五百元，不是周四。",
+              "language": "Chinese",
+              "language_source": "detected"
+            }
+          ],
+          "elapsed": 0.287
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing",
+          "elapsed": 0.287
+        },
+        {
+          "event": "transcript",
+          "text": "周五下午三点开会，预算三千五百元，不是周四。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "周五下午三点开会，预算三千五百元，不是周四。",
+              "language": "Chinese",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "周五下午3点开会预算3500元，不是周四。",
+              "language": "Chinese",
+              "language_source": "forced"
+            }
+          ],
+          "elapsed": 0.317
+        },
+        {
+          "event": "stage",
+          "stage": "polishing",
+          "elapsed": 0.317
+        },
+        {
+          "event": "result",
+          "text": "周五下午3点开会，预算3500元，不是周四。",
+          "original": "周五下午三点开会，预算三千五百元，不是周四。",
+          "processed": true,
+          "elapsed": 1.638
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "en-context",
+      "context": {
+        "before": "The previous meeting had a budget of 9999 dollars. The new plan is: ",
+        "after": "Keep the speaker’s new decision."
+      },
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing",
+          "elapsed": 0.0
+        },
+        {
+          "event": "transcript",
+          "text": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+              "language": "English",
+              "language_source": "detected"
+            }
+          ],
+          "elapsed": 0.408
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing",
+          "elapsed": 0.408
+        },
+        {
+          "event": "transcript",
+          "text": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+              "language": "English",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "Please schedule a meeting for Friday at 3 pm. The budget is $3,500, not $4000.",
+              "language": "English",
+              "language_source": "forced"
+            }
+          ],
+          "elapsed": 0.439
+        },
+        {
+          "event": "stage",
+          "stage": "polishing",
+          "elapsed": 0.439
+        },
+        {
+          "event": "result",
+          "text": "Please schedule the meeting for Friday at 3 p.m. The budget is $3,500, not $4,000.",
+          "original": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+          "processed": true,
+          "elapsed": 1.932
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "zh-verbatim",
+      "context": {},
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing",
+          "elapsed": 0.0
+        },
+        {
+          "event": "transcript",
+          "text": "周五下午三点开会，预算三千五百元，不是周四。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "周五下午三点开会，预算三千五百元，不是周四。",
+              "language": "Chinese",
+              "language_source": "detected"
+            }
+          ],
+          "elapsed": 0.247
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing",
+          "elapsed": 0.247
+        },
+        {
+          "event": "transcript",
+          "text": "周五下午三点开会，预算三千五百元，不是周四。",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "周五下午三点开会，预算三千五百元，不是周四。",
+              "language": "Chinese",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "周五下午3点开会预算3500元，不是周四。",
+              "language": "Chinese",
+              "language_source": "forced"
+            }
+          ],
+          "elapsed": 0.277
+        },
+        {
+          "event": "stage",
+          "stage": "polishing",
+          "elapsed": 0.277
+        },
+        {
+          "event": "result",
+          "text": "周五下午三点开会，预算三千五百元，不是周四。",
+          "original": "周五下午三点开会，预算三千五百元，不是周四。",
+          "processed": false,
+          "elapsed": 1.435
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "en-verbatim",
+      "context": {},
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing",
+          "elapsed": 0.0
+        },
+        {
+          "event": "transcript",
+          "text": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+              "language": "English",
+              "language_source": "detected"
+            }
+          ],
+          "elapsed": 0.362
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing",
+          "elapsed": 0.362
+        },
+        {
+          "event": "transcript",
+          "text": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+              "language": "English",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "Please schedule a meeting for Friday at 3 pm. The budget is $3,500, not $4000.",
+              "language": "English",
+              "language_source": "forced"
+            }
+          ],
+          "elapsed": 0.393
+        },
+        {
+          "event": "stage",
+          "stage": "polishing",
+          "elapsed": 0.393
+        },
+        {
+          "event": "result",
+          "text": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.  \nPlease schedule a meeting for Friday at 3 pm. The budget is $3,500, not $4000.",
+          "original": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+          "processed": false,
+          "elapsed": 2.043
+        }
+      ],
+      "passed": true
+    },
+    {
+      "id": "en-translation",
+      "context": {},
+      "events": [
+        {
+          "event": "stage",
+          "stage": "transcribing",
+          "elapsed": 0.0
+        },
+        {
+          "event": "transcript",
+          "text": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+              "language": "English",
+              "language_source": "detected"
+            }
+          ],
+          "elapsed": 0.364
+        },
+        {
+          "event": "stage",
+          "stage": "reviewing",
+          "elapsed": 0.364
+        },
+        {
+          "event": "transcript",
+          "text": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+          "asr_results": [
+            {
+              "engine_name": "Qwen3-ASR",
+              "transcript": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+              "language": "English",
+              "language_source": "detected"
+            },
+            {
+              "engine_name": "SenseVoice Small",
+              "transcript": "Please schedule a meeting for Friday at 3 pm. The budget is $3,500, not $4000.",
+              "language": "English",
+              "language_source": "forced"
+            }
+          ],
+          "elapsed": 0.395
+        },
+        {
+          "event": "stage",
+          "stage": "translating",
+          "elapsed": 0.395
+        },
+        {
+          "event": "result",
+          "text": "请将会议安排在周五下午3点，预算为三千五百美元，不是四千美元。",
+          "original": "Please schedule the meeting for Friday at 3 p.m. The budget is three thousand five hundred dollars, not four thousand.",
+          "processed": true,
+          "elapsed": 1.459
+        }
+      ],
+      "passed": true
+    }
+  ],
+  "failed": [],
+  "passed": 8
+}

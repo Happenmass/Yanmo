@@ -17,8 +17,8 @@ public enum InputAction: String, Codable, CaseIterable, Identifiable {
     public var defaults: [InputShortcut] {
         switch self {
         case .dictation: return InputShortcut.defaults
-        case .voiceTranslation: return [InputShortcut(keyCode: 17, modifiers: 4096 | 2048, keyLabel: "T")]
-        case .selectionTranslation: return [InputShortcut(keyCode: 1, modifiers: 4096 | 2048, keyLabel: "S")]
+        case .voiceTranslation: return [InputShortcut(keyCode: 63, modifiers: 512, keyLabel: "FN")]
+        case .selectionTranslation: return [InputShortcut(keyCode: 49, modifiers: InputShortcut.functionModifier, keyLabel: "Space")]
         }
     }
 }

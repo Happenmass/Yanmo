@@ -1,4 +1,5 @@
 import Foundation
+import YanmoNative
 import Darwin
 
 /// Compile with LocalEngine.swift; uses the real pipe, queue and idle timer with

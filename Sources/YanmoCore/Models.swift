@@ -43,38 +43,54 @@ public enum HistoryRetention: Int, Codable, CaseIterable {
     }
 }
 
-/// Carbon modifier bits are persisted rather than a keyboard-layout-dependent string.
+/// Carbon modifier bits are persisted; FN uses the secondary-function bit and
+/// is dispatched by the event tap, never registered as a Carbon hotkey.
 public struct InputShortcut: Codable, Equatable, Identifiable {
-    public var id: String { modifierKeys.map { "mod:" + $0.sorted().map(String.init).joined(separator: "+") } ?? "\(keyCode):\(modifiers)" }
+    public static let functionModifier: UInt32 = 1 << 23
+    private static let modifierBits: [UInt16: UInt32] = [59: 4096, 62: 4096, 56: 512, 60: 512, 58: 2048, 61: 2048, 55: 256, 54: 256]
+    public var id: String {
+        if let keys = modifierKeys, keys.contains(63) { return Self.modifierOnly(Set(keys)).id }
+        return modifierKeys.map { "mod:" + $0.sorted().map(String.init).joined(separator: "+") } ?? "\(keyCode):\(modifiers)"
+    }
     public var keyCode: UInt32
     public var modifiers: UInt32
     public var keyLabel: String
     public var modifierKeys: [UInt16]?
     // macOS may consume Control+Space before it reaches AppKit/Carbon.
-    public var needsEventTap: Bool { isFn || modifierKeys != nil || (keyCode == 49 && modifiers == 4096) }
+    public var usesFn: Bool { keyCode == 63 || modifiers & Self.functionModifier != 0 || modifierKeys?.contains(63) == true }
+    public var needsEventTap: Bool { usesFn || modifierKeys != nil || (keyCode == 49 && modifiers == 4096) }
     public init(keyCode: UInt32, modifiers: UInt32, keyLabel: String) {
         self.keyCode = keyCode; self.modifiers = modifiers; self.keyLabel = keyLabel
     }
     public static func modifierOnly(_ keys: Set<UInt16>) -> InputShortcut {
+        if keys.contains(63) {
+            return InputShortcut(keyCode: 63, modifiers: keys.reduce(0) { $0 | (modifierBits[$1] ?? 0) }, keyLabel: "FN")
+        }
         var result = InputShortcut(keyCode: 0, modifiers: 0, keyLabel: keys.sorted().compactMap { ModifierChord.names[$0] }.joined(separator: " + "))
         result.modifierKeys = keys.sorted()
         return result
     }
-    public static let fn = InputShortcut(keyCode: 63, modifiers: 0, keyLabel: "Fn")
+    public static let fn = InputShortcut(keyCode: 63, modifiers: 0, keyLabel: "FN")
     public static let standard = InputShortcut(keyCode: 49, modifiers: 4096 | 2048, keyLabel: "Space")
-    public static let defaults = [fn, standard]
-    public var isFn: Bool { self == .fn }
+    public static let defaults = [fn]
+    public var isFn: Bool { modifierKeys == nil && keyCode == 63 && modifiers == 0 }
     public var label: String {
-        if modifierKeys != nil { return keyLabel }
-        return (modifiers & 4096 != 0 ? "⌃" : "") + (modifiers & 2048 != 0 ? "⌥" : "") +
-        (modifiers & 512 != 0 ? "⇧" : "") + (modifiers & 256 != 0 ? "⌘" : "") + keyLabel
+        if let keys = modifierKeys {
+            if keys.contains(63) { return Self.modifierOnly(Set(keys)).label }
+            return keys.sorted().compactMap { ModifierChord.names[$0] }.joined(separator: " + ")
+        }
+        return [usesFn ? "FN" : "", modifiers & 4096 != 0 ? "Control" : "",
+                modifiers & 2048 != 0 ? "Option" : "", modifiers & 256 != 0 ? "Command" : "",
+                modifiers & 512 != 0 ? "Shift" : "", keyCode == 63 ? "" : keyCode == 49 ? "空格" : keyLabel]
+            .filter { !$0.isEmpty }.joined(separator: " + ")
     }
     public var validationError: String? {
+        if keyCode > 127 || modifiers & ~(6912 | Self.functionModifier) != 0 || (keyCode == 63 && modifiers & Self.functionModifier != 0) { return "快捷键配置无效。" }
         if let keys = modifierKeys {
-            return !keys.isEmpty && keys.allSatisfy { ModifierChord.names[$0] != nil } ? nil : "请选择有效的修饰键。"
+            return !keys.isEmpty && Set(keys).count == keys.count && keys.allSatisfy { ModifierChord.names[$0] != nil } ? nil : "请选择有效的修饰键。"
         }
-        if isFn { return nil }
-        if modifiers & (256 | 4096) == 0 { return "请搭配 Control 或 Command，避免影响正常打字。" }
+        if keyCode == 63 { return nil }
+        if modifiers & (256 | 4096 | Self.functionModifier) == 0 { return "请搭配 FN、Control 或 Command，避免影响正常打字。" }
         if [36, 48, 51, 53, 63, 117].contains(keyCode) { return "请选一个字母、数字、空格或功能键。" }
         if modifiers == 256 && [0, 4, 6, 7, 8, 9, 12, 13, 46, 49].contains(keyCode) { return "这是常用系统或编辑快捷键，请换一组组合。" }
         return nil

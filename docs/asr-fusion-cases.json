@@ -1,0 +1,658 @@
+{
+  "method": "Controlled synthetic ASR disagreements with known intended values. These are injected candidate errors, not claims of naturally occurring Qwen/SenseVoice mistakes or an ASR accuracy benchmark.",
+  "cases": [
+    {
+      "id": "zh-secondary-corrects-qwen",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "预算3500元。"
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "预算3501元。"
+          }
+        ],
+        "text": "预算3500元。",
+        "before": "当前这一单已确认的预算金额是3501元。",
+        "after": "",
+        "task": "polish"
+      },
+      "contains_any": [
+        [
+          "3501元",
+          "三千五百零一元"
+        ]
+      ],
+      "forbid": [
+        "3500",
+        "三千五百元"
+      ]
+    },
+    {
+      "id": "en-secondary-corrects-qwen",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "The amount is one hundred dollars."
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "The amount is 101 dollars."
+          }
+        ],
+        "text": "The amount is one hundred dollars.",
+        "before": "This invoice has a confirmed amount of 101 dollars.",
+        "after": "",
+        "task": "polish"
+      },
+      "contains_any": [
+        [
+          "101 dollars",
+          "one hundred and one dollars",
+          "one hundred one dollars"
+        ]
+      ],
+      "forbid": [
+        "100 dollars",
+        "one hundred dollars"
+      ]
+    },
+    {
+      "id": "zh-primary-also-can-win",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "费用123元。"
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "费用132元。"
+          }
+        ],
+        "text": "费用123元。",
+        "before": "",
+        "after": "本条费用已经核对为123元。",
+        "task": "polish"
+      },
+      "contains_any": [
+        [
+          "123元",
+          "一百二十三元"
+        ]
+      ],
+      "forbid": [
+        "132",
+        "一百三十二"
+      ]
+    },
+    {
+      "id": "en-primary-also-can-win",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "The fee is 99 dollars."
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "The fee is 98 dollars."
+          }
+        ],
+        "text": "The fee is 99 dollars.",
+        "before": "",
+        "after": "The confirmed fee for this entry is 99 dollars.",
+        "task": "polish"
+      },
+      "contains_any": [
+        [
+          "99 dollars",
+          "ninety-nine dollars"
+        ]
+      ],
+      "forbid": [
+        "98",
+        "ninety-eight"
+      ]
+    },
+    {
+      "id": "zh-candidate-order-swapped",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "预算3501元。"
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "预算3500元。"
+          }
+        ],
+        "text": "预算3501元。",
+        "before": "当前这一单已确认的预算金额是3501元。",
+        "after": "",
+        "task": "polish"
+      },
+      "contains_any": [
+        [
+          "3501元",
+          "三千五百零一元"
+        ]
+      ],
+      "forbid": [
+        "3500",
+        "三千五百元"
+      ]
+    },
+    {
+      "id": "en-candidate-order-swapped",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "The amount is 101 dollars."
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "The amount is one hundred dollars."
+          }
+        ],
+        "text": "The amount is 101 dollars.",
+        "before": "This invoice has a confirmed amount of 101 dollars.",
+        "after": "",
+        "task": "polish"
+      },
+      "contains_any": [
+        [
+          "101 dollars",
+          "one hundred and one dollars",
+          "one hundred one dollars"
+        ]
+      ],
+      "forbid": [
+        "100 dollars",
+        "one hundred dollars"
+      ]
+    },
+    {
+      "id": "zh-no-evidence",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "预算3500元。"
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "预算3501元。"
+          }
+        ],
+        "text": "预算3500元。",
+        "before": "",
+        "after": "",
+        "task": "polish"
+      },
+      "contains_any": [
+        [
+          "3500元",
+          "3501元",
+          "三千五百元",
+          "三千五百零一元"
+        ]
+      ]
+    },
+    {
+      "id": "en-no-evidence",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "The amount is 900 dollars."
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "The amount is 901 dollars."
+          }
+        ],
+        "text": "The amount is 900 dollars.",
+        "before": "",
+        "after": "",
+        "task": "polish"
+      },
+      "contains_any": [
+        [
+          "900 dollars",
+          "901 dollars",
+          "nine hundred dollars",
+          "nine hundred and one dollars",
+          "nine hundred one dollars"
+        ]
+      ]
+    },
+    {
+      "id": "zh-equivalent-number-spelling",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "预算一百元，买三件。"
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "预算100元，买3件。"
+          }
+        ],
+        "text": "预算一百元，买三件。",
+        "before": "",
+        "after": "",
+        "task": "polish"
+      },
+      "contains_any": [
+        [
+          "100元",
+          "一百元"
+        ],
+        [
+          "3件",
+          "三件"
+        ]
+      ]
+    },
+    {
+      "id": "en-equivalent-number-spelling",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "Pay one hundred dollars for three items."
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "Pay 100 dollars for 3 items."
+          }
+        ],
+        "text": "Pay one hundred dollars for three items.",
+        "before": "",
+        "after": "",
+        "task": "polish"
+      },
+      "contains_any": [
+        [
+          "100 dollars",
+          "one hundred dollars"
+        ],
+        [
+          "3 items",
+          "three items"
+        ]
+      ]
+    },
+    {
+      "id": "zh-decimal-percentage",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "利率百分之三点五，余额负零点五元。"
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "利率3.5%，余额-0.5元。"
+          }
+        ],
+        "text": "利率百分之三点五，余额负零点五元。",
+        "before": "",
+        "after": "",
+        "task": "polish"
+      },
+      "contains_any": [
+        [
+          "3.5%",
+          "百分之三点五"
+        ],
+        [
+          "-0.5元",
+          "负零点五元"
+        ]
+      ]
+    },
+    {
+      "id": "en-decimal",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "The balance is negative zero point five dollars."
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "The balance is -0.5 dollars."
+          }
+        ],
+        "text": "The balance is negative zero point five dollars.",
+        "before": "",
+        "after": "",
+        "task": "polish"
+      },
+      "contains_any": [
+        [
+          "-0.5 dollars",
+          "negative zero point five dollars"
+        ]
+      ]
+    },
+    {
+      "id": "zh-utterance-confirmation",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "预算100元，最终确认金额是101元。"
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "预算101元，最终确认金额是101元。"
+          }
+        ],
+        "text": "预算100元，最终确认金额是101元。",
+        "before": "",
+        "after": "",
+        "task": "polish"
+      },
+      "contains_any": [
+        [
+          "101元",
+          "一百零一元"
+        ]
+      ],
+      "forbid": [
+        "100元",
+        "一百元"
+      ]
+    },
+    {
+      "id": "en-utterance-confirmation",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "The amount is 100 dollars. The final confirmed amount is 101 dollars."
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "The amount is 101 dollars. The final confirmed amount is 101 dollars."
+          }
+        ],
+        "text": "The amount is 100 dollars. The final confirmed amount is 101 dollars.",
+        "before": "",
+        "after": "",
+        "task": "polish"
+      },
+      "contains_any": [
+        [
+          "101 dollars",
+          "one hundred and one dollars",
+          "one hundred one dollars"
+        ]
+      ],
+      "forbid": [
+        "100 dollars",
+        "one hundred dollars"
+      ]
+    },
+    {
+      "id": "zh-current-change-beats-old-context",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "预算改为102元。"
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "预算改为102元。"
+          }
+        ],
+        "text": "预算改为102元。",
+        "before": "之前预算100元。",
+        "after": "",
+        "task": "polish"
+      },
+      "contains_any": [
+        [
+          "102元",
+          "一百零二元"
+        ]
+      ],
+      "forbid": [
+        "100元",
+        "一百元"
+      ]
+    },
+    {
+      "id": "en-current-change-beats-old-context",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "Change the amount to 102 dollars."
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "Change the amount to 102 dollars."
+          }
+        ],
+        "text": "Change the amount to 102 dollars.",
+        "before": "The previous amount was 100 dollars.",
+        "after": "",
+        "task": "polish"
+      },
+      "contains_any": [
+        [
+          "102 dollars",
+          "one hundred and two dollars",
+          "one hundred two dollars"
+        ]
+      ],
+      "forbid": [
+        "100 dollars",
+        "one hundred dollars"
+      ]
+    },
+    {
+      "id": "zh-user-edit-wins",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "预算100元。"
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "预算101元。"
+          }
+        ],
+        "text": "预算100元。",
+        "before": "",
+        "after": "",
+        "task": "polish",
+        "user_text": "预算200元。"
+      },
+      "contains_any": [
+        [
+          "200元",
+          "两百元",
+          "二百元"
+        ]
+      ],
+      "forbid": [
+        "100",
+        "101",
+        "一百"
+      ]
+    },
+    {
+      "id": "en-user-edit-wins",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "The amount is 100 dollars."
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "The amount is 101 dollars."
+          }
+        ],
+        "text": "The amount is 100 dollars.",
+        "before": "",
+        "after": "",
+        "task": "polish",
+        "user_text": "The amount is 210 dollars."
+      },
+      "contains_any": [
+        [
+          "210 dollars",
+          "two hundred and ten dollars",
+          "two hundred ten dollars"
+        ]
+      ],
+      "forbid": [
+        "100",
+        "101",
+        "one hundred"
+      ]
+    },
+    {
+      "id": "zh-voice-translation",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "预算100元。"
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "预算101元。"
+          }
+        ],
+        "text": "预算100元。",
+        "before": "本条预算已确认为101元。",
+        "after": "",
+        "task": "polish",
+        "target_language": "en"
+      },
+      "operation": "translate",
+      "contains_any": [
+        [
+          "101 yuan",
+          "one hundred and one yuan",
+          "one hundred one yuan"
+        ]
+      ],
+      "forbid": [
+        "100 yuan",
+        "one hundred yuan"
+      ]
+    },
+    {
+      "id": "en-voice-translation",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "The budget is 100 yuan."
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "The budget is 101 yuan."
+          }
+        ],
+        "text": "The budget is 100 yuan.",
+        "before": "The confirmed budget is 101 yuan.",
+        "after": "",
+        "task": "polish",
+        "target_language": "zh-Hans"
+      },
+      "operation": "translate",
+      "contains_any": [
+        [
+          "101元",
+          "一百零一元"
+        ]
+      ],
+      "forbid": [
+        "100元",
+        "一百元"
+      ]
+    },
+    {
+      "id": "zh-verbatim-numbers",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "呃，预算一百元。"
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "呃，预算100元。"
+          }
+        ],
+        "text": "呃，预算一百元。",
+        "before": "",
+        "after": "",
+        "task": "verbatim"
+      },
+      "contains": [
+        "呃"
+      ],
+      "contains_any": [
+        [
+          "100元",
+          "一百元"
+        ]
+      ]
+    },
+    {
+      "id": "zh-lexical-words",
+      "request": {
+        "asr_results": [
+          {
+            "engine_name": "Qwen3-ASR",
+            "transcript": "一些建议，一起统一格式，四川周五开会，预算一百元。"
+          },
+          {
+            "engine_name": "SenseVoice Small",
+            "transcript": "一些建议，一起统一格式，四川周五开会，预算100元。"
+          }
+        ],
+        "text": "一些建议，一起统一格式，四川周五开会，预算一百元。",
+        "before": "",
+        "after": "",
+        "task": "polish"
+      },
+      "contains": [
+        "一些",
+        "一起",
+        "统一",
+        "四川",
+        "周五"
+      ],
+      "contains_any": [
+        [
+          "100元",
+          "一百元"
+        ]
+      ],
+      "forbid": [
+        "1起",
+        "4川",
+        "周5"
+      ]
+    }
+  ]
+}

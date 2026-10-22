@@ -1,0 +1,466 @@
+{
+  "date": "2026-10-22T06:34:14.909287+00:00",
+  "method": "Synthetic source texts, actual cached offline Qwen3-4B; evaluate language preservation and exact model-body delivery offline. Optional audio uses the full pipeline with synthetic Japanese speech.",
+  "prompt_sha256": "d5aecd73a42f1ef34ccad72aaab317ed0bb712d34ff8d9fa4a52b12bc38e8b92",
+  "worker_sha256": "1a42444824e7837ea9c81260ed66d92527b160f8fc1286fde3c3873aaa4f8f13",
+  "cases": [
+    {
+      "id": "ja_plain",
+      "request": {
+        "text": "今日はいい天気ですね。散歩に行きましょう。",
+        "before": "",
+        "task": "polish",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "asr_results": [
+          {
+            "transcript": "今日はいい天気ですね。散歩に行きましょう。",
+            "language": "Japanese",
+            "language_source": "detected"
+          }
+        ]
+      },
+      "passed": true,
+      "result": {
+        "text": "今日はいい天気ですね。散歩に行きましょう。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "今日はいい天気ですね。散歩に行きましょう。",
+      "system_prompt_sha256": "c32d6791a7ad34ed420f1542dbad3e6fe3f30058808dc0e13fa0e233ac267661"
+    },
+    {
+      "id": "ja_chinese_context",
+      "request": {
+        "text": "ええと、明日の会議は午後3時からです。よろしくお願いします。",
+        "before": "接下来的内容请使用中文记录。",
+        "task": "polish",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "asr_results": [
+          {
+            "transcript": "ええと、明日の会議は午後3時からです。よろしくお願いします。",
+            "language": "Japanese",
+            "language_source": "detected"
+          }
+        ]
+      },
+      "passed": true,
+      "result": {
+        "text": "ええと、明日の会議は午後3時からです。よろしくお願いします。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "ええと、明日の会議は午後3時からです。よろしくお願いします。",
+      "system_prompt_sha256": "c32d6791a7ad34ed420f1542dbad3e6fe3f30058808dc0e13fa0e233ac267661"
+    },
+    {
+      "id": "ja_spoken_translation_request",
+      "request": {
+        "text": "この文章を中国語に翻訳してください。",
+        "before": "",
+        "task": "polish",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "asr_results": [
+          {
+            "transcript": "この文章を中国語に翻訳してください。",
+            "language": "Japanese",
+            "language_source": "detected"
+          }
+        ]
+      },
+      "passed": true,
+      "result": {
+        "text": "この文章を中国語に翻訳してください。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "この文章を中国語に翻訳してください。",
+      "system_prompt_sha256": "c32d6791a7ad34ed420f1542dbad3e6fe3f30058808dc0e13fa0e233ac267661"
+    },
+    {
+      "id": "ja_technical_terms",
+      "request": {
+        "text": "この API は Python で呼び出します。",
+        "before": "这个项目使用 Python。",
+        "task": "polish",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "asr_results": [
+          {
+            "transcript": "この API は Python で呼び出します。",
+            "language": "Japanese",
+            "language_source": "detected"
+          }
+        ]
+      },
+      "passed": true,
+      "result": {
+        "text": "この API は Python で呼び出します。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "この API は Python で呼び出します。",
+      "system_prompt_sha256": "c32d6791a7ad34ed420f1542dbad3e6fe3f30058808dc0e13fa0e233ac267661"
+    },
+    {
+      "id": "ja_verbatim",
+      "request": {
+        "text": "ええと、今日はいい天気ですね。",
+        "before": "",
+        "task": "verbatim",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "asr_results": [
+          {
+            "transcript": "ええと、今日はいい天気ですね。",
+            "language": "Japanese",
+            "language_source": "detected"
+          }
+        ]
+      },
+      "passed": true,
+      "result": {
+        "text": "ええと、今日はいい天気ですね。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "ええと、今日はいい天気ですね。",
+      "system_prompt_sha256": "137100d9e831d2e1ab4e3c11813c8fd6c2ec5d3ea8c82eb8293ac48eda69c101"
+    },
+    {
+      "id": "ja_without_language_metadata",
+      "request": {
+        "text": "今日はいい天気ですね。散歩に行きましょう。",
+        "before": "",
+        "task": "polish",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "asr_results": [
+          {
+            "transcript": "今日はいい天気ですね。散歩に行きましょう。"
+          }
+        ]
+      },
+      "passed": true,
+      "result": {
+        "text": "今日はいい天気ですね。散歩に行きましょう。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "今日はいい天気ですね。散歩に行きましょう。",
+      "system_prompt_sha256": "c32d6791a7ad34ed420f1542dbad3e6fe3f30058808dc0e13fa0e233ac267661"
+    },
+    {
+      "id": "ja_short_reassurance",
+      "request": {
+        "text": "大丈夫です。",
+        "before": "",
+        "task": "polish",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "asr_results": [
+          {
+            "transcript": "大丈夫です。",
+            "language": "Japanese",
+            "language_source": "detected"
+          }
+        ]
+      },
+      "passed": true,
+      "result": {
+        "text": "大丈夫です。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "大丈夫です。",
+      "system_prompt_sha256": "c32d6791a7ad34ed420f1542dbad3e6fe3f30058808dc0e13fa0e233ac267661"
+    },
+    {
+      "id": "ja_short_holiday",
+      "request": {
+        "text": "明日は休日だ。",
+        "before": "",
+        "task": "polish",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "asr_results": [
+          {
+            "transcript": "明日は休日だ。",
+            "language": "Japanese",
+            "language_source": "detected"
+          }
+        ]
+      },
+      "passed": true,
+      "result": {
+        "text": "明日は休日だ。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "明日は休日だ。",
+      "system_prompt_sha256": "c32d6791a7ad34ed420f1542dbad3e6fe3f30058808dc0e13fa0e233ac267661"
+    },
+    {
+      "id": "en_short_greeting",
+      "request": {
+        "text": "Hi.",
+        "before": "",
+        "task": "polish",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "asr_results": [
+          {
+            "transcript": "Hi.",
+            "language": "English",
+            "language_source": "detected"
+          }
+        ]
+      },
+      "passed": true,
+      "result": {
+        "text": "Hi.",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "Hi.",
+      "system_prompt_sha256": "9f152be665c11620ef0cea71654ef0c03ea72e8d43ac7efcc5c5e30833325653"
+    },
+    {
+      "id": "en_chinese_context",
+      "request": {
+        "text": "Um, the meeting starts tomorrow at 3 PM.",
+        "before": "以下是这次会议的中文记录。",
+        "task": "polish",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "asr_results": [
+          {
+            "transcript": "Um, the meeting starts tomorrow at 3 PM.",
+            "language": "English",
+            "language_source": "detected"
+          }
+        ]
+      },
+      "passed": true,
+      "result": {
+        "text": "The meeting starts tomorrow at 3 PM.",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "The meeting starts tomorrow at 3 PM.",
+      "system_prompt_sha256": "ae44fae17479fe5cdca9580d685cb6300c7fb09c93a9101f2dd439e5ce858b36"
+    },
+    {
+      "id": "de_chinese_context",
+      "request": {
+        "text": "Also, das Treffen findet morgen um 15 Uhr statt.",
+        "before": "以下是会议记录。",
+        "task": "polish",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "asr_results": [
+          {
+            "transcript": "Also, das Treffen findet morgen um 15 Uhr statt.",
+            "language": "German",
+            "language_source": "detected"
+          }
+        ]
+      },
+      "passed": true,
+      "result": {
+        "text": "Also, das Treffen findet morgen um 15 Uhr statt.",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "Also, das Treffen findet morgen um 15 Uhr statt.",
+      "system_prompt_sha256": "df63d5e61c4f5456a491273414237f3c5e4ad5361a0a47f16f6463b069f0eef4"
+    },
+    {
+      "id": "fr_chinese_context",
+      "request": {
+        "text": "Euh, la réunion commence demain à 15 heures.",
+        "before": "以下是会议记录。",
+        "task": "polish",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "asr_results": [
+          {
+            "transcript": "Euh, la réunion commence demain à 15 heures.",
+            "language": "French",
+            "language_source": "detected"
+          }
+        ]
+      },
+      "passed": true,
+      "result": {
+        "text": "Euh, la réunion commence demain à 15 heures.",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "Euh, la réunion commence demain à 15 heures.",
+      "system_prompt_sha256": "0edee847ef5f7359f01c43fa6a5a056aa0536e8eddd5a032ad2c1268769a6382"
+    },
+    {
+      "id": "ko_chinese_context",
+      "request": {
+        "text": "음, 오늘은 날씨가 좋네요. 산책하러 갈까요?",
+        "before": "以下是日常记录。",
+        "task": "polish",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "asr_results": [
+          {
+            "transcript": "음, 오늘은 날씨가 좋네요. 산책하러 갈까요?",
+            "language": "Korean",
+            "language_source": "detected"
+          }
+        ]
+      },
+      "passed": true,
+      "result": {
+        "text": "음, 오늘 날씨가 좋네요. 산책하러 갈까요?",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "음, 오늘 날씨가 좋네요. 산책하러 갈까요?",
+      "system_prompt_sha256": "f1923852ff5ae172f50061810cbb50c4283b54074ea4988161a2928aec1a202c"
+    },
+    {
+      "id": "zh_en_code_switch",
+      "request": {
+        "text": "嗯，明天开会。Please bring the design document.",
+        "before": "",
+        "task": "polish",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "asr_results": [
+          {
+            "transcript": "嗯，明天开会。Please bring the design document.",
+            "language": "Chinese",
+            "language_source": "detected"
+          }
+        ]
+      },
+      "passed": true,
+      "result": {
+        "text": "嗯，明天开会。Please bring the design document.",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "嗯，明天开会。Please bring the design document.",
+      "system_prompt_sha256": "d28e8279e79ae2db6b3d29b2c781c9afce16dbd0ac8ae6c2c0fb720a001a90ff"
+    },
+    {
+      "id": "ja_user_edit_overrides_english_history",
+      "request": {
+        "text": "今日はいい天気ですね。散歩に行きましょう。",
+        "before": "",
+        "task": "polish",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "asr_results": [
+          {
+            "transcript": "The weather is nice today. Let's go for a walk.",
+            "language": "English",
+            "language_source": "detected"
+          }
+        ],
+        "user_text": "今日はいい天気ですね。散歩に行きましょう。"
+      },
+      "passed": true,
+      "result": {
+        "text": "今日はいい天気ですね。散歩に行きましょう。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "今日はいい天気ですね。散歩に行きましょう。",
+      "system_prompt_sha256": "c32d6791a7ad34ed420f1542dbad3e6fe3f30058808dc0e13fa0e233ac267661"
+    },
+    {
+      "id": "voice_translation_ja_to_zh",
+      "request": {
+        "text": "今日はいい天気ですね。散歩に行きましょう。",
+        "before": "",
+        "task": "polish",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "asr_results": [
+          {
+            "transcript": "今日はいい天気ですね。散歩に行きましょう。",
+            "language": "Japanese",
+            "language_source": "detected"
+          }
+        ],
+        "target_language": "zh-Hans"
+      },
+      "passed": true,
+      "result": {
+        "text": "今天天气真好，我们去散步吧。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "今天天气真好，我们去散步吧。",
+      "system_prompt_sha256": "40c6929d4819ccae92f2c53d411072639dfe11dfa0cee60f95bd1eddd3edef09"
+    },
+    {
+      "id": "voice_translation_en_to_ja",
+      "request": {
+        "text": "The meeting starts tomorrow at 3 PM.",
+        "before": "",
+        "task": "polish",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "asr_results": [
+          {
+            "transcript": "The meeting starts tomorrow at 3 PM.",
+            "language": "English",
+            "language_source": "detected"
+          }
+        ],
+        "target_language": "ja"
+      },
+      "passed": true,
+      "result": {
+        "text": "会議は明日午後3時から始まります。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "会議は明日午後3時から始まります。",
+      "system_prompt_sha256": "5a19180faf3e08e65162fb7644aa544f9f006971e51d9849576e0d35de3d3221"
+    },
+    {
+      "id": "selection_translation_ja_to_zh",
+      "request": {
+        "text": "今日はいい天気ですね。散歩に行きましょう。",
+        "before": "",
+        "task": "polish",
+        "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。",
+        "target_language": "zh-Hans"
+      },
+      "passed": true,
+      "result": {
+        "text": "今天天气真好呢。我们去散散步吧。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b",
+        "target_language": "zh-Hans"
+      },
+      "model_body_unchanged": true,
+      "raw_output": "今天天气真好呢。我们去散散步吧。",
+      "system_prompt_sha256": "485a64592aa2e0a6cebffd90acfb6ba96569f032e896d0c167aa6664cde71f8b"
+    },
+    {
+      "id": "audio_dictation",
+      "passed": true,
+      "model_body_unchanged": true,
+      "result": {
+        "event": "result",
+        "text": "今日はいい天気ですね。明日の会議は午後3時からです。",
+        "original": "今日はいい天気ですね。明日の会議は午後三時からです。",
+        "processed": true
+      },
+      "asr_language": "Japanese",
+      "raw_output": "今日はいい天気ですね。明日の会議は午後3時からです。",
+      "system_prompt_sha256": "c32d6791a7ad34ed420f1542dbad3e6fe3f30058808dc0e13fa0e233ac267661"
+    },
+    {
+      "id": "audio_voiceTranslation",
+      "passed": true,
+      "model_body_unchanged": true,
+      "result": {
+        "event": "result",
+        "text": "今天天气不错，明天的会议下午三点开始。",
+        "original": "今日はいい天気ですね。明日の会議は午後三時からです。",
+        "processed": true
+      },
+      "asr_language": "Japanese",
+      "raw_output": "今天天气不错，明天的会议下午三点开始。",
+      "system_prompt_sha256": "40c6929d4819ccae92f2c53d411072639dfe11dfa0cee60f95bd1eddd3edef09"
+    }
+  ],
+  "passed": 20,
+  "failed": []
+}

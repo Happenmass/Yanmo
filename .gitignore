@@ -6,3 +6,11 @@ __pycache__/
 *.pyc
 .env
 .local/
+node_modules/
+.electron/
+web/
+dist-electron/
+runtime/macos/python/
+runtime/macos/*.lock
+test-results/
+playwright-report/

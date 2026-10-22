@@ -41,10 +41,10 @@ struct Checks {
 
         let shortcuts = InputShortcut.defaults + [InputShortcut(keyCode: 2, modifiers: 4096 | 512, keyLabel: "D")]
         let decoded = try JSONDecoder().decode([InputShortcut].self, from: JSONEncoder().encode(shortcuts))
-        try require(decoded == shortcuts && decoded[2].label == "⌃⇧D", "Custom shortcuts must survive restart with modifier semantics")
+        try require(decoded == shortcuts && decoded[1].label == "Control + Shift + D", "Custom shortcuts must survive restart with readable modifier names")
         try require(InputShortcut(keyCode: 12, modifiers: 256, keyLabel: "Q").validationError != nil, "Do not capture Cmd-Q")
         try require(InputShortcut(keyCode: 0, modifiers: 0, keyLabel: "A").validationError != nil, "Do not capture ordinary typing")
-        try require(shortcuts[2].validationError == nil && InputShortcut.fn.validationError == nil, "Explicit dictation shortcuts must be allowed")
+        try require(shortcuts[1].validationError == nil && InputShortcut.fn.validationError == nil, "Explicit dictation shortcuts must be allowed")
         print("PASS: shortcut persistence and editing/system-key protection")
 
         var chord = ModifierChord()
@@ -68,6 +68,8 @@ struct Checks {
         print("PASS: modifier-only capture, release, persistence and typing suppression")
 
         let bindings = InputAction.allCases.flatMap { action in action.defaults.map { ShortcutBinding(action: action, shortcut: $0) } }
+        try require(bindings.map { $0.shortcut.label } == ["FN", "FN + Shift", "FN + 空格"] && bindings.allSatisfy { $0.shortcut.validationError == nil && $0.shortcut.needsEventTap }, "All three FN defaults must validate, show explicit key names and use the event tap")
+        try require(InputShortcut(keyCode: 63, modifiers: 0, keyLabel: "Fn").isFn, "Existing Fn labels must remain compatible")
         try require(ShortcutBinding.conflict(in: bindings) == nil, "Default action shortcuts must not collide")
         try require(ShortcutBinding.conflict(in: bindings + [ShortcutBinding(action: .selectionTranslation, shortcut: .fn)]) != nil, "Cross-action duplicate must be rejected")
         try require(TranslationLanguage.allCases.count == 4, "First release has exactly four target languages")
