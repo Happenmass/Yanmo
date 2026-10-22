@@ -60,6 +60,16 @@ test('首次使用引导依次介绍四项功能，完成后可在设置中重�
     for (let index = 0; index < 3; index++) await page.locator('.shortcut-editor').nth(index).getByRole('button', { name: '恢复默认' }).click();
     await expect(page.locator('.shortcut-row kbd')).toHaveText(['FN', 'FN + Shift', 'FN + 空格']);
     await expect.poll(async () => JSON.parse(await readFile(join(directory, 'settings.json'), 'utf8')).shortcuts).toEqual(defaultSettings().shortcuts);
+    // The low-memory ASR preset only swaps the model ID; the default stays 1.7B.
+    const preset = page.getByRole('combobox', { name: '语音识别规格' });
+    await expect(preset).toHaveValue('mlx-community/Qwen3-ASR-1.7B-8bit');
+    await preset.selectOption({ label: '低内存 · Qwen3-ASR 0.6B' });
+    await expect.poll(async () => JSON.parse(await readFile(join(directory, 'settings.json'), 'utf8')).asrModel).toBe('mlx-community/Qwen3-ASR-0.6B-8bit');
+    if (process.env.YANMO_QA_SHOTS) await page.locator('.preference-section', { hasText: '本地模型' }).screenshot({ path: join(process.env.YANMO_QA_SHOTS, 'asr-preset.png'), animations: 'disabled' });
+    await expect(page.getByRole('textbox', { name: '语音识别模型' })).toHaveValue('mlx-community/Qwen3-ASR-0.6B-8bit');
+    await expect(preset).toBeEnabled();
+    await preset.selectOption('mlx-community/Qwen3-ASR-1.7B-8bit');
+    await expect.poll(async () => JSON.parse(await readFile(join(directory, 'settings.json'), 'utf8')).asrModel).toBe(defaultSettings().asrModel);
     await page.getByRole('button', { name: '重新查看引导 →' }).click();
     await expect(rail).toBeVisible();
     await page.getByRole('button', { name: '跳过引导' }).click();

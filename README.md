@@ -97,7 +97,7 @@ ad-hoc 开发签名随构建变化。若系统显示已授权但当前版本仍�
 
 ## 隐私、缓存与迁移
 
-- 默认 ASR：`mlx-community/Qwen3-ASR-1.7B-8bit`；中英复核：`mlx-community/SenseVoiceSmall`；文字模型：`mlx-community/Qwen3-4B-Instruct-2507-4bit`。SenseVoice 权重约 936 MB，首次准备时从 ModelScope 下载到全局缓存。
+- 默认 ASR：`mlx-community/Qwen3-ASR-1.7B-8bit`（运行约占 3.5 GB 内存）；内存紧张时可在「设置 → 本地模型 → 语音识别规格」改选低内存的 `mlx-community/Qwen3-ASR-0.6B-8bit`（约 1.8 GB），嘈杂环境与外语准确率明显较低；中英复核：`mlx-community/SenseVoiceSmall`；文字模型：`mlx-community/Qwen3-4B-Instruct-2507-4bit`。SenseVoice 权重约 936 MB，首次准备时从 ModelScope 下载到全局缓存。
 - ModelScope 缓存：`~/.cache/codex/models/modelscope/`，可通过 `MODELSCOPE_CACHE` 指定其他用户全局位置；同时复用 SDK 既有缓存与 `~/.cache/huggingface/`。不在项目和安装包中复制权重。
 - Python 后端仅监听 `127.0.0.1` 动态端口，以每次启动的随机密钥认证；主进程通过私有管道取得端口。Renderer 不持有密钥或音频路径。
 - 运行时设置 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`，模型定位只使用本地缓存；显式准备模型在单独进程中执行。
