@@ -17,6 +17,11 @@ test('首次使用引导依次介绍四项功能，完成后可在设置中重�
     const rail = page.getByRole('navigation', { name: '引导步骤' });
     await expect(rail).toBeVisible();
     await expect(page.locator('.sidebar')).toHaveAttribute('inert', '');
+    // The guide asks for Accessibility exactly when FN cannot be captured yet.
+    await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).checking)).toBe(false);
+    const tap = await page.evaluate(async () => (await window.yanmo.state()).native.eventTap);
+    await expect(page.getByRole('button', { name: '授予权限' })).toHaveCount(tap ? 0 : 1);
+    if (process.env.YANMO_QA_SHOTS) await page.screenshot({ path: join(process.env.YANMO_QA_SHOTS, 'guide-permission.png'), animations: 'disabled' });
     const headings = ['开口，即成文字。', '选中，即见译文。', '说中文，写外文。', '译文，另起一页。'];
     for (const [index, heading] of headings.entries()) {
       await expect(page.getByRole('heading', { name: heading })).toBeVisible();

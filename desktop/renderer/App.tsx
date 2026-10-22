@@ -98,12 +98,15 @@ function Onboarding({ state }: { state: AppState }) {
   const target = LANGUAGES[action === 'voiceTranslation' ? settings.voiceTarget : settings.selectionTarget];
   const finish = (page: Page = 'desk') => void api('settings', { onboarded: true }).then(result => { if (result.ok) void api('page', page); });
   const last = step === guideSteps.length - 1;
+  // Without Accessibility the event tap never sees FN, so macOS opens its own 🌐 emoji picker instead.
+  const needsGrant = keys.some(shortcutNeedsEventTap) && !state.native.eventTap;
   return <section className="guide"><header className="guide-top"><span>初次见面</span><button className="text-button" onClick={() => finish()}>跳过引导</button></header>
     <nav className="guide-rail" aria-label="引导步骤">{guideSteps.map((item, index) => <button key={item.name} aria-current={index === step ? 'step' : undefined} onClick={() => setStep(index)}>{'一二三四'[index]}　{item.name}</button>)}</nav>
     <div className="guide-body" key={step}><div className="guide-text"><h2 className="brush-reveal">{action === 'voiceTranslation' && settings.voiceTarget === 'zh-Hans' ? '说外文，写中文。' : title}</h2><p className="guide-caption">{caption}</p>
       <ol>{lines(keys.length ? keys.map(shortcutLabel).join(' 或 ') : '快捷键', target).map(line => <li key={line}>{line}</li>)}</ol>
       {action ? keys.length ? <div className="key-list">{keys.map((key, index) => <span className="guide-key" key={shortcutID(key)}>{index > 0 && <em>或</em>}{keycap(key)}</span>)}</div> : <button className="text-button red" onClick={() => finish('settings')}>尚未设置快捷键，去设置 →</button>
         : <Dot ready>{settings.online.text.enabled ? '翻译使用你填写的在线服务' : '全程在本机翻译'}</Dot>}
+      {needsGrant && <div className="permission-line guide-permission"><Dot ready={false}>辅助功能 · 待授权</Dot><button className="text-button red" onClick={event => { const { x, y, width, height } = event.currentTarget.getBoundingClientRect(); void api('permissions', { x, y, width, height }); }}>授予权限</button><button className="text-button" onClick={() => void api('check')}>重新检查</button><p className="fine-print">言墨需要辅助功能权限才能接收 {keys.map(shortcutLabel).join('、')}；未授权时按 FN 会打开系统表情面板。</p></div>}
     </div><figure className="guide-figure">{step === 3 ? <GuidePopup/> : <div className="guide-window"><i className="guide-lights" aria-hidden="true"/>
       <PracticeField key={step} select={step === 1} value={step === 1 ? sample : notes} onChange={step === 1 ? setSample : setNotes} placeholder={step === 1 ? '' : keys.length ? '光标已在这里。按 ' + shortcutLabel(keys[0]) + ' 说一句话试试，也可以直接打字。' : '可以直接在这里打字。'}/>
       {step !== 1 && !busy(state.stage) && <div className="voice-overlay guide-capsule" aria-hidden="true"><span className="overlay-cancel"><X size={13}/></span><BrushMeter level={.45}/>{step === 2 && <span className="translation-mark">译</span>}<time>00:04</time><span className="overlay-finish"><BrushCheck/></span></div>}
