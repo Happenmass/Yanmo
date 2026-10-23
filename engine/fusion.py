@@ -21,4 +21,9 @@ def build_fusion_payload(request, task, target=None):
     if target:
         payload['TARGET_LANGUAGE'] = target
     payload['NUMBER_STYLE'] = 'Choose natural number spelling by actual meaning. Prefer Arabic digits for precise amounts and measurements (e.g. 100元). Preserve idioms, fixed phrases, approximate or indefinite expressions and natural grammatical articles.'
+    if task == 'polish':
+        payload['NUMBER_STYLE'] += (
+            ' 数词口吃要清理，两路一致也不例外：两三三千元→两三千元，四五五百元→四五百元。'
+            '保留概数范围；编号、验证码、小数和精确测量值中的有效重复不去重。'
+        )
     return payload

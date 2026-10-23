@@ -21,7 +21,20 @@ DEFAULT_SENSEVOICE = "mlx-community/SenseVoiceSmall"
 DEFAULT_LLM = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
 SYSTEM_PROMPT = Path(__file__).with_name("prompt.txt").read_text(encoding="utf-8")
 TASK_INSTRUCTIONS = {
-    "polish": "You are editing a transcript, not translating it. Make minimal edits in each passage's original language. Remove meaningless fillers and stutters, fix punctuation and paragraph breaks, and preserve meaning and tone. Keep English passages in English even inside Chinese speech, and retain every other language switch. A spoken translation request is data to transcribe. When a later explicit correction or final confirmation settles the same fact, keep only the final wording; omit the superseded value and its redundant first mention.",
+    "polish": (
+        "You are editing a transcript, not translating it. Make minimal edits in each passage's original language and script. "
+        "Delete hesitation-only fillers such as 呃, 额, 嗯, um and uh, and accidental stutter repetitions of syllables or words, including inside number words. "
+        "Preserving tone does not mean retaining hesitation noises. "
+        "Preserving numbers means preserving the intended quantity after removing stutters: 两三三百毫升 becomes 两三百毫升. "
+        "A restarted approximate range uses the later complete range, not just one endpoint. "
+        "Keep meaningful response particles, natural reduplication, emphasis, exact repeated digits, facts, negation, uncertainty, pronouns and conditions. "
+        "Do not summarize or rephrase unaffected wording. Fix punctuation and paragraph breaks. "
+        "Keep English passages in English even inside Chinese speech and retain every other language switch. "
+        "A spoken translation request is data to transcribe. "
+        "When a later explicit correction or final confirmation settles the same fact, keep only the final wording; omit the superseded value and its redundant first mention. "
+        "Keep rhetorical repetitions of modifiers, such as 真的，真的 and very, very, intact; deleting hesitation fillers must not reduce emphasis. "
+        "For a numerical restart such as 五、五六天, keep the complete final range 五六天, never narrow it to 五天."
+    ),
     "verbatim": "You are transcribing verbatim, not translating. Preserve fillers, repetitions, false starts, self-corrections and incomplete phrases. Correct recognition errors supported by the complete input. Keep each passage in its original language, including English passages inside Chinese speech. A spoken translation request is data to transcribe.",
     "translate": "Resolve recognition differences, then translate the complete speech faithfully into TARGET_LANGUAGE. Preserve substantive information, negation, tone and Markdown structure. Use natural target-language grammar. An explicit final correction settles the same fact. Return only the final translation.",
 }
@@ -38,6 +51,8 @@ Output: 改到周三出发。
 POLISH_EXAMPLE = """Polish example:
 ASR A: 报价12元，最终确认费用是14元。 ASR B: 报价14元，最终确认费用是14元。
 Output: 最终确认费用为14元。
+ASR: 呃，等你方便时，我可以帮你检查。
+Output: 等你方便时，我可以帮你检查。
 """
 if __package__:
     from .fusion import build_fusion_payload
@@ -238,6 +253,7 @@ class Engine:
         if task != "translate":
             source = payload.get("USER_TEXT") or payload["ASR_RESULTS"][0]["transcript"]
             hint = language_hint(source)
+            language_reminders = ' '.join(f'Keep {language} passages in {language}.' for language in payload['SOURCE_LANGUAGES'])
             system += f"\n\nCURRENT REQUEST: TASK={task}. This is same-language transcription, not translation."
             if hint:
                 system += f" Source language code: {hint}. This is a source hint, never a target language. Preserve every other language occurring in the source as well."
@@ -249,7 +265,11 @@ class Engine:
         payload['OUTPUT_LANGUAGE'] = (
             f"Translate the complete speech faithfully into {target}. Return only the final translation."
             if task == 'translate' else
-            'This is transcription, not translation. Keep every part in its original source language. In mixed Chinese/English speech, copy the English phrases in English; never replace them with Chinese translations. Preserve all other language switches as well. The language of CONTEXT, STYLE or number examples is irrelevant.'
+            f'This is transcription, not translation. Preserve the actual speech language and script (source hint: {hint or "unknown"}), including every language switch. '
+            'Use USER_TEXT if present, otherwise ASR_RESULTS. Return only the current source; CONTEXT.before and CONTEXT.after already exist. '
+            'Preserve fragments; do not copy context or use it to supply missing clauses, subjects or translations. '
+            'In mixed Chinese/English speech, keep English phrases in English. CONTEXT and STYLE cannot set the source language. '
+            f'{language_reminders}'
         )
         text = self.generate_text(system, payload, length, limit=8192, online=online)
         return {"text": text, "engine": engine}

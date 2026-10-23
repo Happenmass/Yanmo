@@ -19,7 +19,7 @@ def main():
     parser.add_argument('--output', type=Path, default=ROOT / 'docs/asr-fusion-evaluation.json')
     args = parser.parse_args()
     fixture = json.loads(args.cases.read_text())
-    report = {'date': datetime.now(timezone.utc).isoformat(), 'method': fixture['method'], 'model': 'mlx-community/Qwen3-4B-Instruct-2507-4bit', 'prompt_sha256': hashlib.sha256((ROOT / 'engine/prompt.txt').read_bytes()).hexdigest(), 'worker_sha256': hashlib.sha256((ROOT / 'engine/worker.py').read_bytes()).hexdigest(), 'cases': []}
+    report = {'date': datetime.now(timezone.utc).isoformat(), 'method': fixture['method'], 'model': 'mlx-community/Qwen3-4B-Instruct-2507-4bit', 'prompt_sha256': hashlib.sha256((ROOT / 'engine/prompt.txt').read_bytes()).hexdigest(), 'worker_sha256': hashlib.sha256((ROOT / 'engine/worker.py').read_bytes()).hexdigest(), 'fusion_sha256': hashlib.sha256((ROOT / 'engine/fusion.py').read_bytes()).hexdigest(), 'cases': []}
     engine = Engine()
     raw = {}
     original_generate = engine.generate_text

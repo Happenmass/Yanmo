@@ -1,0 +1,412 @@
+{
+  "date": "2026-10-23T04:32:19.887270+00:00",
+  "method": "Synthetic disfluency controls replayed through the actual offline text model. Check hesitation and stutter removal alongside meaningful particles, reduplication, approximate quantities, precise values, identifiers, language switches, edited text and verbatim mode. These selected cases are not a speech-recognition accuracy benchmark.",
+  "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+  "prompt_sha256": "b0cc511af6cfe17d606858a76fe04d6c69d97ac2233f4000fa68ad82ef34eb4e",
+  "worker_sha256": "7d77f324a8026f1834c66921286c5a126e722158a71121ee94ff78a6f10c15d9",
+  "cases": [
+    {
+      "id": "zh-hesitation-prefix",
+      "result": {
+        "text": "今天先整理会议记录。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "今天先整理会议记录。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 5.001
+    },
+    {
+      "id": "zh-hesitation-middle",
+      "result": {
+        "text": "这份清单明天发给你。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "这份清单明天发给你。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.172
+    },
+    {
+      "id": "zh-multiple-hesitations",
+      "result": {
+        "text": "嗯，先把清单发给我。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": false,
+      "model_body_unchanged": true,
+      "raw_output": "嗯，先把清单发给我。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.12
+    },
+    {
+      "id": "zh-word-stutters",
+      "result": {
+        "text": "我我觉得，这个方案可以先试试。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": false,
+      "model_body_unchanged": true,
+      "raw_output": "我我觉得，这个方案可以先试试。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.174
+    },
+    {
+      "id": "zh-word-restart",
+      "result": {
+        "text": "先把报告发给小林。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "先把报告发给小林。",
+      "system_prompt_sha256": "a6b84fc6100cc609178434e2b3a1af08032f3d899049b21095b3c71b0a31d8a1",
+      "elapsed": 2.159
+    },
+    {
+      "id": "zh-price-range-stutter",
+      "result": {
+        "text": "预算大概四五百元。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "预算大概四五百元。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.177
+    },
+    {
+      "id": "zh-duration-range-stutter",
+      "result": {
+        "text": "要两三天左右。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "要两三天左右。",
+      "system_prompt_sha256": "116598c70f63049d6a7927e81b3b2886ebfa94c583328b1bf0570c5aae6088c7",
+      "elapsed": 2.125
+    },
+    {
+      "id": "zh-headcount-range-stutter",
+      "result": {
+        "text": "大概要三四个人。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "大概要三四个人。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.159
+    },
+    {
+      "id": "zh-range-after-restart",
+      "result": {
+        "text": "大概三四天能弄好。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "大概三四天能弄好。",
+      "system_prompt_sha256": "a6b84fc6100cc609178434e2b3a1af08032f3d899049b21095b3c71b0a31d8a1",
+      "elapsed": 2.136
+    },
+    {
+      "id": "zh-dual-agreed-stutters",
+      "result": {
+        "text": "预算大概四五百元。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "预算大概四五百元。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.22
+    },
+    {
+      "id": "zh-short-dual-range-stutter",
+      "result": {
+        "text": "预算两三千元。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "预算两三千元。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.204
+    },
+    {
+      "id": "zh-short-dual-range-without-stutter",
+      "result": {
+        "text": "预算两三千元。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "预算两三千元。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.203
+    },
+    {
+      "id": "zh-dual-differing-stutters",
+      "result": {
+        "text": "这件事大概三四天能办好。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "这件事大概三四天能办好。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.236
+    },
+    {
+      "id": "zh-natural-reduplication",
+      "result": {
+        "text": "你先看看，想一想，再给大家讲一讲，慢慢来。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "你先看看，想一想，再给大家讲一讲，慢慢来。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.286
+    },
+    {
+      "id": "zh-emphasis-and-idioms",
+      "result": {
+        "text": "真的很难。请一项一项检查，三思而后行。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": false,
+      "model_body_unchanged": true,
+      "raw_output": "真的很难。请一项一项检查，三思而后行。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.201
+    },
+    {
+      "id": "zh-meaningful-question-particle",
+      "result": {
+        "text": "嗯？你说的是今天吗？",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "嗯？你说的是今天吗？",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.24
+    },
+    {
+      "id": "zh-standalone-affirmation",
+      "result": {
+        "text": "嗯。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "嗯。",
+      "system_prompt_sha256": "a6b84fc6100cc609178434e2b3a1af08032f3d899049b21095b3c71b0a31d8a1",
+      "elapsed": 2.182
+    },
+    {
+      "id": "zh-meaningful-tone",
+      "result": {
+        "text": "好啊，我们就这么定吧，你觉得呢？",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "好啊，我们就这么定吧，你觉得呢？",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.291
+    },
+    {
+      "id": "zh-quoted-hesitation-word",
+      "result": {
+        "text": "词表里要加上“呃”和“嗯”这两个字。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "词表里要加上“呃”和“嗯”这两个字。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.39
+    },
+    {
+      "id": "zh-approximate-ranges",
+      "result": {
+        "text": "大概两三天，三五个人就能做完。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "大概两三天，三五个人就能做完。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.293
+    },
+    {
+      "id": "zh-precision-and-repeated-digits",
+      "result": {
+        "text": "电流0.0033安，电阻3300欧。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "电流0.0033安，电阻3300欧。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.378
+    },
+    {
+      "id": "zh-repeated-identifiers",
+      "result": {
+        "text": "订单编号是003337，校验码是111222。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "订单编号是003337，校验码是111222。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.447
+    },
+    {
+      "id": "zh-spoken-repeated-code",
+      "result": {
+        "text": "验证码333666，连续三个三和三个六。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "验证码333666，连续三个三和三个六。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.355
+    },
+    {
+      "id": "zh-two-real-quantities",
+      "result": {
+        "text": "甲组3台，乙组3台，共6台。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "甲组3台，乙组3台，共6台。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.333
+    },
+    {
+      "id": "zh-real-temporal-connectors",
+      "result": {
+        "text": "先备份，然后删除旧目录，再重启。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "先备份，然后删除旧目录，再重启。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.311
+    },
+    {
+      "id": "zh-roles-and-condition",
+      "result": {
+        "text": "你有空的时候，我可以帮你演示一下。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "你有空的时候，我可以帮你演示一下。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.269
+    },
+    {
+      "id": "zh-negation-and-uncertainty",
+      "result": {
+        "text": "嗯，我不是说一定要改，只是可能要等两三天。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": false,
+      "model_body_unchanged": true,
+      "raw_output": "嗯，我不是说一定要改，只是可能要等两三天。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.319
+    },
+    {
+      "id": "zh-en-code-switch-with-stutter",
+      "result": {
+        "text": "先跑一下 smoke test，然后 merge。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "先跑一下 smoke test，然后 merge。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.224
+    },
+    {
+      "id": "en-hesitation-and-stutter",
+      "result": {
+        "text": "I think we need two or three days.",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "I think we need two or three days.",
+      "system_prompt_sha256": "66ad2ed8ce9fc1ec4a5b2984cfb861c39879ca50550087fc3c96f494f7083884",
+      "elapsed": 2.248
+    },
+    {
+      "id": "zh-user-edit-takes-precedence",
+      "result": {
+        "text": "我觉得七八百元就够了。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "我觉得七八百元就够了。",
+      "system_prompt_sha256": "ad709a5e3381e9cc24735bea7c40ccb70c77241e69725d3dd60df3ac557933b5",
+      "elapsed": 2.19
+    },
+    {
+      "id": "zh-verbatim-preserves-hesitation-and-number-stutter",
+      "result": {
+        "text": "呃，大概四五五百元。",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "呃，大概四五五百元。",
+      "system_prompt_sha256": "1588348629b0714342982ec84aad6731fac28f30d445dd5140a90d658294b199",
+      "elapsed": 1.735
+    },
+    {
+      "id": "en-verbatim-preserves-stutter",
+      "result": {
+        "text": "Um, I I think so.",
+        "engine": "50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+      },
+      "passed": true,
+      "model_body_unchanged": true,
+      "raw_output": "Um, I I think so.",
+      "system_prompt_sha256": "6a21dbea063b9b62dd90dc0e74232417637fbd2217902400228ea333e4aa8b84",
+      "elapsed": 1.738
+    }
+  ],
+  "passed": 28,
+  "failed": [
+    "zh-multiple-hesitations",
+    "zh-word-stutters",
+    "zh-emphasis-and-idioms",
+    "zh-negation-and-uncertainty"
+  ],
+  "fusion_sha256": "843c562182640b3a8b41ed0b5ab82b78a4eed6ce758e494f72bb0e39339621fe",
+  "baseline_comparison": {
+    "common_cases": 30,
+    "baseline_passed": 24,
+    "current_passed": 26,
+    "improved": [
+      "zh-dual-agreed-stutters",
+      "zh-en-code-switch-with-stutter"
+    ],
+    "regressions": [],
+    "baseline_fusion_sha256": "931e75b19549658a4e5d8a626ffd57b9c3a33d71ccf3f0e2fdfb84e6763723d3"
+  }
+}

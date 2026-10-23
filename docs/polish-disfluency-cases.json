@@ -1,0 +1,165 @@
+{
+  "method": "Synthetic disfluency controls replayed through the actual offline text model. Check hesitation and stutter removal alongside meaningful particles, reduplication, approximate quantities, precise values, identifiers, language switches, edited text and verbatim mode. These selected cases are not a speech-recognition accuracy benchmark.",
+  "cases": [
+    {
+      "id": "zh-hesitation-prefix",
+      "request": {"text": "呃，今天先整理会议记录。"},
+      "contains": ["今天", "整理会议记录"], "forbid": ["呃"]
+    },
+    {
+      "id": "zh-hesitation-middle",
+      "request": {"text": "这份，呃，清单明天发给你。"},
+      "contains": ["清单", "明天", "发给你"], "forbid": ["呃"]
+    },
+    {
+      "id": "zh-multiple-hesitations",
+      "request": {"text": "嗯，呃，先把清单发给我。"},
+      "contains": ["清单", "发给我"], "forbid": ["嗯", "呃"]
+    },
+    {
+      "id": "zh-word-stutters",
+      "request": {"text": "我我觉得，这个这个方案可以先试试。"},
+      "contains": ["我觉得", "这个方案", "可以", "试试"], "forbid": ["我我", "这个这个"]
+    },
+    {
+      "id": "zh-word-restart",
+      "request": {"text": "先把报告发、发给小林。"},
+      "contains": ["报告", "发给小林"], "forbid": ["发、发", "发，发"]
+    },
+    {
+      "id": "zh-price-range-stutter",
+      "request": {"text": "预算大概四五五百元。"},
+      "contains": ["大概"], "contains_any": [["四五百", "400到500", "400至500", "400-500"]], "forbid": ["四五五百", "45500"]
+    },
+    {
+      "id": "zh-duration-range-stutter",
+      "request": {"text": "要两两三天左右。"},
+      "contains_any": [["两三天", "二三天", "2到3天", "2至3天", "2-3天"]], "forbid": ["两两三", "223天"]
+    },
+    {
+      "id": "zh-headcount-range-stutter",
+      "request": {"text": "大概要三四四个人。"},
+      "contains": ["大概"], "contains_any": [["三四个", "3到4个", "3至4个", "3-4个"]], "forbid": ["三四四", "344个"]
+    },
+    {
+      "id": "zh-range-after-restart",
+      "request": {"text": "大概三、三四天能弄好。"},
+      "contains_any": [["三四天", "三到四天", "三至四天", "三、四天", "3到4天", "3至4天", "3-4天"]], "forbid": ["三、三", "三，三"]
+    },
+    {
+      "id": "zh-dual-agreed-stutters",
+      "request": {"asr_results": [{"transcript": "呃，预算大概四五五百元。", "language": "Chinese"}, {"transcript": "呃，预算大概四五五百元。", "language": "Chinese"}]},
+      "contains": ["大概"], "contains_any": [["四五百", "400到500", "400至500", "400-500"]], "forbid": ["呃", "四五五百"]
+    },
+    {
+      "id": "zh-short-dual-range-stutter",
+      "request": {"text": "呃，预算两三三千元。", "asr_results": [{"transcript": "呃，预算两三三千元。", "language": "Chinese"}, {"transcript": "呃，预算两三三千元", "language": "Chinese"}]},
+      "contains": ["预算"], "contains_any": [["两三千", "2000到3000", "2000至3000", "2000-3000"]], "forbid": ["呃", "两三三千", "233000"]
+    },
+    {
+      "id": "zh-short-dual-range-without-stutter",
+      "request": {"asr_results": [{"transcript": "预算两三千元。", "language": "Chinese"}, {"transcript": "预算两三千元。", "language": "Chinese"}]},
+      "contains": ["预算"], "contains_any": [["两三千", "2000到3000", "2000至3000", "2000-3000"]], "forbid": ["两三三千", "233000"]
+    },
+    {
+      "id": "zh-dual-differing-stutters",
+      "request": {"asr_results": [{"transcript": "呃，这件事大概三四四天能办好。", "language": "Chinese"}, {"transcript": "这件事大概三四天能办好。", "language": "Chinese"}]},
+      "contains": ["这件事", "大概", "办好"], "contains_any": [["三四天", "3到4天", "3至4天", "3-4天"]], "forbid": ["呃", "三四四"]
+    },
+    {
+      "id": "zh-natural-reduplication",
+      "request": {"text": "你先看看，想一想，再给大家讲一讲，慢慢来。"},
+      "contains": ["看看", "想一想", "讲一讲", "慢慢来"]
+    },
+    {
+      "id": "zh-emphasis-and-idioms",
+      "request": {"text": "真的，真的很难。请一项一项检查，三思而后行。"},
+      "contains": ["真的，真的", "一项一项", "三思而后行"]
+    },
+    {
+      "id": "zh-meaningful-question-particle",
+      "request": {"text": "嗯？你说的是今天吗？"},
+      "contains": ["嗯", "今天", "吗"]
+    },
+    {
+      "id": "zh-standalone-affirmation",
+      "request": {"text": "嗯。"},
+      "contains": ["嗯"]
+    },
+    {
+      "id": "zh-meaningful-tone",
+      "request": {"text": "好啊，我们就这么定吧，你觉得呢？"},
+      "contains": ["好啊", "吧", "呢"]
+    },
+    {
+      "id": "zh-quoted-hesitation-word",
+      "request": {"text": "词表里要加上“呃”和“嗯”这两个字。"},
+      "contains": ["词表", "呃", "嗯", "两个字"]
+    },
+    {
+      "id": "zh-approximate-ranges",
+      "request": {"text": "大概两三天，三五个人就能做完。"},
+      "contains": ["大概", "两三天", "三五个"]
+    },
+    {
+      "id": "zh-precision-and-repeated-digits",
+      "request": {"text": "电流0.0033安，电阻3300欧。"},
+      "contains": ["0.0033", "3300", "安", "欧"]
+    },
+    {
+      "id": "zh-repeated-identifiers",
+      "request": {"text": "订单编号是003337，校验码是111222。"},
+      "contains": ["003337", "111222"]
+    },
+    {
+      "id": "zh-spoken-repeated-code",
+      "request": {"text": "验证码三三三六六六，连续三个三和三个六。"},
+      "contains_any": [["333666", "三三三六六六"], ["三个三", "三个3", "3个3"], ["三个六", "三个6", "3个6"]]
+    },
+    {
+      "id": "zh-two-real-quantities",
+      "request": {"text": "甲组3台，乙组3台，总共6台。"},
+      "contains": ["甲组3台", "乙组3台", "6台"]
+    },
+    {
+      "id": "zh-real-temporal-connectors",
+      "request": {"text": "先备份，然后删除旧目录，再重启。"},
+      "contains": ["先备份", "然后", "删除旧目录", "再重启"]
+    },
+    {
+      "id": "zh-roles-and-condition",
+      "request": {"text": "呃，你有空的时候，我可以帮你演示一下。"},
+      "contains": ["你有空", "我可以", "演示"], "forbid": ["呃", "我有空"]
+    },
+    {
+      "id": "zh-negation-and-uncertainty",
+      "request": {"text": "嗯，我不是说一定要改，只是可能要等两三天。"},
+      "contains": ["不是", "一定", "可能", "两三天"], "forbid": ["嗯"]
+    },
+    {
+      "id": "zh-en-code-switch-with-stutter",
+      "request": {"text": "呃，先跑一下 smoke test，然然后再 merge。", "asr_results": [{"transcript": "呃，先跑一下 smoke test，然然后再 merge。", "language": "Chinese"}]},
+      "contains": ["smoke test", "merge", "然后"], "forbid": ["呃", "然然后", "烟雾测试", "合并"]
+    },
+    {
+      "id": "en-hesitation-and-stutter",
+      "request": {"text": "Um, I I think we need two or three days.", "before": "这里用中文记录。"},
+      "contains": ["I think", "two or three days"], "forbid": ["Um", "I I", "两三天"]
+    },
+    {
+      "id": "zh-user-edit-takes-precedence",
+      "request": {"text": "呃，大概四五五百元。", "user_text": "呃，我觉得七八百元就够了。", "asr_results": [{"transcript": "呃，大概四五五百元。"}]},
+      "contains": ["我觉得", "七八百", "够了"], "forbid": ["呃", "四五", "455"]
+    },
+    {
+      "id": "zh-verbatim-preserves-hesitation-and-number-stutter",
+      "request": {"text": "呃，大概四五五百元。", "task": "verbatim"},
+      "contains": ["呃", "四五五百"]
+    },
+    {
+      "id": "en-verbatim-preserves-stutter",
+      "request": {"text": "Um, I I think so.", "task": "verbatim"},
+      "contains": ["Um", "I I", "think so"]
+    }
+  ]
+}
