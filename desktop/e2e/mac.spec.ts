@@ -22,6 +22,8 @@ test.beforeAll(async () => {
   page.on('pageerror', error => errors.push(error.message));
   await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible();
   await expect.poll(() => application.evaluate(({ app }) => app.dock!.isVisible())).toBe(false);
+  // checking is also false before the startup model check begins, so wait for its result.
+  await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).modelsChecked)).toBe(true);
   await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).checking)).toBe(false);
 });
 test.afterAll(async () => { if (application) await application.close(); if (directory) await rm(directory, { recursive: true, force: true }); });
