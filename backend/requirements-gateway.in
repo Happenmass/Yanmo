@@ -1,0 +1,8 @@
+# Inference gateway without MLX; on Windows this is the whole native Python runtime.
+fastapi>=0.115,<1
+uvicorn>=0.34,<1
+python-multipart>=0.0.20,<1
+httpx>=0.28,<1
+soundfile>=0.13,<1
+# Language hints for the shared polish prompt.
+langid==1.1.6

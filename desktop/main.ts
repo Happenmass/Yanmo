@@ -1,6 +1,7 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, safeStorage, screen, shell, Tray } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, safeStorage, screen, shell, Tray } from 'electron';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawn, ChildProcess } from 'node:child_process';
@@ -8,7 +9,9 @@ import { createInterface } from 'node:readline';
 import { Controller } from './controller';
 import { NativeBridge, BackendClient } from './processes';
 import { LibraryStore } from './store';
-import { ACTIONS, Action, AppState, busy, Capability, CAPABILITIES, cocoaNow, defaultSettings, migrateSettings, Page, Settings } from './shared';
+import { probeWindows, WSL_DISTRO } from './precheck';
+import { checkWindowsModels, prepareWindowsRuntime, setupRunning, wslPrepareModels } from './windows-runtime';
+import { ACTIONS, Action, AppState, busy, Capability, CAPABILITIES, cocoaNow, defaultSettings, migrateSettings, Page, Settings, WINDOWS_MODELS } from './shared';
 
 let mainWindow: BrowserWindow;
 let overlay: BrowserWindow;
@@ -108,14 +111,19 @@ async function importAudio() {
 const appBundle = () => resolve(process.execPath, '../../..');
 async function prepareModels() {
   if (busy(controller.state.stage) || controller.state.checking || preparation) return;
+  // Windows downloads CUDA-format models inside the WSL runtime, so that runtime must exist first.
+  const windows = process.platform === 'win32';
+  if (windows && controller.environment?.environment !== 'ready') throw new Error('请先准备运行环境，再下载模型。');
   const settings = structuredClone(controller.state.settings);
+  const modelArgs = ['--source', settings.modelSource, '--asr', settings.asrModel, '--llm', settings.llmModel];
+  const [command, args] = windows ? wslPrepareModels(root, homedir(), modelArgs) : [runtimePython, ['-B', '-u', '-m', 'backend.prepare_models', ...modelArgs, '--sensevoice', settings.senseVoiceModel]];
   controller.state.checking = true;
   controller.notice('正在检查全局缓存，并准备模型（来源：' + (settings.modelSource === 'modelscope' ? 'ModelScope' : 'Hugging Face') + '）…');
   try {
     await new Promise<void>((resolve, reject) => {
       const env: NodeJS.ProcessEnv = { ...process.env, HF_HUB_OFFLINE: '0', HF_HUB_DISABLE_TELEMETRY: '1', PYTHONUNBUFFERED: '1' };
       delete env.PYTHONHOME; delete env.PYTHONPATH; delete env.VIRTUAL_ENV;
-      const child = spawn(runtimePython, ['-B', '-u', '-m', 'backend.prepare_models', '--source', settings.modelSource, '--asr', settings.asrModel, '--llm', settings.llmModel, '--sensevoice', settings.senseVoiceModel], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(command, args, { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
       preparation = child;
       child.stderr!.resume();
       createInterface({ input: child.stdout! }).on('line', line => {
@@ -131,7 +139,17 @@ async function prepareModels() {
     controller.notice('模型已准备，可在本机离线使用。');
   } finally { controller.state.checking = false; controller.changed(); await controller.checkModels(); }
   // First run goes straight from the download to the Accessibility grant, so FN works when the guide asks for it.
-  if (!controller.state.settings.onboarded && !controller.state.native.accessibility) await controller.permissions(true, { app: appBundle() });
+  if (!windows && !controller.state.settings.onboarded && !controller.state.native.accessibility) await controller.permissions(true, { app: appBundle() });
+}
+async function prepareRuntime() {
+  if (process.platform !== 'win32' || busy(controller.state.stage) || controller.state.checking || preparation) return;
+  controller.state.checking = true; controller.changed();
+  let result: 'ready' | 'reboot';
+  // Multi-GB data stays in Local AppData, not the roaming profile.
+  const dataDir = join(process.env.LOCALAPPDATA || app.getPath('appData'), 'Yanmo', 'wsl');
+  try { result = await prepareWindowsRuntime({ root, dataDir, fetch: net.fetch }, message => controller.notice(message)); }
+  finally { controller.state.checking = false; controller.changed(); await controller.checkModels(); }
+  controller.notice(result === 'reboot' ? 'WSL2 已启用，请重启电脑后回到言墨，再点一次「准备运行环境」。' : '运行环境已就绪，可以下载模型。');
 }
 // API keys are encrypted with safeStorage, whose key lives in the macOS Keychain; the file alone cannot be read elsewhere.
 const keysPath = () => join(dataDirectory, 'online-keys.json');
@@ -167,6 +185,7 @@ async function invoke(action: string, value: any) {
     case 'import': await importAudio(); break;
     case 'check': await controller.checkModels(); break;
     case 'prepareModels': await prepareModels(); break;
+    case 'prepareRuntime': await prepareRuntime(); break;
     case 'permissions': {
       // The guide panel flies from the clicked button; renderer rects are relative to the window content.
       const bounds = mainWindow.getContentBounds();
@@ -224,20 +243,28 @@ function authorize(senderID: number, url?: string) {
 }
 
 app.whenReady().then(async () => {
-  if (process.platform !== 'darwin') throw new Error('当前开发版先提供 Mac MLX；Windows 运行时将在下一阶段接入。');
-  const bridgePath = app.isPackaged ? join(root, 'native/YanmoBridge') : join(root, '.build/release/YanmoBridge');
-  const python = process.env.YANMO_PYTHON || join(root, 'python/bin/python3.12');
-  const developmentPython = join(root, 'runtime/macos/python/bin/python3.12');
+  if (process.platform !== 'darwin' && process.platform !== 'win32') throw new Error('言墨目前只支持 Mac 与 Windows。');
+  const windows = process.platform === 'win32';
+  const bridgePath = app.isPackaged ? join(root, windows ? 'native/YanmoBridge.exe' : 'native/YanmoBridge') : join(root, '.build/release/YanmoBridge');
+  // The Win32 helper arrives in P2; until then the runtime pre-check runs via scripts/check-windows-runtime.mts.
+  if (!existsSync(bridgePath)) throw new Error(windows ? 'Windows 系统桥接尚未接入，当前开发版先提供 Mac。' : '缺少系统桥接，请重新构建言墨。');
+  const python = process.env.YANMO_PYTHON || join(root, windows ? 'python/python.exe' : 'python/bin/python3.12');
+  const developmentPython = join(root, windows ? 'runtime/windows/python/python.exe' : 'runtime/macos/python/bin/python3.12');
   const native = new NativeBridge(bridgePath);
   await native.start();
-  let defaults = defaultSettings();
-  if (!process.env.YANMO_DATA_DIR) {
+  let defaults: Settings = windows ? { ...defaultSettings(), ...WINDOWS_MODELS } : defaultSettings();
+  if (!windows && !process.env.YANMO_DATA_DIR) {
     try { defaults = migrateSettings(await native.call('legacySettings')); } catch { /* Invalid legacy settings never overwrite the source. */ }
   }
   const store = new LibraryStore(dataDirectory, defaults, process.env.YANMO_DATA_DIR ? undefined : join(app.getPath('appData'), 'Yanmo/library.json'));
   runtimePython = existsSync(python) ? python : developmentPython;
   const backend = new BackendClient(runtimePython, root);
   controller = new Controller(store, native, backend);
+  if (windows) {
+    controller.state.platform = 'windows';
+    controller.windowsPrecheck = () => probeWindows();
+    controller.windowsModels = settings => checkWindowsModels(root, homedir(), settings);
+  }
   controller.ownSelection = async () => mainWindow?.isFocused() ? String(await mainWindow.webContents.executeJavaScript(
     `(() => { const field = document.activeElement; return field && 'selectionStart' in field && field.selectionEnd > field.selectionStart ? field.value.slice(field.selectionStart, field.selectionEnd) : String(getSelection() || ''); })()`)) : '';
   controller.state.launchAtLogin = app.getLoginItemSettings().openAtLogin;
@@ -285,5 +312,7 @@ app.on('before-quit', event => {
   if (quitting) return;
   event.preventDefault(); quitting = true;
   preparation?.kill('SIGTERM');
+  // ponytail: stops the whole Yanmo distro (never other distributions); a finer stop needs PID tracking inside WSL.
+  if (setupRunning() || (preparation && process.platform === 'win32')) spawn('wsl.exe', ['--terminate', WSL_DISTRO], { windowsHide: true, stdio: 'ignore' });
   if (controller) void controller.shutdown().finally(() => app.exit(0)); else app.exit(0);
 });

@@ -244,3 +244,26 @@ test('在线模型只在启用时随任务发送，地址需 https 或本机', a
     assert.ok(!JSON.stringify(value.controller.state).includes('sk-test'));
   } finally { await value.close(); }
 });
+test('Windows 无 CUDA：未配置在线前不录音也不启动后端，配置后按在线处理', async () => {
+  const value = fixture(); value.backend.mode = 'translation';
+  let statusCalls = 0; value.backend.status = async () => { statusCalls++; return {}; };
+  value.controller.windowsPrecheck = async () => ({ environment: 'unsupported', issues: ['未检测到 NVIDIA GPU 或驱动。'] });
+  try {
+    await value.controller.checkModels();
+    assert.equal(statusCalls, 0);
+    assert.equal(value.controller.state.runtime.status, 'recommend-online');
+    assert.match(value.controller.state.notice, /配置前不会上传/);
+    await value.controller.perform('dictation', {});
+    assert.equal(value.controller.state.stage, 'idle'); assert.equal(value.controller.state.page, 'settings');
+    assert.ok(!value.native.calls.includes('record.start'));
+    assert.match(value.controller.state.notice, /语音识别与文字整理与翻译/);
+    const endpoint = { enabled: true, baseURL: 'https://api.example.test/v1', model: 'remote' };
+    await value.controller.updateSettings({ online: { asr: endpoint, text: endpoint } });
+    assert.equal(value.controller.state.runtime.status, 'online-ready');
+    await value.controller.perform('voiceTranslation', {});
+    assert.equal(value.controller.state.stage, 'recording');
+    await new Promise(resolve => setTimeout(resolve, 380));
+    await value.controller.finishRecording();
+    assert.deepEqual(Object.keys(value.backend.requests[0].online), ['asr', 'text']);
+  } finally { await value.close(); }
+});

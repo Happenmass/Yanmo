@@ -1,9 +1,5 @@
 -r ../engine/requirements.txt
-fastapi>=0.115,<1
-uvicorn>=0.34,<1
-python-multipart>=0.0.20,<1
-httpx>=0.28,<1
-soundfile>=0.13,<1
+-r requirements-gateway.in
 # Match the libraries used by the validated native prototype.
 mlx==0.32.0
 numpy==2.5.1

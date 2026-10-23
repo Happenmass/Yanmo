@@ -22,6 +22,10 @@ export interface Settings {
 export interface Destination { id?: string; name?: string; category?: string; before?: string; after?: string; secure?: boolean }
 export interface NativeStatus { accessibility: boolean; eventTap: boolean; microphone: number; devices: { id: string; name: string }[] }
 export interface Translation { source: string; result: string; language: Language; loading: boolean; error: string }
+// Pre-check result of this machine's local inference environment, before models are considered.
+export interface LocalEnvironment { environment: 'ready' | 'repair' | 'unsupported'; issues: string[]; gpu?: string }
+export type RuntimeStatus = 'checking' | 'local-ready' | 'models-pending' | 'local-repair' | 'recommend-online' | 'api-pending' | 'online-ready';
+export interface RuntimeState { status: RuntimeStatus; issues: string[]; gpu?: string; capabilities: Record<Capability, 'local' | 'online' | 'unavailable'> }
 export interface AppState {
   page: Page; stage: Stage; action: Action; settings: Settings; library: Library;
   selectedID: string | null; draft: string; original: string; notice: string;
@@ -29,7 +33,7 @@ export interface AppState {
   seconds: number; level: number; destinationName: string; checking: boolean; modelsChecked: boolean; overlayVisible: boolean;
   models: { asr: boolean; sensevoice: boolean; llm: boolean; metal: boolean }; native: NativeStatus;
   translation: Translation; captureAction: Action | null; shortcutNotice: string; launchAtLogin: boolean;
-  onlineKeys: Record<Capability, boolean>;
+  onlineKeys: Record<Capability, boolean>; runtime: RuntimeState; platform: 'mac' | 'windows';
 }
 export type TaskEvent = { event: 'stage' | 'transcript' | 'result' | 'error' | 'cancelled'; task_id: string; stage?: Stage; text?: string; original?: string; processed?: boolean; message?: string; asr_results?: ASRResult[] };
 export const LANGUAGES: Record<Language, string> = { en: '英语', 'zh-Hans': '简体中文', ja: '日语', de: '德语' };
@@ -50,6 +54,8 @@ export const defaultSettings = (): Settings => ({
   },
   online: { asr: { enabled: false, baseURL: '', model: '' }, text: { enabled: false, baseURL: '', model: '' } },
 });
+// CUDA-format defaults for the Windows vLLM runtime, sized for an 8 GB GPU (spec §8.2).
+export const WINDOWS_MODELS = { asrModel: 'Qwen/Qwen3-ASR-0.6B', llmModel: 'Qwen/Qwen3-4B-AWQ' } as const;
 export const CAPABILITIES: Record<Capability, string> = { asr: '语音识别', text: '文字整理与翻译' };
 /** https only; plain http is allowed for a server on this Mac. Credentials or query strings in the URL are refused. */
 export function checkOnlineURL(value: string) {

@@ -49,7 +49,7 @@ Mac 版保留原型的主要功能：
 
 模型下载来源默认 **ModelScope**，准备时先复用完整的全局缓存；日常推理不自动下载或上传输入。SenseVoice Small 共用一份多语言权重，按 Qwen 检测出的中文、英文分别指定 `zh`、`en`；其他语言或未知语言跳过复核。
 
-Electron、Swift 系统桥接和独立 Python/MLX 运行时均随应用包交付，权重另存用户全局缓存。当前是 ad-hoc 签名的本机开发构建，尚未完成公证及干净机器验收。Mac 可明确启用 OpenAI 兼容的在线接口，默认仍走本机；Windows WSL2/vLLM 与 CUDA 预检查留待后续。
+Electron、Swift 系统桥接和独立 Python/MLX 运行时均随应用包交付，权重另存用户全局缓存。当前是 ad-hoc 签名的本机开发构建，尚未完成公证及干净机器验收。Mac 可明确启用 OpenAI 兼容的在线接口，默认仍走本机；Windows 已有 CUDA/WSL2 预检查与无 CUDA 在线分流（[P0 说明](docs/architecture/electron_01_Runtime_运行时与预检查.md)），系统桥接与 WSL2/vLLM 本地推理留待后续，Windows 版暂不能启动。
 
 [重构方案](docs/architecture/electron_00_Overview_顶层架构.md) · [本轮实现与验证](docs/electron-mac-2026-10-21.md)
 

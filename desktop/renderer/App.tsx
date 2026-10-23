@@ -61,12 +61,12 @@ export default function App() {
   return <div className={'app-shell' + (guiding ? ' guiding' : '')}>
     <aside className="sidebar" inert={guiding}><PaperFibers/><div className="brand"><BrandMark /><div><h1>言墨</h1><span>YANMO</span><p className="brand-caption">语音输入</p></div></div>
       <nav aria-label="主导航"><i className="nav-ink" style={{ transform: `translateY(${Object.keys(pageNames).indexOf(state.page) * 57}px)` }}/>{(Object.keys(pageNames) as Page[]).map(page => <button key={page} aria-current={state.page === page ? 'page' : undefined} className={state.page === page ? 'selected' : ''} onClick={() => void api('page', page)}><span>{pageNames[page][0]}</span></button>)}</nav>
-      <div className="sidebar-bottom"><Dot ready={state.models.metal}>本地运行</Dot><p>开源 · 私密 · 离线</p></div>
+      <div className="sidebar-bottom"><Dot ready={state.platform === 'windows' ? ['local-ready', 'models-pending'].includes(state.runtime.status) : state.models.metal}>本地运行</Dot><p>开源 · 私密 · 离线</p></div>
     </aside>
     {guiding ? <main>{modelsReady(state) ? <Onboarding state={state}/> : <ModelSetup state={state}/>}<Mountains /><PaperFibers /></main> : <main><header className="topbar"><span className="page-name">{pageNames[state.page][0]}</span><span className="slash">·</span><span>{pageNames[state.page][1]}</span>{state.settings.online.asr.enabled || state.settings.online.text.enabled ? <div className="privacy online"><Cloud size={12} />已开启在线处理</div> : <div className="privacy"><LockKeyhole size={12} />所有处理留在本机</div>}</header>
       <div className="page-content" key={state.page}>{state.page === 'desk' ? <Desk state={state} /> : state.page === 'manuscripts' ? <Manuscripts state={state} /> : state.page === 'dictionary' ? <Dictionary state={state} /> : <Preferences state={state} />}</div>
       {state.notice && <div className="notice" role="status"><span>{state.notice}</span><button className="icon-button" aria-label="关闭提示" onClick={() => void api('clearNotice')}><X size={13}/></button></div>}
-      <footer className="footer"><Dot ready={state.settings.online.asr.enabled || (state.models.asr && state.models.sensevoice && state.models.metal)}>语音识别 · {state.settings.online.asr.enabled ? '在线' : state.models.asr && state.models.sensevoice && state.models.metal ? '本地就绪' : '待配置'}</Dot><span className="footer-divider"/><Dot ready={state.settings.online.text.enabled || (state.models.llm && state.models.metal)}>文字整理 · {state.settings.online.text.enabled ? '在线' : state.models.llm && state.models.metal ? '本地就绪' : '待配置'}</Dot><button className="footer-key" onClick={() => void api('page', 'settings')}>{state.settings.shortcuts.dictation[0] && keycap(state.settings.shortcuts.dictation[0])}<span>语音输入</span></button></footer>
+      <footer className="footer"><Dot ready={state.runtime.capabilities.asr !== 'unavailable'}>语音识别 · {capabilityLabel[state.runtime.capabilities.asr]}</Dot><span className="footer-divider"/><Dot ready={state.runtime.capabilities.text !== 'unavailable'}>文字整理 · {capabilityLabel[state.runtime.capabilities.text]}</Dot><button className="footer-key" onClick={() => void api('page', 'settings')}>{state.settings.shortcuts.dictation[0] && keycap(state.settings.shortcuts.dictation[0])}<span>语音输入</span></button></footer>
       <Mountains /><PaperFibers />
     </main>}
   </div>;
@@ -78,17 +78,26 @@ const guideSteps: { action?: Action; name: string; title: string; caption: strin
   { action: 'voiceTranslation', name: '口述翻译', title: '说中文，写外文。', caption: '照常开口，写进输入框的是译文。', lines: (keys, target) => ['把光标放进输入框，按下 ' + keys + ' 说话', '浮层出现「译」字，表示这一次会翻译', '说完再按一次，' + target + '译文写入光标处'] },
   { name: '翻译弹窗', title: '译文，另起一页。', caption: '划词翻译的结果在独立弹窗里，不改动原文。', lines: () => ['在弹窗顶部切换目标语言，或重新翻译', '「排版 / 源码」切换 Markdown 显示', '复制译文后关闭，译文不会保存'] },
 ];
+const capabilityLabel = { online: '在线', local: '本地就绪', unavailable: '待配置' };
 // First run downloads the local models before teaching shortcuts that would otherwise fail.
-const modelsReady = (state: AppState) => state.modelsChecked && (state.settings.online.asr.enabled || (state.models.asr && state.models.sensevoice)) && (state.settings.online.text.enabled || state.models.llm);
+// Windows has no SenseVoice review.
+const modelsReady = (state: AppState) => state.modelsChecked && (state.settings.online.asr.enabled || (state.models.asr && (state.models.sensevoice || state.platform === 'windows'))) && (state.settings.online.text.enabled || state.models.llm);
 function ModelSetup({ state }: { state: AppState }) {
-  const { settings, models, checking, modelsChecked } = state;
+  const { settings, models, checking, modelsChecked, runtime } = state;
+  const windows = state.platform === 'windows';
+  // Windows prepares WSL2 and the CUDA runtime before any model download; without a supported GPU it stops here.
+  const needsEnvironment = windows && runtime.status === 'local-repair';
+  const unsupported = windows && ['recommend-online', 'api-pending'].includes(runtime.status);
   return <section className="guide"><header className="guide-top"><span>初次见面</span><button className="text-button" onClick={() => void api('settings', { onboarded: true }).then(result => { if (result.ok) void api('page', 'settings'); })}>跳过引导</button></header>
     <div className="guide-body"><div className="guide-text"><h2 className="brush-reveal">先备好笔墨。</h2><p className="guide-caption">言墨在本机识别与整理，第一次使用需要下载模型。</p>
-      <ol><li>共约 5 GB，保存在用户全局缓存；已有完整缓存会直接复用</li><li>只有这一步需要联网，之后录音、识别和整理都在本机完成</li><li>准备完成后，进入快捷键引导</li></ol>
+      {windows ? <ol><li>先准备运行环境：启用 WSL2 并安装言墨专用运行库，约下载 4.4 GB</li><li>再下载模型约 4.6 GB，保存在用户全局缓存；之后录音、识别和整理都在本机完成</li><li>准备完成后，进入快捷键引导</li></ol>
+        : <ol><li>共约 5 GB，保存在用户全局缓存；已有完整缓存会直接复用</li><li>只有这一步需要联网，之后录音、识别和整理都在本机完成</li><li>准备完成后，进入快捷键引导</li></ol>}
       <label className="inline-setting"><span>下载来源</span><select aria-label="模型下载来源" disabled={checking} value={settings.modelSource} onChange={event => void api('settings', { modelSource: event.target.value })}><option value="modelscope">ModelScope（默认）</option><option value="huggingface">Hugging Face</option></select></label>
-      <button className="button primary" disabled={checking || !modelsChecked} onClick={() => void api('prepareModels')}>{!modelsChecked ? '正在检查本地缓存…' : checking ? '正在准备模型…' : '下载模型'}</button>
+      {unsupported ? <p className="fine-print">{runtime.issues.join(' ')} 可跳过引导，在设置中配置在线处理。</p>
+        : needsEnvironment ? <><button className="button primary" disabled={checking} onClick={() => void api('prepareRuntime')}>{checking ? '正在准备运行环境…' : '准备运行环境'}</button>{!checking && <p className="fine-print">{runtime.issues.join(' ')}</p>}</>
+        : <button className="button primary" disabled={checking || !modelsChecked} onClick={() => void api('prepareModels')}>{!modelsChecked ? (windows ? '正在检查本地环境…' : '正在检查本地缓存…') : checking ? '正在准备模型…' : '下载模型'}</button>}
       {state.notice && <p className="fine-print" role="status">{state.notice}</p>}
-    </div><figure className="guide-figure"><div className="model-check"><Dot ready={models.asr}>语音识别 · Qwen3-ASR</Dot><Dot ready={models.sensevoice}>中英复核 · SenseVoice</Dot><Dot ready={models.llm}>文字整理 · Qwen3-4B</Dot></div><figcaption>{modelsChecked ? '三项就绪后自动进入引导' : '正在检查全局缓存'}</figcaption></figure></div>
+    </div><figure className="guide-figure"><div className="model-check">{windows && <Dot ready={!needsEnvironment && !unsupported && modelsChecked}>运行环境 · WSL2 + CUDA</Dot>}<Dot ready={models.asr}>语音识别 · Qwen3-ASR</Dot>{!windows && <Dot ready={models.sensevoice}>中英复核 · SenseVoice</Dot>}<Dot ready={models.llm}>文字整理 · Qwen3-4B</Dot></div><figcaption>{modelsChecked ? '三项就绪后自动进入引导' : '正在检查全局缓存'}</figcaption></figure></div>
   </section>;
 }
 function Onboarding({ state }: { state: AppState }) {

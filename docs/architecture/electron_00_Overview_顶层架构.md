@@ -6,7 +6,7 @@
 
 需求依据：本次用户确认的 Electron 重建方向，以及“Mac 默认 MLX；Windows 检查 CUDA，无 CUDA 推荐在线 API”的平台策略。产品行为沿用 [README](../../README.md) 与 [已确认视觉](../design/README.md)。本文给出模块范围和推荐边界，具体版本、接口类型和安装步骤在实施前的专项设计中固定。
 
-实施状态：Mac 的 Electron 界面、Swift helper、独立 Python/MLX 运行时、认证 HTTP/SSE 和旧数据迁移已落地；功能与验证入口见 [Mac 实施记录](../electron-mac-2026-10-21.md)。下文模块清单以重构前原型为基线描述责任划分；Windows helper、CUDA/WSL 预检查、vLLM 及在线配置尚未实现。
+实施状态：Mac 的 Electron 界面、Swift helper、独立 Python/MLX 运行时、认证 HTTP/SSE 和旧数据迁移已落地；功能与验证入口见 [Mac 实施记录](../electron-mac-2026-10-21.md)。下文模块清单以重构前原型为基线描述责任划分；2026-10-23 起 Windows CUDA/WSL2 预检查、无 CUDA 在线分流与网关依赖已实现，见 [P0 运行时与预检查](electron_01_Runtime_运行时与预检查.md)；Windows helper、WSL vLLM 运行时组件与 vLLM Provider 尚未实现。
 
 ## 0. 术语
 

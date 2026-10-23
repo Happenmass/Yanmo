@@ -1,8 +1,9 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { ACTIONS, Action, AppState, ASRResult, Capability, busy, cocoaNow, defaultSettings, Destination, Language, LANGUAGES, Manuscript, NativeStatus, Page, Settings, Shortcut, shortcutID, TaskEvent, Term, validateSettings } from './shared';
+import { ACTIONS, Action, AppState, ASRResult, Capability, CAPABILITIES, busy, cocoaNow, defaultSettings, Destination, Language, LANGUAGES, LocalEnvironment, Manuscript, NativeStatus, Page, Settings, Shortcut, shortcutID, TaskEvent, Term, validateSettings } from './shared';
 import { BackendClient, NativeBridge } from './processes';
 import { LibraryStore } from './store';
+import { decideRuntime } from './precheck';
 
 interface Task {
   id: string; action: Action; settings: Settings; destination: Destination; lexicon: Term[];
@@ -20,6 +21,11 @@ export class Controller extends EventEmitter {
   private settingsQueue: Promise<unknown> = Promise.resolve();
   /** Selected text in 言墨's focused main window, if any. */
   ownSelection?: () => Promise<string>;
+  /** Set on Windows: probes CUDA/WSL2 instead of asking the backend for MLX caches. */
+  windowsPrecheck?: () => Promise<LocalEnvironment>;
+  /** Set on Windows: cache completeness of the CUDA models, checked inside the WSL runtime. */
+  windowsModels?: (settings: Settings) => Promise<{ asr: boolean; llm: boolean }>;
+  environment?: LocalEnvironment;
   constructor(readonly store: LibraryStore, readonly native: NativeBridge, readonly backend: BackendClient) {
     super();
     this.state = {
@@ -29,6 +35,7 @@ export class Controller extends EventEmitter {
       native: { accessibility: false, eventTap: false, microphone: 0, devices: [] },
       translation: { source: '', result: '', language: store.settings.selectionTarget, loading: false, error: '' },
       captureAction: null, shortcutNotice: '', launchAtLogin: false, onlineKeys: { asr: false, text: false },
+      runtime: decideRuntime(store.settings.online, { asr: false, text: false }), platform: 'mac',
     };
     native.on('shortcut', ({ action, destination }: { action: Action; destination: Destination }) => {
       if (action in ACTIONS) void this.perform(action, destination);
@@ -48,6 +55,11 @@ export class Controller extends EventEmitter {
   /** Decrypted by the main process; the renderer only learns whether a key exists. */
   setOnlineKeys(keys: Partial<Record<Capability, string>>) { this.keys = keys; this.state.onlineKeys = { asr: !!keys.asr, text: !!keys.text }; this.changed(); }
   changed() { this.emit('state', this.state); }
+  private refreshRuntime() {
+    const { models } = this.state;
+    // Windows has no SenseVoice review, so its local ASR needs only the ASR model.
+    this.state.runtime = decideRuntime(this.state.settings.online, { asr: models.asr && (models.sensevoice || !!this.windowsPrecheck), text: models.llm }, this.environment);
+  }
   notice(message: string) { this.state.notice = message; this.changed(); }
   private persist() {
     this.store.library = this.state.library; this.store.settings = this.state.settings;
@@ -75,10 +87,23 @@ export class Controller extends EventEmitter {
     this.state.checking = true; this.changed();
     try {
       await this.cancelling;
+      if (this.windowsPrecheck) {
+        // No MLX on Windows: the backend is not started just to look for caches.
+        const [environment, native] = await Promise.all([this.windowsPrecheck(), this.native.call<NativeStatus>('status')]);
+        const cached = environment.environment === 'ready' && this.windowsModels ? await this.windowsModels(settings) : { asr: false, llm: false };
+        this.environment = environment; this.state.native = native;
+        this.state.models = { asr: cached.asr, sensevoice: false, llm: cached.llm, metal: false }; this.refreshRuntime();
+        const { status, issues } = this.state.runtime;
+        if (status === 'recommend-online') this.state.notice = '未检测到可用的 NVIDIA CUDA 环境，建议在设置中配置在线语音识别与文字处理；配置前不会上传任何内容。';
+        else if (status === 'local-repair') this.state.notice = issues.join(' ') + ' 也可在设置中改用在线处理。';
+        return;
+      }
       const [value, native] = await Promise.all([this.backend.status(settings), this.native.call<NativeStatus>('status')]);
       if (settings.asrModel !== this.state.settings.asrModel || settings.llmModel !== this.state.settings.llmModel || settings.senseVoiceModel !== this.state.settings.senseVoiceModel || settings.modelSource !== this.state.settings.modelSource) return;
       this.state.native = native;
       this.state.models = { asr: value.models?.asr?.ready === true, sensevoice: value.models?.sensevoice?.ready === true, llm: value.models?.llm?.ready === true, metal: value.metal === true };
+      this.environment = value.metal ? { environment: 'ready', issues: [] } : { environment: 'repair', issues: ['MLX 尚未检测到可用的 Metal 环境。'] };
+      this.refreshRuntime();
       if (!value.metal) this.state.notice = 'MLX 尚未检测到可用的 Metal 环境。';
     } catch (error) { this.state.notice = (error as Error).message; }
     finally { this.state.checking = false; this.state.modelsChecked = true; this.changed(); }
@@ -103,6 +128,7 @@ export class Controller extends EventEmitter {
     this.store.settings = proposed; this.store.library = this.state.library; this.store.prune(); this.state.library = this.store.library;
     if (this.state.selectedID && !this.state.library.manuscripts.some(item => item.id === this.state.selectedID)) { this.state.selectedID = null; this.state.draft = ''; this.state.original = ''; this.state.asrResults = []; this.userEdited = false; }
     if (modelsChanged) this.state.models = { asr: false, sensevoice: false, llm: false, metal: false };
+    this.refreshRuntime();
     this.persist(); this.changed(); this.emit('preferences', proposed);
   }
   async beginCapture(action: Action) {
@@ -131,6 +157,12 @@ export class Controller extends EventEmitter {
   setPage(page: Page) { if (['desk', 'manuscripts', 'dictionary', 'settings'].includes(page)) { if (this.state.captureAction) void this.endCapture(); this.state.page = page; this.changed(); } }
   private async begin(action: Action, captured?: Destination, showOverlay = true): Promise<Task | undefined> {
     if (busy(this.state.stage) || this.state.checking || this.state.captureAction) return;
+    // Windows without a usable local runtime never records until the user enables the missing online capability.
+    // Without the overlay (manual polish) only text generation is needed.
+    const missing = (action === 'selectionTranslation' || !showOverlay ? ['text'] as const : ['asr', 'text'] as const).filter(name => this.state.runtime.capabilities[name] === 'unavailable');
+    if (this.windowsPrecheck && missing.length) {
+      this.state.page = 'settings'; this.notice('请先在设置中启用在线' + missing.map(name => CAPABILITIES[name]).join('与') + '；配置前不会上传任何内容。'); this.emit('reveal'); return;
+    }
     clearTimeout(this.dismiss);
     const task: Task = { id: randomUUID(), action, settings: structuredClone(this.state.settings), destination: {}, lexicon: structuredClone(this.state.library.lexicon), started: Date.now(), manuscriptID: randomUUID(), original: '', asrResults: [] };
     this.task = task; this.state.action = action; this.state.stage = 'preparing'; this.state.notice = ''; this.state.level = 0; this.state.seconds = 0; this.state.overlayVisible = showOverlay && action !== 'selectionTranslation';
@@ -158,7 +190,7 @@ export class Controller extends EventEmitter {
       await this.native.call('record.start', { device: task.settings.microphone, taskId: task.id });
       if (!this.valid(task)) return;
       task.started = Date.now(); this.state.stage = 'recording'; this.changed();
-      if (!task.settings.online.asr.enabled) void this.backend.warmup(task.settings, !task.settings.online.text.enabled).catch(() => {});
+      if (this.state.runtime.capabilities.asr === 'local') void this.backend.warmup(task.settings, !task.settings.online.text.enabled).catch(() => {});
       this.clock = setInterval(() => {
         if (!this.valid(task)) return;
         this.state.seconds = (Date.now() - task.started) / 1000; this.emit('meter', { level: this.state.level, seconds: this.state.seconds });
