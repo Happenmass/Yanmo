@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>言墨 · 本地语音输入</title>
+  <meta name="description" content="言墨：按下 FN，开口说话，文字落进任何输入框。识别与整理全程在你的 Mac 上离线完成。开源免费。">
+  <link rel="icon" href="assets/logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;900&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="#top"><img src="assets/logo.png" alt=""><span>言墨</span></a>
+    <nav>
+      <a href="#how">如何使用</a>
+      <a href="#features">功能</a>
+      <a href="#privacy">隐私</a>
+      <a href="#faq">常见问题</a>
+      <a href="https://github.com/Happenmass/Yanmo">GitHub</a>
+    </nav>
+    <a class="seal small" href="https://github.com/Happenmass/Yanmo/releases/latest">下载</a>
+  </header>
+
+  <main id="top">
+    <!-- 首屏 -->
+    <section class="hero">
+      <p class="eyebrow">本地语音输入 · Mac</p>
+      <h1 class="write"><span>言语之间，</span><span>自有笔墨。</span></h1>
+      <p class="kai lead">按下 FN，开口说话，文字落进任何输入框。</p>
+      <p class="muted">识别与整理全程在你的 Mac 上离线完成。</p>
+      <div class="actions">
+        <a class="seal" href="https://github.com/Happenmass/Yanmo/releases/latest">下载 Mac 版</a>
+        <a class="link" href="https://github.com/Happenmass/Yanmo/releases/latest/download/Yanmo-promo.mp4">观看宣传片 ▸</a>
+      </div>
+      <p class="fine">Apple Silicon · macOS 14+ · 开源免费</p>
+
+      <div class="flow" aria-hidden="true">
+        <svg viewBox="0 0 1200 260" preserveAspectRatio="xMidYMid meet">
+          <path id="p-in" d="M-40,60 C180,40 300,220 600,180" fill="none"/>
+          <path id="p-out" d="M600,180 C860,140 980,40 1240,70" fill="none"/>
+          <path class="stroke" d="M-40,60 C180,40 300,220 600,180 C860,140 980,40 1240,70"/>
+          <text class="raw"><textPath href="#p-in" startOffset="0">嗯…那个，下周三下午，呃，三点开个会，把发布节奏过一遍</textPath></text>
+          <text class="clean"><textPath href="#p-out" startOffset="0">下周三下午 3 点开会，把发布节奏过一遍。</textPath></text>
+        </svg>
+        <div class="pill hero-pill"><span class="brush"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><b>0:04</b></div>
+        <span class="tag">已整理</span>
+      </div>
+    </section>
+
+    <!-- 墨带 -->
+    <section class="band">
+      <div class="band-ink">
+        <p class="eyebrow light">保留你说话的语言</p>
+        <div class="marquee"><div class="row">
+          <span>中英混说，逐段保留：这个 feature 下周上线</span><span>日本語はそのまま日本語に</span><span>预算一万二 → 预算 12,000 元</span><span>Let’s sync on the roadmap tomorrow</span><span>三五个人 → 三五个人</span>
+        </div></div>
+        <div class="marquee rev"><div class="row">
+          <span>嗯、啊、那个，整理时轻轻抹去</span><span>FN 开始，FN 结束，Esc 取消</span><span>Die Übersetzung erscheint im Fenster</span><span>口述翻译：说中文，写英文</span><span>划词翻译：不替换原文</span>
+        </div></div>
+      </div>
+    </section>
+
+    <!-- 三步演示（钉住） -->
+    <section class="how" id="how">
+      <svg class="long-stroke" viewBox="0 0 400 1200" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M320,0 C120,180 360,380 180,560 C20,720 320,880 140,1200"/>
+      </svg>
+      <div class="how-inner">
+        <ol class="steps">
+          <li class="on">按下 FN</li>
+          <li>开口说话</li>
+          <li>落笔成文</li>
+        </ol>
+        <div class="stage">
+          <div class="screen">
+            <div class="chrome"><i></i><i></i><i></i><span>备忘录</span></div>
+            <div class="doc">
+              <p class="doc-title">周三例会</p>
+              <p class="typed"><span class="txt"></span><span class="caret"></span></p>
+            </div>
+            <div class="pill stage-pill">
+              <span class="x">×</span>
+              <span class="brush"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+              <b class="t">0:00</b>
+              <span class="ok">✓</span>
+            </div>
+          </div>
+        </div>
+        <div class="captions">
+          <div class="cap on"><h3>在任何输入框按下 FN</h3><p>黑墨浮层悬于屏幕底部，不抢走原输入框的焦点。</p></div>
+          <div class="cap"><h3>像平时一样说</h3><p>停顿、改口都没关系。音量是笔压，墨迹随声音浓淡。</p></div>
+          <div class="cap"><h3>再按一次，正文落下</h3><p>本机识别、保守整理，抹去语气词，写进你刚才的光标处。</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 功能格 -->
+    <section class="features" id="features">
+      <p class="eyebrow">照你的方式书写</p>
+      <h2>不只是听写。</h2>
+      <div class="grid">
+        <article class="cell" data-demo="translate">
+          <h3>口述翻译</h3>
+          <p class="keys"><kbd>FN</kbd><kbd>Shift</kbd></p>
+          <p class="desc">说中文，直接写出英文、日语或德语。</p>
+          <div class="demo swap"><span class="a">明天上午把方案发给你</span><span class="b">I’ll send you the proposal tomorrow morning.</span></div>
+        </article>
+        <article class="cell" data-demo="select">
+          <h3>划词翻译</h3>
+          <p class="keys"><kbd>FN</kbd><kbd>Space</kbd></p>
+          <p class="desc">选中一段文字，译文在独立的宣纸窗口里出现，不改动原文。</p>
+          <div class="demo popup"><p>The release <mark>focuses on stability</mark> in long sessions.</p><div class="paper">本次发布侧重长时间使用的稳定性。</div></div>
+        </article>
+        <article class="cell" data-demo="dict">
+          <h3>个人词库</h3>
+          <p class="keys">误识别 → 纠正</p>
+          <p class="desc">记下你的人名、术语和常错的词，下次就写对。</p>
+          <div class="demo fix"><span>部署到 <s>酷伯奈特斯</s> <ins>Kubernetes</ins> 集群</span></div>
+        </article>
+        <article class="cell" data-demo="numbers">
+          <h3>数字按语义</h3>
+          <p class="keys">该用数字时才用</p>
+          <p class="desc">金额、测量值写成阿拉伯数字；成语、概数保留原样。</p>
+          <div class="demo nums"><span>预算 <em data-from="一万二" data-to="12,000 元">一万二</em></span><span>来了三五个人</span></div>
+        </article>
+      </div>
+    </section>
+
+    <!-- 隐私 -->
+    <section class="privacy" id="privacy">
+      <div class="privacy-head">
+        <h2>所有处理，<br>留在本机。</h2>
+        <div class="stamp" aria-label="本机"><span>本</span><span>机</span></div>
+      </div>
+      <ul class="ledger">
+        <li><i></i>语音识别<span>Qwen3-ASR</span><em>本地 · MLX</em></li>
+        <li><i></i>双路复核<span>SenseVoice Small</span><em>本地 · MLX</em></li>
+        <li><i></i>文字整理<span>Qwen3-4B</span><em>本地 · MLX</em></li>
+      </ul>
+      <p class="kai muted">仅首次准备模型时需要联网（约 5 GB，默认 ModelScope）。之后断网照常使用，录音与文字不离开你的 Mac。</p>
+    </section>
+
+    <!-- 随处落笔 -->
+    <section class="scenes">
+      <div class="scenes-head">
+        <p class="eyebrow light">随处落笔</p>
+        <h2>有输入框的地方，就能说。</h2>
+      </div>
+      <div class="cards">
+        <div class="card" data-speed="1.4"><b>聊天</b><p>好的，我七点前到，你先点菜。</p></div>
+        <div class="card" data-speed="0.8"><b>周报</b><p>本周完成登录页改版，下周开始灰度。</p></div>
+        <div class="card" data-speed="1.8"><b>代码注释</b><p>// 网络失败时保留草稿，下次启动恢复</p></div>
+        <div class="card" data-speed="1.1"><b>邮件</b><p>附件是修订后的合同，请在周五前确认。</p></div>
+        <div class="card" data-speed="0.6"><b>灵感</b><p>封面用远山留白，标题压在左上角。</p></div>
+        <div class="card" data-speed="1.5"><b>English</b><p>Can we move the review to Thursday?</p></div>
+      </div>
+      <p class="fine light">以上为示例句</p>
+    </section>
+
+    <!-- 常见问题 -->
+    <section class="faq" id="faq">
+      <h2>常见问题</h2>
+      <details><summary>首次打开被系统拦截怎么办？</summary><div><p>言墨是个人开源项目，应用为 ad-hoc 签名、未经 Apple 公证。确认来源后，在终端执行：</p><pre><code>xattr -dr com.apple.quarantine /Applications/言墨.app</code></pre><p>或先打开一次，再到「系统设置 → 隐私与安全性」底部点「仍要打开」。</p></div></details>
+      <details><summary>需要联网吗？会上传录音吗？</summary><div><p>只有第一次准备模型时需要联网下载权重。日常识别和整理都在本机完成，不上传音频、上下文或转写。</p></div></details>
+      <details><summary>对电脑有什么要求？</summary><div><p>Apple Silicon（M 系列芯片）、macOS 14 及以上；模型约占 5 GB 磁盘空间。</p></div></details>
+      <details><summary>支持 Windows 吗？</summary><div><p>Windows 版正在开发中，暂不能使用。</p></div></details>
+      <details><summary>收费吗？</summary><div><p>免费，MIT 协议开源。</p></div></details>
+    </section>
+
+    <!-- 收尾 -->
+    <section class="cta">
+      <div class="cta-bg"><img src="assets/ink-mountains.jpg" alt=""></div>
+      <div class="cta-text">
+        <h2 class="write"><span>开口，</span><span>即成文。</span></h2>
+        <p class="kai">本地运行 · 开源 · 私密 · 离线</p>
+        <div class="actions">
+          <a class="seal" href="https://github.com/Happenmass/Yanmo/releases/latest">下载 Mac 版</a>
+          <a class="link" href="https://github.com/Happenmass/Yanmo">在 GitHub 查看源码</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="foot-links">
+      <span class="kai">开源 · 私密 · 离线</span>
+      <a href="https://github.com/Happenmass/Yanmo">GitHub</a>
+      <a href="https://github.com/Happenmass/Yanmo/releases">版本发布</a>
+      <a href="https://github.com/Happenmass/Yanmo/blob/main/LICENSE">MIT 协议</a>
+    </div>
+    <div class="wordmark" aria-hidden="true"><span>言墨</span></div>
+  </footer>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
