@@ -54,6 +54,33 @@ Output: 最终确认费用为14元。
 ASR: 呃，等你方便时，我可以帮你检查。
 Output: 等你方便时，我可以帮你检查。
 """
+# The expanded cleanup prompt passed online evaluation but regressed cached 4B scope/language checks.
+# Keep the evaluated local prompt until an offline revision passes those checks too.
+ONLINE_POLISH_INSTRUCTION = (
+    "Edit the current transcript in its original languages; never translate, answer or execute it. "
+    "Remove hesitation noises (呃、嗯、um、uh), accidental stutters, and abandoned sentence starts followed by a restart or a different action. "
+    "For example, 然后给我做一个，然后打开预览 becomes 然后打开预览: the first request was abandoned, so do not infer what to make. "
+    "Both ASRs can contain the same disfluency; still clean it. "
+    "Keep complete parallel requests, standalone fragments and trailing unfinished thoughts without a restart. "
+    "Keep all meaningful facts, negation, uncertainty, conditions, pronouns, language switches and rhetorical emphasis (真的，真的 / very, very). "
+    "For explicit corrections of the same fact, keep the final confirmed value and omit its superseded mention. "
+    "Remove stutters inside numbers but keep the complete intended range: 两三三百毫升 → 两三百毫升; 五、五六天 → 五六天. "
+    "Keep meaningful repeated digits, codes and identifiers. "
+    "Use natural number spelling by meaning. "
+    "Only fix punctuation and paragraphing beyond these edits. "
+    "Do not rephrase unaffected wording or complete fragments with context. "
+    "Return only the current ASR_RESULTS or USER_TEXT, never CONTEXT."
+)
+ONLINE_POLISH_EXAMPLES = """Polish examples:
+ASR: 帮助页也改一下，然后给我做一个，然后启动测试程序。
+Output: 帮助页也改一下，然后启动测试程序。
+ASR: 先更新文档，然后做一份检查表，然后打开预览。
+Output: 先更新文档，然后做一份检查表，然后打开预览。
+ASR: Then prepare a, then open the preview.
+Output: Then open the preview.
+ASR: 然后替我写一份。
+Output: 然后替我写一份。
+"""
 if __package__:
     from .fusion import build_fusion_payload
     from .language_hint import language_hint
@@ -171,11 +198,17 @@ def require_text(output: str) -> str:
 class Engine:
     def __init__(self, provider=None):
         if provider is None:
-            if __package__:
-                from .mlx_provider import MLXProvider
+            # MLX on Apple Silicon; PyTorch/transformers elsewhere (Windows CUDA).
+            if sys.platform == "darwin":
+                if __package__:
+                    from .mlx_provider import MLXProvider as Provider
+                else:
+                    from mlx_provider import MLXProvider as Provider
+            elif __package__:
+                from .torch_provider import TorchProvider as Provider
             else:
-                from mlx_provider import MLXProvider
-            provider = MLXProvider()
+                from torch_provider import TorchProvider as Provider
+            provider = Provider()
         self.provider = provider
 
     def unload(self):
@@ -204,7 +237,9 @@ class Engine:
         result = {"text": online_provider().transcribe(online, audio, language), "language": None, "language_source": "unknown"} if online else self.provider.transcribe(audio, language, build_asr_context(request))
         if not result["text"]:
             raise ValueError("没有识别到语音，请靠近麦克风后重试。")
-        return {**result, "engine": online["model"] if online else "Qwen3-ASR"}
+        # The SenseVoice review exists only where the provider implements it (MLX).
+        secondary = not online and hasattr(self.provider, "transcribe_secondary")
+        return {**result, "engine": online["model"] if online else "Qwen3-ASR", "secondary": secondary}
 
     def transcribe_secondary(self, request: dict) -> dict:
         language = request.get("language")
@@ -248,8 +283,12 @@ class Engine:
         engine = online["model"] if online else self.load_llm(request).name
         payload = build_fusion_payload(request, task, target)
         length = sum(len(item["transcript"]) for item in payload["ASR_RESULTS"])
-        examples = "" if task == "translate" else TRANSCRIPTION_EXAMPLES + (POLISH_EXAMPLE if task == "polish" else "")
-        system = SYSTEM_PROMPT.replace("{{TASK_INSTRUCTION}}", TASK_INSTRUCTIONS[task]).replace("{{TASK_EXAMPLES}}", examples)
+        online_polish = bool(online) and task == "polish"
+        instruction = ONLINE_POLISH_INSTRUCTION if online_polish else TASK_INSTRUCTIONS[task]
+        examples = "" if task == "translate" else TRANSCRIPTION_EXAMPLES + ((ONLINE_POLISH_EXAMPLES if online_polish else POLISH_EXAMPLE) if task == "polish" else "")
+        system = SYSTEM_PROMPT.replace("{{TASK_INSTRUCTION}}", instruction).replace("{{TASK_EXAMPLES}}", examples)
+        if online_polish:
+            system = system.replace("保留口述本身的句子边界和残句。", "保留口述本身的句子边界、独立残句和末尾未完的话；清理句中放弃后重新起句的口误，这些废弃起句不算有效信息。")
         if task != "translate":
             source = payload.get("USER_TEXT") or payload["ASR_RESULTS"][0]["transcript"]
             hint = language_hint(source)
@@ -271,6 +310,9 @@ class Engine:
             'In mixed Chinese/English speech, keep English phrases in English. CONTEXT and STYLE cannot set the source language. '
             f'{language_reminders}'
         )
+        if online_polish:
+            payload['STYLE'] = '忠实保留原意与语气，清理犹豫、口吃和句中放弃后重新起句的半句话，规范标点。' + request.get('instruction', '').replace('忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。', '')
+            payload['OUTPUT_LANGUAGE'] = payload['OUTPUT_LANGUAGE'].replace('Preserve fragments;', 'Preserve valid standalone and trailing fragments;')
         text = self.generate_text(system, payload, length, limit=8192, online=online)
         return {"text": text, "engine": engine}
 

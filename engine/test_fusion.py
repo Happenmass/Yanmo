@@ -47,6 +47,23 @@ class FusionTests(unittest.TestCase):
             with self.subTest(output=output), patch.object(engine, "load_llm", return_value=Path("fixture")), patch.object(engine.provider, "generate", return_value=(output, "stop")):
                 self.assertEqual(engine.polish({"text": "今日は100人です。"})["text"], output)
 
+    def testExpandedCleanupOnlyReachesOnlinePolishAndKeepsModelBody(self):
+        engine = Engine()
+        for online, task in ((False, "polish"), (True, "polish"), (True, "verbatim")):
+            with self.subTest(online=online, task=task), patch.object(engine, "load_llm", return_value=Path("fixture")), patch.object(engine, "generate_text", return_value="  exact output\n") as generate:
+                request = {"text": "合成口述", "task": task, "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。输出适合即时通讯的自然短句，不添加问候。"}
+                if online:
+                    request["online"] = {"text": {"model": "fixture"}}
+                self.assertEqual(engine.polish(request)["text"], "  exact output\n")
+                system, payload = generate.call_args.args[:2]
+                expanded = online and task == "polish"
+                self.assertEqual("mid-sentence" in system or "abandoned sentence starts followed" in system, expanded)
+                if expanded:
+                    self.assertNotIn("仅删除无意义的填充和重复", payload["STYLE"])
+                    self.assertIn("即时通讯", payload["STYLE"])
+                else:
+                    self.assertIn("Preserve fragments;", payload["OUTPUT_LANGUAGE"])
+
     def testEmptyOrTruncatedGenerationIsATechnicalFailure(self):
         engine = Engine()
         for output, finish in (("", "stop"), (" ", "stop"), ("partial", "length")):

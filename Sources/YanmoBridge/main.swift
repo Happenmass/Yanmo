@@ -250,8 +250,8 @@ let bridge = MainActor.assumeIsolated {
     return value
 }
 Thread.detachNewThread {
-    while let line = readLine() {
-        guard let data = line.data(using: .utf8), let message = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+    BridgeInput.readLines { line in
+        guard let data = line.data(using: .utf8), let message = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         DispatchQueue.main.async { Task { @MainActor in await bridge.handle(message) } }
     }
     DispatchQueue.main.async { bridge.shutdown(); NSApp.terminate(nil) }

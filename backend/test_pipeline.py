@@ -17,7 +17,7 @@ class PipelineTests(unittest.TestCase):
         request = self.request("dictation")
         request["target_language"] = "zh-Hans"
         request["context"] = {"before": "这是一段中文上下文。"}
-        with patch.object(engine, "transcribe", return_value={"text": original, "engine": "Qwen3-ASR", "language": "Japanese", "language_source": "detected"}), patch.object(engine, "load_llm", return_value=Path("fixture")), patch.object(engine, "generate_text", return_value=translated):
+        with patch.object(engine, "transcribe", return_value={"text": original, "engine": "Qwen3-ASR", "secondary": True, "language": "Japanese", "language_source": "detected"}), patch.object(engine, "load_llm", return_value=Path("fixture")), patch.object(engine, "generate_text", return_value=translated):
             run_pipeline(engine, request, "synthetic.wav", Event(), events.append)
         self.assertEqual(events[-1]["event"], "result")
         self.assertEqual(events[-1]["text"], translated)
@@ -64,7 +64,7 @@ class PipelineTests(unittest.TestCase):
                 def handle(self, request):
                     commands.append(request["command"])
                     if request["command"] == "transcribe":
-                        return {"text": "Primary fixture", "engine": "Qwen3-ASR", "language": language, "language_source": "detected"}
+                        return {"text": "Primary fixture", "engine": "Qwen3-ASR", "secondary": True, "language": language, "language_source": "detected"}
                     if request["command"] == "transcribe_secondary":
                         self_case.assertTrue(any(event["event"] == "transcript" for event in events))
                         self_case.assertEqual(request["language"], language)
@@ -78,12 +78,12 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(events[-1]["original"], "Primary fixture")
 
     def testOtherLanguagesUnknownForcedAndOnlineResultsStaySinglePass(self):
-        for language, source, engine in [("Japanese", "detected", "Qwen3-ASR"), ("Cantonese", "detected", "Qwen3-ASR"), (None, "unknown", "Qwen3-ASR"), ("English", "unknown", "Qwen3-ASR"), ("Chinese", "forced", "Qwen3-ASR"), ("Chinese,English", "detected", "Qwen3-ASR"), ("English", "detected", "online-model")]:
+        for language, source, engine in [("Japanese", "detected", "Qwen3-ASR"), ("Cantonese", "detected", "Qwen3-ASR"), (None, "unknown", "Qwen3-ASR"), ("English", "unknown", "Qwen3-ASR"), ("Chinese", "forced", "Qwen3-ASR"), ("Chinese,English", "detected", "Qwen3-ASR"), ("English", "detected", "online-model"), ("Chinese", "detected", "Qwen3-ASR (PyTorch, no review)")]:
             commands, events = [], []
             class Engine:
                 def handle(self, request):
                     commands.append(request["command"])
-                    return {"text": "Fixture", "engine": engine, "language": language, "language_source": source}
+                    return {"text": "Fixture", "engine": engine, "secondary": engine == "Qwen3-ASR", "language": language, "language_source": source}
             run_pipeline(Engine(), self.request(), "synthetic.wav", Event(), events.append)
             self.assertEqual(commands, ["transcribe", "translate"])
 
@@ -91,7 +91,7 @@ class PipelineTests(unittest.TestCase):
         class Engine:
             def handle(self, request):
                 if request["command"] == "transcribe":
-                    return {"text": "预算3500元", "engine": "Qwen3-ASR", "language": "Chinese", "language_source": "detected"}
+                    return {"text": "预算3500元", "engine": "Qwen3-ASR", "secondary": True, "language": "Chinese", "language_source": "detected"}
                 raise RuntimeError("secondary fixture failure")
         events = []
         run_pipeline(Engine(), self.request(), "synthetic.wav", Event(), events.append)
@@ -104,7 +104,7 @@ class PipelineTests(unittest.TestCase):
         class Engine:
             def handle(self, request):
                 commands.append(request["command"])
-                return {"text": "Primary fixture", "engine": "Qwen3-ASR", "language": "English", "language_source": "detected"}
+                return {"text": "Primary fixture", "engine": "Qwen3-ASR", "secondary": True, "language": "English", "language_source": "detected"}
         def emit(event):
             events.append(event)
             if event["event"] == "transcript":
@@ -122,7 +122,7 @@ class PipelineTests(unittest.TestCase):
                     self_case.assertEqual(request["task"], "verbatim")
                     self_case.assertEqual(len(request["asr_results"]), 2)
                     return {"text": "Fused fixture"}
-                return {"text": "Primary fixture" if request["command"] == "transcribe" else "Secondary fixture", "engine": "Qwen3-ASR", "language": "English", "language_source": "detected"}
+                return {"text": "Primary fixture" if request["command"] == "transcribe" else "Secondary fixture", "engine": "Qwen3-ASR", "secondary": True, "language": "English", "language_source": "detected"}
         self_case = self
         request = self.request("dictation")
         request["style"] = "保留原话"
@@ -135,7 +135,7 @@ class PipelineTests(unittest.TestCase):
         class Engine:
             def handle(self, request):
                 if request["command"] == "transcribe":
-                    return {"text": "预算100元", "engine": "Qwen3-ASR", "language": "Chinese", "language_source": "detected"}
+                    return {"text": "预算100元", "engine": "Qwen3-ASR", "secondary": True, "language": "Chinese", "language_source": "detected"}
                 if request["command"] == "transcribe_secondary":
                     return {"text": "预算101元", "engine": "SenseVoice Small"}
                 return {"text": None}

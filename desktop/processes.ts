@@ -2,6 +2,8 @@ import { ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createInterface } from 'node:readline';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { appendFileSync, mkdirSync, renameSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { Settings, TaskEvent } from './shared';
 
@@ -66,12 +68,22 @@ export class BackendClient {
   private idle?: NodeJS.Timeout;
   private active = false;
   private requests = 0;
-  constructor(private python: string, private root: string, private idleMs = 3600000) {}
+  constructor(private python: string, private root: string, private idleMs = 3600000, private diagnosticsDirectory?: string) {}
+  private diagnostic(event: string, fields: Record<string, unknown> = {}) {
+    if (!this.diagnosticsDirectory) return;
+    try {
+      mkdirSync(this.diagnosticsDirectory, { recursive: true, mode: 0o700 });
+      const path = join(this.diagnosticsDirectory, "desktop.jsonl");
+      try { if (statSync(path).size > 2_000_000) renameSync(path, path + ".1"); } catch {}
+      appendFileSync(path, JSON.stringify({ time: new Date().toISOString(), event, ...fields }) + "\n", { mode: 0o600 });
+    } catch { /* Diagnostics cannot interrupt input. */ }
+  }
   private start() {
     if (this.starting) return this.starting;
     this.token = randomBytes(32).toString('hex');
     this.starting = new Promise<void>((resolve, reject) => {
       const env: NodeJS.ProcessEnv = { ...process.env, YANMO_BACKEND_TOKEN: this.token, YANMO_SUPERVISED: '1', HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1', HF_HUB_DISABLE_TELEMETRY: '1', PYTHONUNBUFFERED: '1' };
+      if (this.diagnosticsDirectory) env.YANMO_DIAGNOSTICS_DIR = this.diagnosticsDirectory;
       delete env.PYTHONHOME; delete env.PYTHONPATH; delete env.VIRTUAL_ENV;
       const child = spawn(this.python, ['-B', '-u', '-m', 'backend.server'], { cwd: this.root, env, stdio: ['pipe', 'pipe', 'pipe'] });
       this.child = child;
@@ -81,11 +93,13 @@ export class BackendClient {
       });
       child.stderr!.resume();
       child.on('error', error => { clearTimeout(timeout); reject(new Error('无法启动内置 Python：' + error.message)); });
-      child.on('close', () => { clearTimeout(timeout); if (this.child === child) { this.child = undefined; this.starting = undefined; this.origin = ''; } reject(new Error('本地推理后端已退出。')); });
+      child.on('close', (code, signal) => { this.diagnostic('backend_exit', { code, signal }); clearTimeout(timeout); if (this.child === child) { this.child = undefined; this.starting = undefined; this.origin = ''; } reject(new Error('本地推理后端已退出。')); });
     });
     return this.starting;
   }
   setActive(value: boolean) { this.active = value; this.scheduleIdle(); }
+  /** Switches interpreter (Windows: bundled gateway ↔ PyTorch venv); the next request restarts the backend. */
+  usePython(python: string) { if (python !== this.python) { this.python = python; void this.stop(); } }
   private scheduleIdle() {
     clearTimeout(this.idle);
     if (!this.active && !this.requests && this.child) this.idle = setTimeout(() => void this.stop(), this.idleMs);
@@ -113,6 +127,9 @@ export class BackendClient {
     // Retain the lifecycle hold for the full stream, not just response headers.
     this.requests++;
     let terminal = false;
+    let stage = "requesting";
+    const started = Date.now();
+    this.diagnostic("task_start", { task_id: payload.task_id, operation: payload.operation });
     try {
       const response = await this.request('/v1/tasks', { method: 'POST', body });
       if (!response.body) throw new Error('本地后端没有返回结果。');
@@ -123,10 +140,15 @@ export class BackendClient {
         for (const event of parsed.events) {
           if (event.task_id !== payload.task_id) throw new Error('本地后端任务编号不匹配。');
           if (['result', 'error', 'cancelled'].includes(event.event)) { if (terminal) throw new Error('本地后端重复返回结果。'); terminal = true; }
+          if (event.event === "stage") stage = event.stage || stage;
+          this.diagnostic("task_event", { task_id: payload.task_id, event_type: event.event, stage, elapsed_ms: Date.now() - started });
           onEvent(event);
         }
       }
       if (!terminal || buffer.trim()) throw new Error('本地推理结果未完整返回。');
+    } catch (error) {
+      this.diagnostic("task_transport_error", { task_id: payload.task_id, stage, terminal, error_type: error instanceof Error ? error.name : "Unknown", elapsed_ms: Date.now() - started });
+      throw error;
     } finally { this.requests--; this.scheduleIdle(); }
   }
   async cancel(id: string) {

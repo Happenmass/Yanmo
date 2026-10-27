@@ -1,4 +1,0 @@
-# Linux runtime inside the dedicated Yanmo WSL2 distro (local CUDA inference).
-vllm[audio]==0.32.0
-# Model preparation into the shared global cache.
-modelscope==1.40.2

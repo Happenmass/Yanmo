@@ -21,9 +21,9 @@ export class Controller extends EventEmitter {
   private settingsQueue: Promise<unknown> = Promise.resolve();
   /** Selected text in 言墨's focused main window, if any. */
   ownSelection?: () => Promise<string>;
-  /** Set on Windows: probes CUDA/WSL2 instead of asking the backend for MLX caches. */
+  /** Set on Windows: probes the GPU and the PyTorch CUDA runtime instead of asking the backend for MLX caches. */
   windowsPrecheck?: () => Promise<LocalEnvironment>;
-  /** Set on Windows: cache completeness of the CUDA models, checked inside the WSL runtime. */
+  /** Set on Windows: cache completeness of the transformers-format models, checked with the PyTorch runtime. */
   windowsModels?: (settings: Settings) => Promise<{ asr: boolean; llm: boolean }>;
   environment?: LocalEnvironment;
   constructor(readonly store: LibraryStore, readonly native: NativeBridge, readonly backend: BackendClient) {

@@ -1,7 +1,6 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, net, safeStorage, screen, shell, Tray } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, safeStorage, screen, shell, Tray } from 'electron';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawn, ChildProcess } from 'node:child_process';
@@ -9,8 +8,8 @@ import { createInterface } from 'node:readline';
 import { Controller } from './controller';
 import { NativeBridge, BackendClient } from './processes';
 import { LibraryStore } from './store';
-import { probeWindows, WSL_DISTRO } from './precheck';
-import { checkWindowsModels, prepareWindowsRuntime, setupRunning, wslPrepareModels } from './windows-runtime';
+import { probeWindows } from './precheck';
+import { checkWindowsModels, prepareWindowsRuntime, RuntimePaths, runtimeCurrent, runtimePaths } from './windows-runtime';
 import { ACTIONS, Action, AppState, busy, Capability, CAPABILITIES, cocoaNow, defaultSettings, migrateSettings, Page, Settings, WINDOWS_MODELS } from './shared';
 
 let mainWindow: BrowserWindow;
@@ -24,6 +23,8 @@ let initialized = false;
 let trayState = '';
 let preparation: ChildProcess | undefined;
 let runtimePython = '';
+// Windows only: the PyTorch venv under Local AppData.
+let windowsRuntime: RuntimePaths | undefined;
 const root = app.isPackaged ? process.resourcesPath : resolve(__dirname, '..');
 const index = app.isPackaged ? join(app.getAppPath(), 'web/index.html') : join(root, 'web/index.html');
 const indexURL = pathToFileURL(index).href;
@@ -111,12 +112,14 @@ async function importAudio() {
 const appBundle = () => resolve(process.execPath, '../../..');
 async function prepareModels() {
   if (busy(controller.state.stage) || controller.state.checking || preparation) return;
-  // Windows downloads CUDA-format models inside the WSL runtime, so that runtime must exist first.
-  const windows = process.platform === 'win32';
+  // Windows downloads its models with the PyTorch runtime's Python, so that runtime must exist first.
+  const windows = !!windowsRuntime;
   if (windows && controller.environment?.environment !== 'ready') throw new Error('请先准备运行环境，再下载模型。');
   const settings = structuredClone(controller.state.settings);
   const modelArgs = ['--source', settings.modelSource, '--asr', settings.asrModel, '--llm', settings.llmModel];
-  const [command, args] = windows ? wslPrepareModels(root, homedir(), modelArgs) : [runtimePython, ['-B', '-u', '-m', 'backend.prepare_models', ...modelArgs, '--sensevoice', settings.senseVoiceModel]];
+  // Windows has no SenseVoice review.
+  const command = windows ? windowsRuntime!.python : runtimePython;
+  const args = ['-B', '-u', '-m', 'backend.prepare_models', ...modelArgs, ...(windows ? ['--without-sensevoice'] : ['--sensevoice', settings.senseVoiceModel])];
   controller.state.checking = true;
   controller.notice('正在检查全局缓存，并准备模型（来源：' + (settings.modelSource === 'modelscope' ? 'ModelScope' : 'Hugging Face') + '）…');
   try {
@@ -142,14 +145,11 @@ async function prepareModels() {
   if (!windows && !controller.state.settings.onboarded && !controller.state.native.accessibility) await controller.permissions(true, { app: appBundle() });
 }
 async function prepareRuntime() {
-  if (process.platform !== 'win32' || busy(controller.state.stage) || controller.state.checking || preparation) return;
+  if (!windowsRuntime || busy(controller.state.stage) || controller.state.checking || preparation) return;
   controller.state.checking = true; controller.changed();
-  let result: 'ready' | 'reboot';
-  // Multi-GB data stays in Local AppData, not the roaming profile.
-  const dataDir = join(process.env.LOCALAPPDATA || app.getPath('appData'), 'Yanmo', 'wsl');
-  try { result = await prepareWindowsRuntime({ root, dataDir, fetch: net.fetch }, message => controller.notice(message)); }
+  try { await prepareWindowsRuntime(windowsRuntime, runtimePython, message => controller.notice(message)); }
   finally { controller.state.checking = false; controller.changed(); await controller.checkModels(); }
-  controller.notice(result === 'reboot' ? 'WSL2 已启用，请重启电脑后回到言墨，再点一次「准备运行环境」。' : '运行环境已就绪，可以下载模型。');
+  controller.notice('运行环境已就绪，可以下载模型。');
 }
 // API keys are encrypted with safeStorage, whose key lives in the macOS Keychain; the file alone cannot be read elsewhere.
 const keysPath = () => join(dataDirectory, 'online-keys.json');
@@ -258,12 +258,19 @@ app.whenReady().then(async () => {
   }
   const store = new LibraryStore(dataDirectory, defaults, process.env.YANMO_DATA_DIR ? undefined : join(app.getPath('appData'), 'Yanmo/library.json'));
   runtimePython = existsSync(python) ? python : developmentPython;
-  const backend = new BackendClient(runtimePython, root);
+  const backend = new BackendClient(runtimePython, root, 3600000, join(dataDirectory, "diagnostics"));
   controller = new Controller(store, native, backend);
   if (windows) {
+    // Multi-GB runtime stays in Local AppData, not the roaming profile.
+    const paths = windowsRuntime = runtimePaths(join(process.env.LOCALAPPDATA || app.getPath('appData'), 'Yanmo'), root);
     controller.state.platform = 'windows';
-    controller.windowsPrecheck = () => probeWindows();
-    controller.windowsModels = settings => checkWindowsModels(root, homedir(), settings);
+    controller.windowsPrecheck = async () => {
+      const environment = await probeWindows({ python: paths.python, current: runtimeCurrent(paths) });
+      // The bundled Python serves online-only processing; local inference runs on the PyTorch venv.
+      backend.usePython(environment.environment === 'ready' ? paths.python : runtimePython);
+      return environment;
+    };
+    controller.windowsModels = settings => checkWindowsModels(paths, root, settings);
   }
   controller.ownSelection = async () => mainWindow?.isFocused() ? String(await mainWindow.webContents.executeJavaScript(
     `(() => { const field = document.activeElement; return field && 'selectionStart' in field && field.selectionEnd > field.selectionStart ? field.value.slice(field.selectionStart, field.selectionEnd) : String(getSelection() || ''); })()`)) : '';
@@ -312,7 +319,5 @@ app.on('before-quit', event => {
   if (quitting) return;
   event.preventDefault(); quitting = true;
   preparation?.kill('SIGTERM');
-  // ponytail: stops the whole Yanmo distro (never other distributions); a finer stop needs PID tracking inside WSL.
-  if (setupRunning() || (preparation && process.platform === 'win32')) spawn('wsl.exe', ['--terminate', WSL_DISTRO], { windowsHide: true, stdio: 'ignore' });
   if (controller) void controller.shutdown().finally(() => app.exit(0)); else app.exit(0);
 });

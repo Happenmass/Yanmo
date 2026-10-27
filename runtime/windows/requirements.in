@@ -1,0 +1,10 @@
+# Native Windows local runtime: PyTorch CUDA 13.0 build (Turing and newer) plus transformers.
+# Installed into %LOCALAPPDATA%\Yanmo\runtime by setup_runtime.py; never bundled in the installer.
+torch==2.14.1+cu130
+transformers==5.20.2
+accelerate==1.15.0
+# Loads the pre-quantized 4-bit text model.
+bitsandbytes==0.50.2
+# Model preparation into the shared global cache.
+modelscope==1.40.2
+-r ../../backend/requirements-gateway.in

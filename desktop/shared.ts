@@ -54,8 +54,9 @@ export const defaultSettings = (): Settings => ({
   },
   online: { asr: { enabled: false, baseURL: '', model: '' }, text: { enabled: false, baseURL: '', model: '' } },
 });
-// CUDA-format defaults for the Windows vLLM runtime, sized for an 8 GB GPU (spec §8.2).
-export const WINDOWS_MODELS = { asrModel: 'Qwen/Qwen3-ASR-0.6B', llmModel: 'Qwen/Qwen3-4B-AWQ' } as const;
+// transformers-format defaults for the Windows PyTorch runtime, sized for an 8 GB GPU (spec §8.2).
+// The text model is the Mac's Qwen3-4B-Instruct-2507, pre-quantized to 4-bit for bitsandbytes.
+export const WINDOWS_MODELS = { asrModel: 'Qwen/Qwen3-ASR-0.6B-hf', llmModel: 'unsloth/Qwen3-4B-Instruct-2507-bnb-4bit' } as const;
 export const CAPABILITIES: Record<Capability, string> = { asr: '语音识别', text: '文字整理与翻译' };
 /** https only; plain http is allowed for a server on this Mac. Credentials or query strings in the URL are refused. */
 export function checkOnlineURL(value: string) {

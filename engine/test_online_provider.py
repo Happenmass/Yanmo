@@ -33,6 +33,35 @@ class OnlineProviderTests(unittest.TestCase):
         self.assertEqual(kwargs["json"]["model"], "remote-model")
         self.assertNotIn("follow_redirects", kwargs)
 
+    def testDeepSeekDisablesDefaultThinkingBeforeShortTranscriptBudget(self):
+        calls = []
+        def post(url, **kwargs):
+            body = kwargs["json"]
+            calls.append(body)
+            if body.get("thinking") != {"type": "disabled"}:
+                return Response(200, {"choices": [{"message": {"content": "", "reasoning_content": "synthetic reasoning"}, "finish_reason": "length"}]})
+            return Response(200, {"choices": [{"message": {"content": "合成测试。"}, "finish_reason": "stop"}]})
+        config = {**CONFIG, "base_url": "https://api.deepseek.com/v1", "model": "deepseek-flash"}
+        with patch.object(online_provider.httpx, "post", post):
+            self.assertEqual(Engine().generate_text("system", {}, 19, online=config), "合成测试。")
+        self.assertEqual(calls[0]["max_tokens"], 512)
+
+    def testTruncatedDeepSeekOutputStillFailsInsteadOfBeingInserted(self):
+        response = Response(200, {"choices": [{"message": {"content": "不完整的正文"}, "finish_reason": "length"}]})
+        config = {**CONFIG, "base_url": "https://api.deepseek.com", "model": "deepseek-flash"}
+        with patch.object(online_provider.httpx, "post", return_value=response):
+            with self.assertRaisesRegex(ValueError, "未写入截断内容"):
+                Engine().generate_text("system", {}, 19, online=config)
+
+    def testOtherCompatibleServicesDoNotReceiveDeepSeekParameters(self):
+        calls = []
+        def post(url, **kwargs):
+            calls.append(kwargs["json"])
+            return Response(200, {"choices": [{"message": {"content": "done"}, "finish_reason": "stop"}]})
+        with patch.object(online_provider.httpx, "post", post):
+            online_provider.generate(CONFIG, "s", {}, 512)
+        self.assertNotIn("thinking", calls[0])
+
     def testErrorsAreReadableAndNeverEchoTheKey(self):
         for status, body in [(401, {}), (404, {}), (429, {}), (500, {}), (302, {}), (200, {"unexpected": True})]:
             with patch.object(online_provider.httpx, "post", lambda *_a, **_k: Response(status, body)):

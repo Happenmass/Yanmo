@@ -1,0 +1,180 @@
+{
+  "method": "Synthetic false starts and preservation controls, actual local model, model body unchanged.",
+  "cases": [
+    {
+      "id": "abandoned_request",
+      "request": {
+        "text": "设置页也改一下，然后帮我弄一份，然后打开桌面程序。"
+      },
+      "contains": [
+        "设置页",
+        "打开",
+        "桌面程序"
+      ],
+      "forbid": [
+        "弄一份"
+      ]
+    },
+    {
+      "id": "abandoned_object",
+      "request": {
+        "text": "把报告发给那个，发给财务同事。"
+      },
+      "contains": [
+        "报告",
+        "财务同事"
+      ],
+      "forbid": [
+        "那个"
+      ]
+    },
+    {
+      "id": "restart_en",
+      "request": {
+        "text": "Please update the guide, and make me a, and launch the desktop app."
+      },
+      "contains": [
+        "guide",
+        "launch",
+        "desktop app"
+      ],
+      "forbid": [
+        "make me a"
+      ]
+    },
+    {
+      "id": "standalone_fragment",
+      "request": {
+        "text": "然后再加一个。"
+      },
+      "contains": [
+        "然后",
+        "加一个"
+      ]
+    },
+    {
+      "id": "context_fragment",
+      "request": {
+        "text": "还有蓝色的。",
+        "before": "把图标改成圆形。"
+      },
+      "contains": [
+        "还有蓝色"
+      ],
+      "forbid": [
+        "图标",
+        "圆形"
+      ]
+    },
+    {
+      "id": "parallel_requests",
+      "request": {
+        "text": "帮我做一份预算，然后启动应用。"
+      },
+      "contains": [
+        "预算",
+        "启动应用"
+      ]
+    },
+    {
+      "id": "emphasis",
+      "request": {
+        "text": "真的，真的不要修改名字。"
+      },
+      "contains": [
+        "真的，真的",
+        "不要",
+        "名字"
+      ]
+    },
+    {
+      "id": "uncertainty",
+      "request": {
+        "text": "可能周三，也可能周四，我还没决定。"
+      },
+      "contains": [
+        "可能周三",
+        "周四",
+        "没决定"
+      ]
+    },
+    {
+      "id": "approximate",
+      "request": {
+        "text": "大概需要五、五六天。"
+      },
+      "contains": [
+        "五六天"
+      ]
+    },
+    {
+      "id": "meaningful_one",
+      "request": {
+        "text": "这个方案给我做一个，然后再做一个备选。"
+      },
+      "contains": [
+        "给我做一个",
+        "备选"
+      ]
+    },
+    {
+      "id": "verbatim",
+      "request": {
+        "task": "verbatim",
+        "text": "设置页也改一下，然后帮我弄一份，然后打开桌面程序。"
+      },
+      "contains": [
+        "帮我弄一份"
+      ]
+    },
+    {
+      "id": "mixed",
+      "request": {
+        "text": "先 update README，然后帮我弄一份，然后 run the app。"
+      },
+      "contains": [
+        "update README",
+        "run the app"
+      ],
+      "forbid": [
+        "弄一份"
+      ]
+    },
+    {
+      "id": "abandoned_generic",
+      "request": {
+        "text": "说明也补上，然后给我做一个，然后运行电脑上的工具。"
+      },
+      "contains": [
+        "说明",
+        "运行",
+        "工具"
+      ],
+      "forbid": [
+        "给我做一个"
+      ]
+    },
+    {
+      "id": "dual_false_start",
+      "request": {
+        "asr_results": [
+          {
+            "transcript": "先改好图标，给我做一个，接着关闭测试窗。",
+            "language": "Chinese"
+          },
+          {
+            "transcript": "先改好图标，给我做一个，接着关闭测试窗。",
+            "language": "Chinese"
+          }
+        ]
+      },
+      "contains": [
+        "图标",
+        "关闭测试窗"
+      ],
+      "forbid": [
+        "给我做一个"
+      ]
+    }
+  ]
+}

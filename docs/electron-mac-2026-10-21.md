@@ -82,10 +82,26 @@ Electron数据位于`~/Library/Application Support/Yanmo/electron/`。首次启�
 
 当前合成口吃对照28/32，原30条由24/30提高到26/30，无新增失败；语言18/18、范围与上下文50/50、受控双路21/22（原中文金额改口仍失败）。少数犹豫声、字词口吃、强调和不确定表达仍需改进，不能以本次短句通过推导所有数词组合均已解决。原文与诊断仅留本机`~/Library/Application Support/Yanmo/evaluations/clean-reinstall-2026-10-23/`；最终验收入口为`report.md`与`verification.json`，未发布新版本。
 
+### Control＋空格与设置同时失效（2026-10-23）
+
+现场运行包为`dist-release/mac-arm64/言墨.app`。实体Control＋空格已送入桥接并产生`selectionTranslation`，但`selection`请求一直没有回复；桌面停在`preparing`，整块设置因忙碌状态禁用。后端未开始翻译，重新授权不能解决。
+
+桥接采样定位到`InputDestination.selectedText → SelectionMarkdown.fromHTML → nodesForXPath → XQuery → fileno → flockfile`。另一条命令线程正阻塞于Swift的`readLine()`；该函数等下一条stdin消息时持有C标准输入的FILE锁，Foundation解析内存HTML时也会获取这把锁，因此互相等待。
+
+命令读取现归入`Sources/YanmoNative/BridgeInput.swift`，用`FileHandle.standardInput.availableData`直接读取管道、缓存不完整的UTF-8行并逐条交给原JSON协议。取消对stdin的C标准输入锁依赖；选区HTML转换和转写/整理协议保持原实现。
+
+新增`swift run YanmoBridgeInputChecks`：子进程始终保持stdin打开，命令线程等待下一行时转换合成富文本。旧实现稳定在3秒时限内失败，修复后debug/release均通过；另覆盖中文字符跨分片、多命令同批和EOF前无换行的最后一条命令。原13项核心、5组快捷键与23项输入上下文检查均通过。该检查覆盖桥接真实的长连接条件，避免仅测试孤立HTML转换而漏掉锁竞争。
+
+首轮交付以现场完整包为基础，只更新桥接后在独立位置签名校验，再完整退出主进程、桥接和后端后整体安装；当时`app.asar`与原包一致。用户实体确认翻译与设置均恢复，两次`selection`回复耗时61/57ms，任务正常回到idle。此轮调试进程的授权继承不能代替应用独立启动的权限检查。
+
+用户随后要求重新编译，已按当前工作区完整执行构建、运行库核验与electron-builder打包，再整体替换`dist-release/mac-arm64/言墨.app`。桌面30项、后端18项、引擎34项及打包界面6项通过，4项需显式开启的采集/Dock专项跳过。包内main/preload、pipeline、worker及prompt与当前构建一致，deep/strict签名通过。用户完成系统触控ID后，已移除旧签名条目、按该完整路径重新添加原辅助功能授权；正常独立启动确认辅助功能已授权、三组原快捷键已启用、模型就绪，设置点击与Tab导航正常。原288篇文稿逐条保留，另有用户新增1篇；设置与词库未变。
+
+无选区正文的现场请求、线程采样、原包备份和验收记录位于本机`~/Library/Application Support/Yanmo/diagnostics/shortcuts-2026-10-23/`；`verification.json`区分首轮实体检查与完整重编译后的独立启动验收。
+
 ## 验证入口
 
 - 单元回归：`npm test`、`npm run typecheck`；`python -m unittest discover -s engine`及`backend`。
-- 原生回归：`swift run YanmoChecks`、`swift run YanmoInputChecks`、`swift run YanmoLifecycleChecks`。
+- 原生回归：`swift run YanmoChecks`、`swift run YanmoInputChecks`、`swift run YanmoLifecycleChecks`、`swift run YanmoShortcutChecks`、`swift run YanmoBridgeInputChecks`。
 - 模型评测：`scripts/evaluate-fusion.py`、`check-transcription-language.py`、`check-translation-output.py`及`evaluate-voice-pipeline.py`，使用合成数据及本地真实模型。
 - 打包回归：`desktop/e2e/transcription-language.spec.ts`及`translation-window.spec.ts`；语言用例在真实推理后检查deep/strict签名。
 - 菜单栏事件回归：构建后运行`npx playwright test desktop/e2e/tray-clicks.spec.ts`，观察真实Tray的菜单绑定并触发注册的左右键事件；不替代打包版的系统鼠标点击验收。
@@ -104,3 +120,23 @@ Electron数据位于`~/Library/Application Support/Yanmo/electron/`。首次启�
 PermissionFlow资源已随新包携带，首次未授权环境的拖拽流程仍待专项验收。本次正式配置的新包已启动，用户完成macOS身份验证后，已重新关联同一应用的辅助功能授权；左Control、左Shift+左Control与Control+空格均显示已启用，本地模型就绪，原配置和文稿逐字节保留，主窗口已收回菜单栏。真实口述效果待用户复测。
 
 2026-10-22删除旧0.3包后修复菜单栏点击：保留左键reveal，以right-click显式popUpContextMenu代替setContextMenu，避免macOS自动在左键弹出菜单。事件回归先在旧实现失败、修复后通过；17项桌面单测、类型/构建、2项打包窗口检查及deep/strict签名通过，2项Dock专项未开启。该事件检查观察真实Electron API并派发已注册的事件，未执行系统实体鼠标点击。旧build.sh入口已实跑并只生成0.4包；新包启动后原3组快捷键授权已恢复，配置与文稿哈希一致，旧包及测试进程无残留。记录位于本机`~/Library/Application Support/Yanmo/evaluations/tray-left-right-2026-10-22/`。
+
+### 输入失败诊断日志（2026-10-27）
+
+运行日志位于Electron数据目录的`diagnostics/`：`inference.jsonl`记录任务ID、阶段、耗时、API状态码、异常类型、生成结束原因与输出字符数；`desktop.jsonl`记录SSE事件、最后阶段、流异常与后端退出。分别按2MB轮转（推理保留2份备份，桌面1份），默认文件仅当前用户读写，日志写入失败不影响输入。诊断不记录请求/响应正文、上下文、音频、URL参数、认证头或异常原文。
+
+可通过同一task_id关联两份日志；ReadTimeout/ConnectTimeout用于区分网络等待，api_response用于定位HTTP错误，api_generation的length用于定位生成截断，task_transport_error用于定位SSE中断。失败不自动回退或改写正文。历史失败无法由新增日志追溯。
+
+### DeepSeek短输入无正文（2026-10-27）
+
+15:21:06真实任务b2ce47d5的API返回200，finish_reason=length、output_chars=0、max_tokens=512，本机双路识别均成功；15:21:28下一次输入stop成功。DeepSeek官方thinking_mode文档声明默认启用思考，旧调用未显式关闭；推断思考消耗短输入预算，旧日志不含推理用量，不能还原具体消耗。
+
+对api.deepseek.com的文字生成显式发送thinking.type=disabled，其他兼容服务不带该扩展。保留截断拒写与原文保留；诊断增加thinking_disabled、completion_tokens和reasoning_tokens计数，不记录推理正文。test_online_provider模拟默认思考用尽512预算，旧调用稳定失败、修复通过；官方依据https://api-docs.deepseek.com/guides/thinking_mode/。
+
+修复交付验收：37项引擎用例（含新增3项）、20项后端、30项桌面及类型检查通过。包内真实DeepSeek三条合成中英文输入均200/stop，thinking_disabled=true、completion_tokens为8/7/9，API耗时645/730/902ms，均沿用512预算。整体安装前已完整退出，更新后重新关联辅助功能，并再次独立启动确认三键启用、点击与搜索键盘输入正常；配置及文稿哈希不变。证据位于本机diagnostics/deepseek-thinking-2026-10-27/verification.json，未记录凭证/正文。
+
+### 0.4.4 发布候选（2026-10-27）
+
+在线自然整理新增废弃起句清理，统一任务、风格及末尾语言提示；保留完整并列请求、独立残句、强调和保留原话模式。DeepSeek实际配置deepseek-flash，14个纯合成案例由旧提示词9/14提升到14/14，报告见`false-start-evaluation-2026-10-27.json`。扩展提示词对本地4B出现范围/语言退步，因此离线沿用原提示词，专项仍9/14；未宣称离线改善。
+
+本轮桌面30、引擎38、后端20及类型检查通过；原生桥接长连接及5组快捷键检查通过，打包界面6项通过、5项需显式启用的采集/Dock/事件专项跳过。离线语言检查18/18通过。包内引擎与源码一致，deep/strict签名有效。替换前主进程、桥接及推理后端已全部退出，旧包移至本机diagnostics/release-044-2026-10-27/previous.app。独立启动正在完成系统钥匙串与辅助功能运行时验收。

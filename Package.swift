@@ -11,9 +11,10 @@ let package = Package(
         .target(name: "YanmoNative", dependencies: ["YanmoCore"]),
         .executableTarget(name: "Yanmo", dependencies: ["YanmoCore", "YanmoNative"]),
         .executableTarget(name: "YanmoBridge", dependencies: ["YanmoCore", "YanmoNative", .product(name: "PermissionFlow", package: "PermissionFlow")]),
-        .executableTarget(name: "YanmoLifecycleChecks", dependencies: ["YanmoNative"], path: "Tests", exclude: ["YanmoCoreTests", "InputCaptureChecks", "ShortcutCaptureChecks.swift"], sources: ["EngineLifecycleChecks.swift"]),
+        .executableTarget(name: "YanmoBridgeInputChecks", dependencies: ["YanmoCore", "YanmoNative"], path: "Tests/BridgeInputChecks"),
+        .executableTarget(name: "YanmoLifecycleChecks", dependencies: ["YanmoNative"], path: "Tests", exclude: ["YanmoCoreTests", "InputCaptureChecks", "BridgeInputChecks", "ShortcutCaptureChecks.swift"], sources: ["EngineLifecycleChecks.swift"]),
         .executableTarget(name: "YanmoInputChecks", dependencies: ["YanmoCore"], path: "Tests/InputCaptureChecks"),
-        .executableTarget(name: "YanmoShortcutChecks", dependencies: ["YanmoCore", "YanmoNative"], path: "Tests", exclude: ["YanmoCoreTests", "InputCaptureChecks", "EngineLifecycleChecks.swift"], sources: ["ShortcutCaptureChecks.swift"]),
+        .executableTarget(name: "YanmoShortcutChecks", dependencies: ["YanmoCore", "YanmoNative"], path: "Tests", exclude: ["YanmoCoreTests", "InputCaptureChecks", "BridgeInputChecks", "EngineLifecycleChecks.swift"], sources: ["ShortcutCaptureChecks.swift"]),
         // Standalone checks also run with Command Line Tools, which omit XCTest.
         .executableTarget(name: "YanmoChecks", dependencies: ["YanmoCore"], path: "Tests/YanmoCoreTests")
     ],

@@ -1,0 +1,203 @@
+{
+  "date": "2026-10-27",
+  "method": "Synthetic text fixtures only, actual user-enabled DeepSeek endpoint (deepseek-flash), temperature 0, thinking disabled; old vs new prompt using the production natural-style instruction. Online credentials decrypted in the signed app and passed to Python over stdin only. No user dictation, audio, contexts, dictionary or credentials included. Outputs checked by fixture contains/forbid assertions; these are bounded examples, not a general quality guarantee.",
+  "source_sha256": {
+    "engine/worker.py": "e7673ed54b3741b64395f92c5fd3784f8c7a4c0330ff6b5441a5d73d49cf15bd",
+    "engine/prompt.txt": "b0cc511af6cfe17d606858a76fe04d6c69d97ac2233f4000fa68ad82ef34eb4e",
+    "engine/online_provider.py": "5050b2f1e502e3a0805b00b77f2268a10c382cf368a403629f30e2de09ffef1f",
+    "engine/fusion.py": "843c562182640b3a8b41ed0b5ab82b78a4eed6ce758e494f72bb0e39339621fe",
+    "backend/pipeline.py": "cfe182ffa1e2dfb56c7569bfeb3796ad8516b21b24b8bae779391ecdaee67c21"
+  },
+  "online_before": {
+    "passed": 9,
+    "total": 14,
+    "cases": [
+      {
+        "id": "abandoned_request",
+        "passed": false,
+        "output": "设置页也改一下，然后帮我弄一份，然后打开桌面程序。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "abandoned_object",
+        "passed": true,
+        "output": "把报告发给财务同事。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "restart_en",
+        "passed": false,
+        "output": "Please update the guide, and make me a, and launch the desktop app.",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "standalone_fragment",
+        "passed": true,
+        "output": "然后再加一个。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "context_fragment",
+        "passed": true,
+        "output": "还有蓝色的。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "parallel_requests",
+        "passed": true,
+        "output": "帮我做一份预算，然后启动应用。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "emphasis",
+        "passed": true,
+        "output": "真的，真的不要修改名字。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "uncertainty",
+        "passed": true,
+        "output": "可能周三，也可能周四，我还没决定。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "approximate",
+        "passed": true,
+        "output": "大概需要五六天。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "meaningful_one",
+        "passed": true,
+        "output": "这个方案给我做一个，然后再做一个备选。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "verbatim",
+        "passed": true,
+        "output": "设置页也改一下，然后帮我弄一份，然后打开桌面程序。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "mixed",
+        "passed": false,
+        "output": "先 update README，然后帮我弄一份，然后 run the app。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "abandoned_generic",
+        "passed": false,
+        "output": "说明也补上，然后给我做一个，然后运行电脑上的工具。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "dual_false_start",
+        "passed": false,
+        "output": "先改好图标，给我做一个，接着关闭测试窗。",
+        "engine": "deepseek-flash"
+      }
+    ]
+  },
+  "online_after": {
+    "passed": 14,
+    "total": 14,
+    "cases": [
+      {
+        "id": "abandoned_request",
+        "passed": true,
+        "output": "设置页也改一下，然后打开桌面程序。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "abandoned_object",
+        "passed": true,
+        "output": "把报告发给财务同事。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "restart_en",
+        "passed": true,
+        "output": "Please update the guide, and launch the desktop app.",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "standalone_fragment",
+        "passed": true,
+        "output": "然后再加一个。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "context_fragment",
+        "passed": true,
+        "output": "还有蓝色的。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "parallel_requests",
+        "passed": true,
+        "output": "帮我做一份预算，然后启动应用。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "emphasis",
+        "passed": true,
+        "output": "真的，真的不要修改名字。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "uncertainty",
+        "passed": true,
+        "output": "可能周三，也可能周四，我还没决定。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "approximate",
+        "passed": true,
+        "output": "大概需要五六天。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "meaningful_one",
+        "passed": true,
+        "output": "这个方案给我做一个，然后再做一个备选。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "verbatim",
+        "passed": true,
+        "output": "设置页也改一下，然后帮我弄一份，然后打开桌面程序。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "mixed",
+        "passed": true,
+        "output": "先 update README，然后 run the app。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "abandoned_generic",
+        "passed": true,
+        "output": "说明也补上，然后运行电脑上的工具。",
+        "engine": "deepseek-flash"
+      },
+      {
+        "id": "dual_false_start",
+        "passed": true,
+        "output": "先改好图标，接着关闭测试窗。",
+        "engine": "deepseek-flash"
+      }
+    ]
+  },
+  "local_unchanged": {
+    "passed": 9,
+    "total": 14,
+    "failed": [
+      "abandoned_request",
+      "abandoned_object",
+      "mixed",
+      "abandoned_generic",
+      "dual_false_start"
+    ],
+    "note": "Offline prompt and scope behavior retained, no claim of false-start cleanup improvement. Local prompt SHA-256 matches pre-change evaluation for shared cases."
+  }
+}

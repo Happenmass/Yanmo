@@ -1,5 +1,7 @@
 """Application-independent inference flow. Providers never own cursor insertion."""
 from threading import Event
+from time import monotonic
+from engine.diagnostics import record, task_id
 
 
 class TaskCancelled(Exception):
@@ -8,6 +10,10 @@ class TaskCancelled(Exception):
 
 def run_pipeline(engine, request, audio, cancelled: Event, emit):
     original = ""
+    token = task_id.set(request.get("task_id", ""))
+    started = monotonic()
+    current_stage = "starting"
+    record("task_start", operation=request["operation"])
 
     def check():
         if cancelled.is_set():
@@ -16,11 +22,17 @@ def run_pipeline(engine, request, audio, cancelled: Event, emit):
     def invoke(command, **values):
         check()
         payload = {**request["context"], **request["models"], "online": request.get("online") or {}, "command": command, **values}
+        begin = monotonic()
+        record("model_start", command=command)
         response = engine.handle(payload)
+        record("model_complete", command=command, elapsed_ms=round((monotonic()-begin)*1000), output_chars=len(response.get("text") or ""))
         check()
         return response
 
     def stage(name):
+        nonlocal current_stage
+        current_stage = name
+        record("stage", stage=name)
         check()
         emit({"event": "stage", "stage": name})
 
@@ -37,7 +49,7 @@ def run_pipeline(engine, request, audio, cancelled: Event, emit):
                         "language": value.get("language"), "language_source": value.get("language_source", "unknown")}
             candidates.append(candidate(primary))
             emit({"event": "transcript", "text": original, "asr_results": list(candidates)})
-            if primary.get("engine") == "Qwen3-ASR" and primary.get("language_source") == "detected" and language in ("Chinese", "English"):
+            if primary.get("secondary") and primary.get("language_source") == "detected" and language in ("Chinese", "English"):
                 stage("reviewing")
                 secondary = invoke("transcribe_secondary", audio=str(audio), language=language)
                 candidates.append(candidate(secondary))
@@ -61,11 +73,17 @@ def run_pipeline(engine, request, audio, cancelled: Event, emit):
             processed = task != "verbatim"
         result = response.get("text")
         if not result:
+            record("task_error", stage=current_stage, error_type="EmptyModelOutput")
             emit({"event": "error", "message": "模型没有返回正文，识别原文已保留，请重试。", "original": original})
             return
         check()
+        record("task_complete", elapsed_ms=round((monotonic()-started)*1000))
         emit({"event": "result", "text": result, "original": original, "processed": processed})
     except TaskCancelled:
+        record("task_cancelled", stage=current_stage)
         emit({"event": "cancelled", "original": original})
     except Exception as exc:
+        record("task_error", stage=current_stage, error_type=type(exc).__name__, elapsed_ms=round((monotonic()-started)*1000))
         emit({"event": "error", "message": str(exc), "original": original})
+    finally:
+        task_id.reset(token)

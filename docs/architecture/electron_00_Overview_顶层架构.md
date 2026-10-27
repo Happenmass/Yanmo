@@ -2,11 +2,11 @@
 
 版本：v0.2；日期：2026-10-21；重构前基线：`cb686f5`。Mac 首阶段已实现，Windows 仍按下述方案推进。
 
-目标：共用 Electron 界面、应用流程和推理协议，分别交付 Mac 的 MLX 运行时与 Windows 的 vLLM 运行时，让模型接入方式能够独立调整。
+目标：共用 Electron 界面、应用流程和推理协议，分别交付 Mac 的 MLX 运行时与 Windows 的 PyTorch（CUDA）运行时，让模型接入方式能够独立调整。
 
 需求依据：本次用户确认的 Electron 重建方向，以及“Mac 默认 MLX；Windows 检查 CUDA，无 CUDA 推荐在线 API”的平台策略。产品行为沿用 [README](../../README.md) 与 [已确认视觉](../design/README.md)。本文给出模块范围和推荐边界，具体版本、接口类型和安装步骤在实施前的专项设计中固定。
 
-实施状态：Mac 的 Electron 界面、Swift helper、独立 Python/MLX 运行时、认证 HTTP/SSE 和旧数据迁移已落地；功能与验证入口见 [Mac 实施记录](../electron-mac-2026-10-21.md)。下文模块清单以重构前原型为基线描述责任划分；2026-10-23 起 Windows CUDA/WSL2 预检查、无 CUDA 在线分流与网关依赖已实现，见 [P0 运行时与预检查](electron_01_Runtime_运行时与预检查.md)；Windows helper、WSL vLLM 运行时组件与 vLLM Provider 尚未实现。
+实施状态：Mac 的 Electron 界面、Swift helper、独立 Python/MLX 运行时、认证 HTTP/SSE 和旧数据迁移已落地；功能与验证入口见 [Mac 实施记录](../electron-mac-2026-10-21.md)。下文模块清单以重构前原型为基线描述责任划分；2026-10-23 用户决定 Windows 放弃 vLLM/WSL2，改用原生 PyTorch 与 transformers；预检查、无 CUDA 在线分流、运行库安装、模型准备与 PyTorch 推理适配已实现，见 [运行时与预检查](electron_01_Runtime_运行时与预检查.md)；Windows helper 尚未实现。下文涉及 Windows 本地推理处均以该决定为准。
 
 ## 0. 术语
 
@@ -17,7 +17,7 @@
 | 推理后端 | 独立 Python 服务，组织识别、整理和翻译 | 本次需求、现有 `engine/` |
 | ASR | 将录音转换为原始转写的能力 | 现有 Qwen3-ASR 流程 |
 | 文字生成 | 整理或翻译文本的能力，与 ASR 分开配置 | 现有双翻译流程 |
-| Provider | 把 MLX、vLLM 或在线 API 接入统一能力接口的适配器 | 本方案建议 |
+| Provider | 把 MLX、PyTorch 或在线 API 接入统一能力接口的适配器 | 本方案建议 |
 | 运行时 | Python、推理库及其原生依赖，不包含模型权重 | 本方案打包边界 |
 | 预检查 | 检查硬件、运行时、模型和服务能力，输出可操作状态 | 本次需求 |
 | 本地模式 | 音频、转写、词库和上下文均留在本机处理 | 项目 `AGENTS.md` |
@@ -35,8 +35,8 @@
 | 目标 | 对应范围限制 |
 |---|---|
 | G1：Electron 复现已确认界面与水墨动效 | NG1：本轮沿用现有产品设计，不增加视觉改版 |
-| G2：Mac 默认离线使用 MLX | NG2：Mac 首版以 Apple Silicon 为目标，不引入 vLLM Metal 路径 |
-| G3：Windows 可用 CUDA 时运行 vLLM，否则推荐 API | NG3：首版不增加 CPU、DirectML、ROCm 等 Windows 本地后端 |
+| G2：Mac 默认离线使用 MLX | NG2：Mac 首版以 Apple Silicon 为目标，不引入 PyTorch MPS 路径 |
+| G3：Windows 可用 CUDA 时运行 PyTorch，否则推荐 API | NG3：首版不增加 CPU、DirectML、ROCm 等 Windows 本地后端 |
 | G4：模型、引擎、API 可独立切换 | NG4：只做 ASR 与文字生成两个能力接口，不建设通用插件市场 |
 | G5：保留输入、双翻译、词库、历史与隐私设置 | NG5：不增加账号、云同步、OCR、问答和多引擎投票 |
 | G6：安装包可脱离开发环境运行 | NG6：模型权重使用全局缓存，不随应用打包，不复制个人数据作演示 |
@@ -48,7 +48,7 @@
 | 环境 | 默认路径 | 预检查未通过时 |
 |---|---|---|
 | Apple Silicon Mac | 内置 Python + MLX；复用现有 Qwen3-ASR 与 4B 文本模型 | 区分模型未准备、运行时异常和硬件不支持，提供修复或主动配置 API 的入口 |
-| Windows x64，CUDA 与运行条件通过 | 内置 Python 网关 + WSL2 中的 vLLM 运行时 | 显示缺少的运行条件，支持准备本地运行环境或配置 API |
+| Windows x64，CUDA 与运行条件通过 | 内置 Python 网关 + 本机 PyTorch CUDA 运行库 | 显示缺少的运行条件，支持准备本地运行环境或配置 API |
 | Windows，无受支持的 CUDA GPU | 原生 Python 网关 + 在线 API 适配器 | 进入 API 配置引导；未配置成功前不显示“可用” |
 
 Windows 建议先支持 Windows 11 x64。Mac 系统下限以现有 macOS 14 为起点，随锁定的 MLX/Python 依赖验证。Intel Mac 与 Windows ARM 暂列后续范围。
@@ -73,7 +73,7 @@ flowchart TB
     end
     subgraph ENGINE["按平台选择推理实现"]
         X["Mac：MLX ASR + MLX-LM"]
-        V["Windows：WSL2 + vLLM"]
+        V["Windows：PyTorch + transformers（CUDA）"]
         A["用户启用的在线 ASR / 文本 API"]
     end
     D["本机文稿、设置与凭证存储"]
@@ -101,9 +101,9 @@ flowchart TB
 |---|---|---|---|
 | `backend/` | 当前入口为 `engine/worker.py` | 🆕 | 从逐行 JSON worker 提取为独立服务，统一任务提示词、正文交付、Markdown代码保护与技术错误语义 |
 | `backend/providers/mlx/` | 当前 ASR 与 MLX-LM 直接调用 | 🔧 | 迁入 Mac 专属适配器，优先保持现用模型和行为 |
-| `backend/providers/compatible_api/` | 暂无统一 API 接入 | 🆕 | 分别适配转写与文字生成；本机 vLLM 与兼容在线接口复用传输，保留各自能力差异 |
+| `backend/providers/compatible_api/` | 暂无统一 API 接入 | 🆕 | 分别适配转写与文字生成；兼容在线接口复用传输，保留各自能力差异 |
 | `runtime/macos/` | 当前使用项目外 Python 路径 | 🆕 | 内置可重定位 Python、MLX 及音频依赖，并固定版本 |
-| `runtime/windows/` | 暂无 Windows 推理环境 | 🆕 | 原生 Python 网关、预检查，以及随附的 Linux vLLM 运行时组件 |
+| `runtime/windows/` | 暂无 Windows 推理环境 | 🆕 | 原生 Python 网关、预检查，以及按需安装的 PyTorch CUDA 运行库 |
 
 ### 5.2 桌面端与系统桥接
 
@@ -121,7 +121,7 @@ flowchart TB
 |---|---|---|
 | 业务协议与类型 | 🆕 | TypeScript/Python 共用的任务、事件、错误和能力定义；集中在协议文件中维护 |
 | 本机数据与凭证 | 🔧 | 兼容 `library.json`，导入 Mac UserDefaults；平台各自保管凭证 |
-| 全局权重缓存 | 🔧 | 默认 ModelScope；复用已有 ModelScope/Hugging Face 全局缓存；Windows/WSL 使用同一配置的全局位置 |
+| 全局权重缓存 | 🔧 | 默认 ModelScope；复用已有 ModelScope/Hugging Face 全局缓存；Windows 使用同一配置的全局位置 |
 | 构建与测试资产 | 🔧 | 增加分平台运行时清单、安装包构建与核心行为回归；保留旧版作迁移对照 |
 
 现有 SwiftUI 应用在迁移验收期间继续作为行为基线。旧版与 Electron 版共享迁移源时采用备份和单写入方，避免同时覆盖文稿库。
@@ -135,7 +135,7 @@ flowchart TB
 | Mac / Windows helper | 录音、上下文与选区快照、键盘监听、剪贴板和当前焦点一次粘贴 | 生成文本、保存文稿和选择 Provider | 系统事件/应用命令 → 音频、上下文/选区快照、交付状态 |
 | Python 后端 | ASR→整理/翻译流程、提示词与技术完成状态 | 操作输入框、保留历史、控制窗口 | 推理任务 → 阶段事件、原始转写、模型正文 |
 | MLX 适配器 | Mac 模型加载与本机推理 | 桌面流程和在线上传 | 标准能力请求 → 标准结果 |
-| API 适配器 | 本机 vLLM/在线接口的参数、能力与结果转换 | 将任意服务视为完全兼容 | 标准能力请求 → 结果/明确错误 |
+| API 适配器 | 在线接口的参数、能力与结果转换 | 将任意服务视为完全兼容 | 标准能力请求 → 结果/明确错误 |
 | 分平台运行时 | 启动、检查和停止应用拥有的推理进程 | 接管用户其他服务或更改系统驱动 | 启动/探测命令 → readiness 与资源状态 |
 | 协议、数据、缓存与发布资产 | 类型版本、原子保存、缓存定位和可复现构建 | 复制业务判断或存储演示个人数据 | 业务对象/构建输入 → 本机文件/安装包 |
 
@@ -147,12 +147,12 @@ flowchart TB
 |---|---|---|
 | Electron 重建 | 共用界面与业务流程，分别构建两个平台安装包 | 桌面端与构建 |
 | Mac 默认 MLX | 使用 Apple Silicon 本机推理 | Mac 运行时 |
-| Windows 使用 vLLM | CUDA 不满足时推荐在线 API | Windows 运行时与预检查 |
+| Windows 使用 PyTorch（2026-10-23 由 vLLM 改定） | CUDA 不满足时推荐在线 API | Windows 运行时与预检查 |
 | 默认下载源 | ModelScope，准备前复用已有完整全局缓存 | 模型准备与缓存 |
 | 后端可替换 | 引擎与 API 接入调整不要求重写界面 | Python 接口与协议 |
 | 延续产品约束 | 已确认视觉、离线能力、全局缓存、谨慎整理与写入 | 全部模块 |
 
-建议选型是“一个仓库、一套前端、一套后端核心、分平台 helper 与依赖清单”。模型配置分成 ASR 和文字生成两项；首次只实现 MLX、vLLM/兼容 API 所需的适配，不增加通用插件系统。
+建议选型是“一个仓库、一套前端、一套后端核心、分平台 helper 与依赖清单”。模型配置分成 ASR 和文字生成两项；首次只实现 MLX、PyTorch/兼容 API 所需的适配，不增加通用插件系统。
 
 ## 8. 通信契约与启动预检查
 
@@ -176,26 +176,26 @@ flowchart TB
 | `POST /v1/tasks` + SSE 响应 | 每个推理任务一次 | 任务 ID、操作、音频上传或文本、语言、配置快照、可选上下文 |
 | `POST /v1/tasks/{id}/cancel` | 用户取消或应用退出 | 取消指定任务；迟到结果失效 |
 
-SSE 统一返回阶段变化、原始转写、最终结果或终止错误；部分 token 不作为可写入结果。传音频内容而非 Windows/Mac 私有路径，避免 WSL 路径耦合。首版只保留一个前台交互任务，不建设持久队列。版本以 `/v1` 为边界。
+SSE 统一返回阶段变化、原始转写、最终结果或终止错误；部分 token 不作为可写入结果。传音频内容而非 Windows/Mac 私有路径。首版只保留一个前台交互任务，不建设持久队列。版本以 `/v1` 为边界。
 
 ### 8.4 后端到推理实现
 
-Mac 在 Python 中调用 MLX ASR/MLX-LM；Windows 通过本机认证 HTTP 访问 WSL2 vLLM。转写与文字生成是两个模型能力，分别探测；不假设一个 `vllm serve` 进程同时装载两个不同基础模型。在线端点只接受用户启用的配置，适配器按实际支持项映射转写、Chat Completions、长度与结束原因。
+Mac 在 Python 中调用 MLX ASR/MLX-LM；Windows 在同一后端进程中以 PyTorch/transformers 调用 Qwen3-ASR 与文字模型。转写与文字生成是两个模型能力，分别探测。在线端点只接受用户启用的配置，适配器按实际支持项映射转写、Chat Completions、长度与结束原因。
 
-本机服务限制在 loopback，通过临时认证信息访问。Windows 额外验证宿主到 WSL 的本机连接；网络不通时保留诊断，不将服务绑定到局域网来绕过问题。[WSL 网络说明](https://learn.microsoft.com/en-us/windows/wsl/networking)
+本机服务限制在 loopback，通过临时认证信息访问，不将服务绑定到局域网。
 
 ### 8.5 启动预检查与选择规则
 
 | 检查阶段 | Mac | Windows |
 |---|---|---|
-| 轻量环境检查 | 架构、系统、Metal、内置 Python/MLX | 架构、受支持 NVIDIA GPU、驱动、WSL2 与运行时是否就绪 |
+| 轻量环境检查 | 架构、系统、Metal、内置 Python/MLX | 架构、受支持 NVIDIA GPU、PyTorch 运行库是否就绪 |
 | 模型准备检查 | 现有 MLX 权重与 tokenizer 是否完整 | CUDA 可用性、GPU 架构、模型格式、可用显存与全局缓存 |
-| 能力验证 | 模型加载与必要推理检查；加载与录音重叠 | 在实际 WSL/vLLM 环境中检查 CUDA 和模型；不能只看宿主 `nvidia-smi` |
+| 能力验证 | 模型加载与必要推理检查；加载与录音重叠 | 在实际 PyTorch 运行库中检查 CUDA 和模型；不能只看宿主 `nvidia-smi` |
 | 在线配置验证 | 用户主动选择时检测 | 无可用 CUDA 时直接推荐；分别验证 ASR 和文字生成 |
 
 状态至少区分“检查中、本地可用、模型待准备、本地环境待修复、推荐在线、API 待配置、在线可用”。普通启动不重复完整推理基准；依赖或模型变更后重新验证，按需加载状态单独显示。
 
-CUDA 判断针对捆绑运行时能否实际执行，不以是否安装系统 CUDA Toolkit 为判据。vLLM 当前官方要求 Linux，Windows 路径采用 WSL2；GPU 架构与驱动要求随锁定版本记录在兼容矩阵中。[vLLM 官方安装要求](https://docs.vllm.ai/en/stable/getting_started/installation/gpu/)
+CUDA 判断针对捆绑运行时能否实际执行，不以是否安装系统 CUDA Toolkit 为判据。GPU 架构与驱动要求随锁定的 PyTorch CUDA 版本记录在兼容矩阵中。
 
 ## 9. 语音输入时序
 
@@ -239,7 +239,7 @@ sequenceDiagram
 | 情况 | 处理方式 | 影响范围 |
 |---|---|---|
 | Windows 无受支持 CUDA | 直接推荐在线配置，跳过本地模型加载 | 本地推理入口 |
-| 有 GPU，但 WSL2/驱动/运行时未就绪 | 给出具体修复项，同时可选 API；准备 WSL 的安装操作由用户明确发起 | Windows 本地运行时 |
+| 有 GPU，但驱动/运行库未就绪 | 给出具体修复项，同时可选 API；运行库安装由用户明确发起 | Windows 本地运行时 |
 | 显存不足或双模型争用 | 为 ASR/文本分别设预算并实测；可顺序驻留，达不到交互要求时推荐 API | Windows 模型调度 |
 | API 只支持文本或转写 | 逐项显示能力；没有 ASR 就不能标记语音输入就绪 | 在线模式 |
 | 后端异常、超时、空输出或生成截断 | 保留已识别原文；停止自动写入；用户可重试 | 当前任务 |
@@ -253,19 +253,19 @@ sequenceDiagram
 | 产物 | 随附内容 | 外部条件 |
 |---|---|---|
 | Mac arm64 应用/DMG | Electron、Swift helper、独立 Python、MLX/MLX-LM/音频依赖 | 系统权限与全局模型缓存 |
-| Windows x64 安装器 | Electron、Win32 helper、原生 Python 网关、压缩的 Linux Python/vLLM/CUDA 用户态依赖运行时组件 | 本地模式需要可用 NVIDIA 驱动与 WSL2；在线模式无需它们 |
+| Windows x64 安装器 | Electron、Win32 helper、原生 Python 网关；PyTorch CUDA 运行库在启用本地模式时下载 | 本地模式需要可用 NVIDIA 驱动；在线模式无需 |
 
-Windows 的 vLLM 组件在启用本地模式时导入专用运行环境，模型另存全局缓存；启用 WSL2 可能需要系统操作与重启，不能作为无感前提。首版按随附组件设计，压缩体积与安装耗时先测量，再决定是否需要另提供轻量在线安装包。采用专用环境，生命周期只停止言墨拥有的进程，不执行影响其他发行版的全局 WSL 关闭。
+Windows 的 PyTorch 运行库在用户启用本地模式时按锁文件安装到 Local AppData（约 2.1 GB），不随安装包分发，模型另存全局缓存；无需管理员权限或重启。
 
 Python 优先使用可重定位的独立发行版，加上构建时锁定的 wheels；运行时与 helper 放在应用资源区、ASAR 外。现有 `.venv` 不直接复制进安装包，也不依赖用户安装 Python/Homebrew/开发工具。冻结为单文件可执行程序留作打包评估选项。[Python 独立发行版](https://gregoryszorc.com/docs/python-build-standalone/main/distributions.html)、[electron-builder 资源打包](https://www.electron.build/contents/)
 
-模型准备默认来源为 ModelScope，与日常离线推理分开。Mac 新下载进入 `~/.cache/codex/models/modelscope/`，复用 SDK 既有缓存及 `~/.cache/huggingface/`；`MODELSCOPE_CACHE` 可指向其他用户级全局位置。Windows/WSL 使用相同缓存政策，通过路径映射配置共享位置；不复制已有完整权重。Mac MLX 量化文件与 CUDA 模型格式分别准备，不能假设权重文件通用；WSL 读取宿主缓存的性能纳入实测。
+模型准备默认来源为 ModelScope，与日常离线推理分开。Mac 新下载进入 `~/.cache/codex/models/modelscope/`，复用 SDK 既有缓存及 `~/.cache/huggingface/`；`MODELSCOPE_CACHE` 可指向其他用户级全局位置。Windows 使用相同缓存政策；不复制已有完整权重。Mac MLX 量化文件与 transformers 格式分别准备，不能假设权重文件通用。
 
 ## 11. 端到端验收约束
 
 1. 两个安装包使用相同的业务任务与结果协议，换 Provider 不要求改界面代码。
 2. Mac 的默认输入、整理和双翻译在断网状态可完成；Windows 本地模式准备完成后也可断网执行。
-3. Windows 无 CUDA 时不启动 vLLM，不下载本地权重；API 未启用前不上传输入内容。
+3. Windows 无 CUDA 时不安装本地运行库，不下载本地权重；API 未启用前不上传输入内容。
 4. 在线 ASR 与文字 API 分别标记可用性；用户可明确配置本地识别配合在线文字处理，发送范围可见。
 5. 本地模式不发送遥测或请求正文；两种模式均不将凭证、词库、上下文或录音写入诊断日志。
 6. 临时录音在完成、取消和受控错误后删除；历史开关、保留周期和选区翻译不留历史的规则保持有效。
@@ -282,8 +282,8 @@ Python 优先使用可重定位的独立发行版，加上构建时锁定的 whe
 
 | 阶段 | 主要工作 | 完成判据 | 后续详细设计 |
 |---|---|---|---|
-| P0：运行时与预检查 | Mac 内置 MLX 最小包；Windows WSL2/vLLM 及无 CUDA 分流验证；记录运行时体积 | Mac 脱离项目环境执行；Windows 有/无 CUDA 和 WSL 缺失均返回正确状态 | `electron_01_Runtime_运行时与预检查.md` |
-| P1：共用推理后端 | 统一任务提示词与正文协议，接入MLX、vLLM/兼容API | 相同合成样本覆盖本地后端及API；语言、融合、翻译效果及正文完整交付通过评测 | `electron_02_Backend_推理协议.md` |
+| P0：运行时与预检查 | Mac 内置 MLX 最小包；Windows PyTorch 运行库及无 CUDA 分流验证；记录运行时体积 | Mac 脱离项目环境执行；Windows 有/无 CUDA 和运行库缺失均返回正确状态 | `electron_01_Runtime_运行时与预检查.md` |
+| P1：共用推理后端 | 统一任务提示词与正文协议，接入MLX、PyTorch/兼容API | 相同合成样本覆盖本地后端及API；语言、融合、翻译效果及正文完整交付通过评测 | `electron_02_Backend_推理协议.md` |
 | P2：跨平台输入闭环 | 最小 Electron 壳、两个 helper、录音浮层、一次写入 | 两平台真实快捷键→录音→推理→写入时当前焦点；途中切换目标仍正确投递，取消不写入 | `electron_03_Native_系统交互.md` |
 | P3：完整界面与数据 | 主窗口、双翻译、文稿/词库/设置、Mac 数据导入 | 按确认视觉验收，原型功能逐项对照，隐私与历史设置保留 | 沿用 `docs/design/`，新增配置界面先做视觉确认 |
 | P4：发布验收 | 干净环境安装、Mac 签名/公证、Windows 签名、升级/卸载 | 两个平台分别完成发布检查，权重与个人数据不进入构建产物 | `electron_04_Release_分发验收.md` |
@@ -292,11 +292,11 @@ Python 优先使用可重定位的独立发行版，加上构建时锁定的 whe
 
 ## 13. 待验证事项
 
-1. Windows 首批目标 GPU 与显存档位是什么？这决定两模型可否常驻、vLLM 预算及首版可承诺的延迟；以实机矩阵固定，不根据 CUDA 存在与否直接判定。
-2. 随附 WSL2 运行时组件的实际体积、导入耗时和驱动兼容性是否满足安装体验？先验证完整方案，再决定是否补充轻量在线包。
+1. Windows 首批目标 GPU 与显存档位是什么？这决定两模型可否常驻及首版可承诺的延迟；以实机矩阵固定，不根据 CUDA 存在与否直接判定。
+2. PyTorch 运行库（约 2.1 GB）在实机的安装耗时与驱动兼容性是否满足安装体验？
 3. 首批在线 API 服务分别提供哪些 ASR/文字接口？先支持一种经验证的兼容协议，供应商差异留在适配器中。
 
-以上影响细节与发布范围；Electron 共用界面、Mac MLX、Windows vLLM/无 CUDA 推荐 API 的方向已按用户决定固定。Mac 已完成首阶段实现；下一阶段优先落实 Windows 运行时与预检查，并验证在线 ASR/文字接口。
+以上影响细节与发布范围；Electron 共用界面、Mac MLX、Windows PyTorch/无 CUDA 推荐 API 的方向已按用户决定固定。Mac 已完成首阶段实现；下一阶段优先落实 Windows 运行时与预检查，并验证在线 ASR/文字接口。
 
 ## 14. 依据与参考
 
@@ -304,10 +304,8 @@ Python 优先使用可重定位的独立发行版，加上构建时锁定的 whe
 
 官方参考（2026-10-21 查阅）：
 
-- [vLLM GPU 安装要求](https://docs.vllm.ai/en/stable/getting_started/installation/gpu/)：Linux/WSL、GPU 与版本兼容要求。
-- [vLLM Qwen3-ASR 用法](https://docs.vllm.ai/projects/recipes/en/stable/Qwen/Qwen3-ASR.html)：Qwen3-ASR-1.7B 与转写接口；不据此认定现有 MLX 8bit 权重可直接用于 CUDA。
-- [NVIDIA CUDA on WSL](https://docs.nvidia.com/cuda/wsl-user-guide/index.html)：Windows 驱动与 WSL GPU 环境边界。
-- [Microsoft WSL 命令](https://learn.microsoft.com/en-us/windows/wsl/basic-commands)、[WSL 网络](https://learn.microsoft.com/en-us/windows/wsl/networking)：运行环境管理和宿主访问。
+- [transformers Qwen3-ASR](https://huggingface.co/docs/transformers/model_doc/qwen3_asr)：`-hf` 格式权重、转写请求与解码。
+- [PyTorch 安装](https://pytorch.org/get-started/locally/)：Windows CUDA 版本与索引。
 - [Electron 进程模型](https://www.electronjs.org/docs/latest/tutorial/process-model)、[BrowserWindow](https://www.electronjs.org/docs/latest/api/browser-window)、[安全说明](https://www.electronjs.org/docs/latest/tutorial/security)：主进程/renderer、非激活显示与权限边界。
 - [Win32 热键](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey)、[UI Automation](https://learn.microsoft.com/en-us/windows/win32/winauto/entry-uiauto-win32)：Windows 系统桥接入口。
 - [Python 独立发行版](https://gregoryszorc.com/docs/python-build-standalone/main/distributions.html)、[electron-builder 资源打包](https://www.electron.build/contents/)：运行时随应用分发的基础。

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -38,7 +38,7 @@ server = HTTPServer(('127.0.0.1', 0), Handler)
 print(json.dumps({'event':'ready','protocol':1,'port':server.server_port}),flush=True)
 server.serve_forever()
 `);
-  const client = new BackendClient(process.env.YANMO_TEST_PYTHON || 'python3', directory, 150);
+  const client = new BackendClient(process.env.YANMO_TEST_PYTHON || 'python3', directory, 150, join(directory, "diagnostics"));
   try {
     const status = await client.status(defaultSettings());
     assert.equal(status.dont_write_bytecode, true, '后端不可写入缓存修改签名资源');
@@ -54,6 +54,12 @@ server.serve_forever()
     await running;
     assert.deepEqual(events, ['stage', 'result']);
     assert.equal((await client.status(defaultSettings())).pid, second, '长流完成前保留进程，完成后可复用');
+    await assert.rejects(client.run({ task_id: "other", text: "PRIVATE_INPUT" }, undefined, () => {}), /任务编号不匹配/);
+    const log = await readFile(join(directory, "diagnostics", "desktop.jsonl"), "utf8");
+    assert.ok(log.includes("task_transport_error"));
+    assert.ok(log.includes("polishing"));
+    assert.ok(!log.includes("PRIVATE_INPUT"));
+    assert.ok(!log.includes("合成结果"));
     await exited(second);
   } finally { await client.stop(); await rm(directory, { recursive: true, force: true }); }
 });

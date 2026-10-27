@@ -85,19 +85,19 @@ const modelsReady = (state: AppState) => state.modelsChecked && (state.settings.
 function ModelSetup({ state }: { state: AppState }) {
   const { settings, models, checking, modelsChecked, runtime } = state;
   const windows = state.platform === 'windows';
-  // Windows prepares WSL2 and the CUDA runtime before any model download; without a supported GPU it stops here.
+  // Windows prepares the PyTorch CUDA runtime before any model download; without a supported GPU it stops here.
   const needsEnvironment = windows && runtime.status === 'local-repair';
   const unsupported = windows && ['recommend-online', 'api-pending'].includes(runtime.status);
   return <section className="guide"><header className="guide-top"><span>初次见面</span><button className="text-button" onClick={() => void api('settings', { onboarded: true }).then(result => { if (result.ok) void api('page', 'settings'); })}>跳过引导</button></header>
     <div className="guide-body"><div className="guide-text"><h2 className="brush-reveal">先备好笔墨。</h2><p className="guide-caption">言墨在本机识别与整理，第一次使用需要下载模型。</p>
-      {windows ? <ol><li>先准备运行环境：启用 WSL2 并安装言墨专用运行库，约下载 4.4 GB</li><li>再下载模型约 4.6 GB，保存在用户全局缓存；之后录音、识别和整理都在本机完成</li><li>准备完成后，进入快捷键引导</li></ol>
+      {windows ? <ol><li>先准备运行环境：安装 PyTorch 与 CUDA 运行库，约下载 2.1 GB</li><li>再下载模型约 4.3 GB，保存在用户全局缓存；之后录音、识别和整理都在本机完成</li><li>准备完成后，进入快捷键引导</li></ol>
         : <ol><li>共约 5 GB，保存在用户全局缓存；已有完整缓存会直接复用</li><li>只有这一步需要联网，之后录音、识别和整理都在本机完成</li><li>准备完成后，进入快捷键引导</li></ol>}
       <label className="inline-setting"><span>下载来源</span><select aria-label="模型下载来源" disabled={checking} value={settings.modelSource} onChange={event => void api('settings', { modelSource: event.target.value })}><option value="modelscope">ModelScope（默认）</option><option value="huggingface">Hugging Face</option></select></label>
       {unsupported ? <p className="fine-print">{runtime.issues.join(' ')} 可跳过引导，在设置中配置在线处理。</p>
         : needsEnvironment ? <><button className="button primary" disabled={checking} onClick={() => void api('prepareRuntime')}>{checking ? '正在准备运行环境…' : '准备运行环境'}</button>{!checking && <p className="fine-print">{runtime.issues.join(' ')}</p>}</>
         : <button className="button primary" disabled={checking || !modelsChecked} onClick={() => void api('prepareModels')}>{!modelsChecked ? (windows ? '正在检查本地环境…' : '正在检查本地缓存…') : checking ? '正在准备模型…' : '下载模型'}</button>}
       {state.notice && <p className="fine-print" role="status">{state.notice}</p>}
-    </div><figure className="guide-figure"><div className="model-check">{windows && <Dot ready={!needsEnvironment && !unsupported && modelsChecked}>运行环境 · WSL2 + CUDA</Dot>}<Dot ready={models.asr}>语音识别 · Qwen3-ASR</Dot>{!windows && <Dot ready={models.sensevoice}>中英复核 · SenseVoice</Dot>}<Dot ready={models.llm}>文字整理 · Qwen3-4B</Dot></div><figcaption>{modelsChecked ? '三项就绪后自动进入引导' : '正在检查全局缓存'}</figcaption></figure></div>
+    </div><figure className="guide-figure"><div className="model-check">{windows && <Dot ready={!needsEnvironment && !unsupported && modelsChecked}>运行环境 · PyTorch + CUDA</Dot>}<Dot ready={models.asr}>语音识别 · Qwen3-ASR</Dot>{!windows && <Dot ready={models.sensevoice}>中英复核 · SenseVoice</Dot>}<Dot ready={models.llm}>文字整理 · Qwen3-4B</Dot></div><figcaption>{modelsChecked ? '三项就绪后自动进入引导' : '正在检查全局缓存'}</figcaption></figure></div>
   </section>;
 }
 function Onboarding({ state }: { state: AppState }) {
