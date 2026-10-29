@@ -39,4 +39,4 @@ npm run package:win:arti
 
 Windows 选区与可选上下文通过 UI Automation 读取；不提供选区的控件会提示先选中。密码控件不读取或写入；Windows 权限限制下无法向以管理员权限运行的程序注入粘贴，正文仍保留在文稿中。构建/单测/交叉打包不能代替上述原生验收。
 
-验收安装包后再放到 arti.local 软件下载区域。门户已预留固定文件名 `Yanmo-Arti-Setup-win-x64.exe` 和 `Yanmo-Arti-SHA256SUMS.txt`，未提供经 Windows 验收的安装包前不展示下载按钮。
+2026-10-29 用户要求将现有交叉打包版本直接上架，现已可从 [arti.local](http://arti.local/#download) 下载言墨安装包（178.6MiB）。固定下载名为 `Yanmo-Arti-Setup-win-x64.exe`，校验文件为 `Yanmo-Arti-SHA256SUMS.txt`。网页实际完整下载与 SHA-256 已核对；Windows 原生验收仍按上述清单执行。

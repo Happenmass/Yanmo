@@ -18,6 +18,6 @@ ssh arti 'curl -fsS http://127.0.0.1:8103/health'
 
 调用格式为 OpenAI 音频转录 multipart，字段 `model`、`file`、可选 `language`，支持 `json`、`verbose_json`、`text`。上传最多 20MiB、音频 0.35～300 秒；单执行线程排队，执行后释放未使用的 CUDA allocator 缓存供 LLM/OCR 使用。上传临时文件读取后即关闭清理，不保留录音，访问日志关闭，运维日志只写模型放置、耗时与显存数据。识别质量需实际口述验收，合成语音只证明链路和容量。
 
-回退：`systemctl --user disable --now yanmo-asr`，恢复门户备份 `~/atlas-inference/backups/yanmo-asr-20261029/portal-server.py` 后按现行门户服务流程重启；LLM/OCR 配置不变。不要用旧首页覆盖当前下载版本。Windows 安装包通过用户实机验收后，再按 `docs/windows-arti-api.md` 与 Atlas 门户手册上架。
+回退：`systemctl --user disable --now yanmo-asr`，恢复门户备份 `~/atlas-inference/backups/yanmo-asr-20261029/portal-server.py` 后按现行门户服务流程重启；LLM/OCR 配置不变。不要用旧首页覆盖当前下载版本。Windows 安装包已于2026-10-29按用户要求上架；实际下载完整性已验，Windows原生验收仍按 `docs/windows-arti-api.md` 执行。
 
 官方接口与结构依据：[Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR)、[Qwen3-ASR-1.7B](https://modelscope.cn/models/Qwen/Qwen3-ASR-1.7B)。
