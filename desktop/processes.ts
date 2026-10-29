@@ -15,7 +15,7 @@ export class NativeBridge extends EventEmitter {
   start(): Promise<void> {
     if (this.starting) return this.starting;
     this.starting = new Promise((resolve, reject) => {
-      const child = spawn(this.executable, [], { env: { ...process.env, YANMO_PARENT_PID: String(process.pid) }, stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawn(this.executable, [], { env: { ...process.env, YANMO_PARENT_PID: String(process.pid) }, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
       this.child = child;
       const timeout = setTimeout(() => { reject(new Error('系统桥接启动超时。')); child.kill(); }, 15000);
       createInterface({ input: child.stdout }).on('line', line => {
@@ -85,7 +85,7 @@ export class BackendClient {
       const env: NodeJS.ProcessEnv = { ...process.env, YANMO_BACKEND_TOKEN: this.token, YANMO_SUPERVISED: '1', HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1', HF_HUB_DISABLE_TELEMETRY: '1', PYTHONUNBUFFERED: '1' };
       if (this.diagnosticsDirectory) env.YANMO_DIAGNOSTICS_DIR = this.diagnosticsDirectory;
       delete env.PYTHONHOME; delete env.PYTHONPATH; delete env.VIRTUAL_ENV;
-      const child = spawn(this.python, ['-B', '-u', '-m', 'backend.server'], { cwd: this.root, env, stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawn(this.python, ['-B', '-u', '-c', 'import runpy, sys; sys.path.insert(0, sys.argv[1]); runpy.run_module("backend.server", run_name="__main__")', this.root], { cwd: this.root, env, stdio: ['pipe', 'pipe', 'pipe'] });
       this.child = child;
       const timeout = setTimeout(() => { reject(new Error('本地推理后端启动超时。')); child.kill(); }, 30000);
       createInterface({ input: child.stdout! }).on('line', line => {
@@ -108,14 +108,14 @@ export class BackendClient {
     clearTimeout(this.idle); this.requests++;
     try {
       await this.start();
-      const response = await fetch(this.origin + path, { ...init, headers: { ...init.headers, Authorization: 'Bearer ' + this.token }, signal: init.signal ?? AbortSignal.timeout(180000) });
+      const response = await fetch(this.origin + path, { ...init, headers: { ...init.headers, Authorization: 'Bearer ' + this.token }, signal: init.signal ?? AbortSignal.timeout(process.env.YANMO_API_ONLY === '1' ? 3660000 : 180000) });
       if (!response.ok) { const value = await response.json().catch(() => ({})); throw new Error(value.detail || '本地推理请求失败。'); }
       return response;
     } catch (error) { throw new Error(error instanceof Error ? error.message : '本地后端连接失败。'); }
     finally { this.requests--; this.scheduleIdle(); }
   }
   async status(settings: Settings) {
-    const params = new URLSearchParams({ asr_model: settings.asrModel, llm_model: settings.llmModel, sensevoice_model: settings.senseVoiceModel, model_source: settings.modelSource });
+    const params = new URLSearchParams({ asr_model: settings.asrModel, llm_model: settings.llmModel, sensevoice_model: settings.senseVoiceModel, model_source: settings.modelSource, online: JSON.stringify(settings.online) });
     return (await this.request('/v1/status?' + params)).json();
   }
   async warmup(settings: Settings, includeLLM: boolean) {

@@ -15,3 +15,9 @@ runtime/macos/*.lock
 test-results/
 playwright-report/
 dist-release/
+
+node_modules
+native/windows/bin/
+native/windows/obj/
+runtime/windows/native/
+runtime/windows/python/

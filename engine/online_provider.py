@@ -1,5 +1,7 @@
 """OpenAI-compatible endpoints the user explicitly enabled. Only used when a request carries an online config."""
 import json
+import os
+import ssl
 from time import monotonic
 try:
     from .diagnostics import record
@@ -13,13 +15,40 @@ import httpx
 TIMEOUT = httpx.Timeout(120, connect=10)
 
 
+def tls_options(base_url):
+    if urlsplit(base_url).hostname != "arti.local":
+        return {}
+    ca = os.environ.get("YANMO_CA_CERT")
+    return {"verify": ssl.create_default_context(cafile=ca), "trust_env": False} if ca else {"trust_env": False}
+
+
+def check_services(configs):
+    try:
+        grouped = {}
+        for config in configs.values():
+            if config.get("enabled"):
+                grouped.setdefault(config["baseURL"].rstrip("/"), set()).add(config["model"])
+        if not grouped:
+            return "请配置 API 服务。"
+        for url, expected in grouped.items():
+            response = httpx.get(url + "/models", timeout=httpx.Timeout(5, connect=3), **tls_options(url))
+            response.raise_for_status()
+            available = {item["id"] for item in response.json()["data"]}
+            missing = expected - available
+            if missing:
+                return "服务尚未提供模型：" + "、".join(sorted(missing))
+        return ""
+    except (httpx.HTTPError, OSError, ValueError, KeyError, TypeError):
+        return "无法连接 arti.local 服务，请检查服务器、局域网与证书。"
+
+
 def _post(config: dict, path: str, **kwargs) -> dict:
     headers = {"Authorization": "Bearer " + config["api_key"]} if config.get("api_key") else {}
     started = monotonic()
     record("api_start", endpoint=path)
     # Redirects are not followed, so the key is only ever sent to the configured host.
     try:
-        response = httpx.post(config["base_url"].rstrip("/") + path, headers=headers, timeout=TIMEOUT, **kwargs)
+        response = httpx.post(config["base_url"].rstrip("/") + path, headers=headers, timeout=httpx.Timeout(3600, connect=10) if urlsplit(config["base_url"]).hostname == "arti.local" else TIMEOUT, **tls_options(config["base_url"]), **kwargs)
     except httpx.HTTPError as exc:
         record("api_error", endpoint=path, error_type=type(exc).__name__, elapsed_ms=round((monotonic()-started)*1000))
         raise ValueError("无法连接在线服务，已保留原文。") from None

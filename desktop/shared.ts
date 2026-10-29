@@ -33,7 +33,7 @@ export interface AppState {
   seconds: number; level: number; destinationName: string; checking: boolean; modelsChecked: boolean; overlayVisible: boolean;
   models: { asr: boolean; sensevoice: boolean; llm: boolean; metal: boolean }; native: NativeStatus;
   translation: Translation; captureAction: Action | null; shortcutNotice: string; launchAtLogin: boolean;
-  onlineKeys: Record<Capability, boolean>; runtime: RuntimeState; platform: 'mac' | 'windows';
+  apiOnly?: boolean; onlineKeys: Record<Capability, boolean>; runtime: RuntimeState; platform: 'mac' | 'windows';
 }
 export type TaskEvent = { event: 'stage' | 'transcript' | 'result' | 'error' | 'cancelled'; task_id: string; stage?: Stage; text?: string; original?: string; processed?: boolean; message?: string; asr_results?: ASRResult[] };
 export const LANGUAGES: Record<Language, string> = { en: '英语', 'zh-Hans': '简体中文', ja: '日语', de: '德语' };
@@ -44,7 +44,8 @@ export const STYLES = ['自然整理', '保留原话', '即时消息', '文档�
 export const FN_MODIFIER = 1 << 23;
 export const MODIFIER_NAMES: Record<number, string> = { 63: 'FN', 59: '左 Control', 62: '右 Control', 56: '左 Shift', 60: '右 Shift', 58: '左 Option', 61: '右 Option', 55: '左 Command', 54: '右 Command' };
 const MODIFIER_BITS: Record<number, number> = { 59: 4096, 62: 4096, 56: 512, 60: 512, 58: 2048, 61: 2048, 55: 256, 54: 256 };
-export const defaultSettings = (): Settings => ({
+export const defaultSettings = (platform?: string): Settings => {
+  const settings: Settings = {
   asrModel: 'mlx-community/Qwen3-ASR-1.7B-8bit', senseVoiceModel: 'mlx-community/SenseVoiceSmall', llmModel: 'mlx-community/Qwen3-4B-Instruct-2507-4bit', modelSource: 'modelscope',
   polishEnabled: true, style: '自然整理', readContext: false, keepHistory: true, microphone: '', showDock: true, retention: 0, onboarded: true,
   voiceTarget: 'en', selectionTarget: 'en', shortcuts: {
@@ -53,7 +54,13 @@ export const defaultSettings = (): Settings => ({
     selectionTranslation: [{ keyCode: 49, modifiers: FN_MODIFIER, keyLabel: 'Space' }],
   },
   online: { asr: { enabled: false, baseURL: '', model: '' }, text: { enabled: false, baseURL: '', model: '' } },
-});
+  };
+  if (platform === 'windows') {
+    settings.online = { asr: { enabled: true, baseURL: 'https://arti.local/v1', model: 'Qwen/Qwen3-ASR-1.7B' }, text: { enabled: true, baseURL: 'https://arti.local/v1', model: 'Qwen/Qwen3.6-35B-A3B' } };
+    settings.shortcuts = { dictation: [{ keyCode: 49, modifiers: 6144, keyLabel: 'Space' }], voiceTranslation: [{ keyCode: 49, modifiers: 4608, keyLabel: 'Space' }], selectionTranslation: [{ keyCode: 17, modifiers: 6144, keyLabel: 'T' }] };
+  }
+  return settings;
+};
 // transformers-format defaults for the Windows PyTorch runtime, sized for an 8 GB GPU (spec §8.2).
 // The text model is the Mac's Qwen3-4B-Instruct-2507, pre-quantized to 4-bit for bitsandbytes.
 export const WINDOWS_MODELS = { asrModel: 'Qwen/Qwen3-ASR-0.6B-hf', llmModel: 'unsloth/Qwen3-4B-Instruct-2507-bnb-4bit' } as const;
@@ -74,11 +81,11 @@ export function shortcutID(key: Shortcut) {
   return key.modifierKeys ? 'mod:' + [...key.modifierKeys].sort((a, b) => a - b).join('+') : key.keyCode + ':' + key.modifiers;
 }
 export function shortcutNeedsEventTap(key: Shortcut) { return key.keyCode === 63 || !!key.modifierKeys || !!(key.modifiers & FN_MODIFIER) || (key.keyCode === 49 && key.modifiers === 4096); }
-export function shortcutLabel(key: Shortcut) {
+export function shortcutLabel(key: Shortcut, platform?: string | number) {
   if (key.modifierKeys?.includes(63)) return shortcutLabel({ keyCode: 63, modifiers: key.modifierKeys.reduce((bits, code) => bits | (MODIFIER_BITS[code] ?? 0), 0), keyLabel: 'FN' });
   if (key.modifierKeys) return [...key.modifierKeys].sort((a, b) => a - b).map(code => MODIFIER_NAMES[code]).join(' + ');
   return [key.keyCode === 63 || (key.modifiers & FN_MODIFIER) ? 'FN' : '',
-    key.modifiers & 4096 ? 'Control' : '', key.modifiers & 2048 ? 'Option' : '',
+    key.modifiers & 4096 ? 'Control' : '', key.modifiers & 2048 ? (platform === 'windows' ? 'Alt' : 'Option') : '',
     key.modifiers & 256 ? 'Command' : '', key.modifiers & 512 ? 'Shift' : '',
     key.keyCode === 63 ? '' : key.keyCode === 49 ? '空格' : key.keyLabel].filter(Boolean).join(' + ');
 }

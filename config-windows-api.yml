@@ -1,0 +1,37 @@
+appId: org.yanmo.arti
+productName: 言墨 arti
+artifactName: Yanmo-Arti-Setup-${version}-win-${arch}.${ext}
+directories:
+  output: dist-electron
+files:
+  - .electron/**
+  - web/**
+  - package.json
+extraResources:
+  - from: runtime/windows/native
+    to: native
+    filter: ['YanmoBridge.exe']
+  - from: runtime/windows/python
+    to: python
+    filter: ['**/*', '!**/__pycache__/**', '!**/*.pyc']
+  - from: backend
+    to: backend
+    filter: ['*.py', '!test_*.py', '!prepare_models.py']
+  - from: engine
+    to: engine
+    filter: ['*.py', 'prompt.txt', '!test_*.py']
+  - from: deployment/arti/arti-ca.crt
+    to: deployment/arti/arti-ca.crt
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  executableName: Yanmo-Arti
+  icon: desktop/assets/yanmo.ico
+  signExecutable: false
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: 言墨 arti

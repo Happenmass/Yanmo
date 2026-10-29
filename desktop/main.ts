@@ -31,13 +31,14 @@ const indexURL = pathToFileURL(index).href;
 const preload = join(__dirname, 'preload.cjs');
 // Leave room for the upward entrance; the visible pill still rests 30px above the work area bottom.
 const overlaySize = { width: 220, height: 80, bottom: 8 };
-const dataDirectory = process.env.YANMO_DATA_DIR || join(app.getPath('appData'), 'Yanmo', 'electron');
+const dataDirectory = process.env.YANMO_DATA_DIR || join(app.getPath('appData'), process.platform === 'win32' ? 'Yanmo-Arti' : 'Yanmo', 'electron');
 app.setName('言墨');
 app.setPath('userData', dataDirectory);
 if (!app.requestSingleInstanceLock()) app.quit();
 app.on('second-instance', () => reveal());
 
 function updateDock(visible: boolean) {
+  if (process.platform !== 'darwin') return;
   app.setActivationPolicy(controller.state.settings.showDock && visible ? 'regular' : 'accessory');
 }
 function reveal() {
@@ -56,11 +57,11 @@ function secureWindow(window: BrowserWindow) {
 }
 async function createWindows() {
   const common = { webPreferences: { preload, nodeIntegration: false, contextIsolation: true, sandbox: true, spellcheck: false } };
-  mainWindow = new BrowserWindow({ ...common, width: 1120, height: 800, minWidth: 980, minHeight: 720, title: '言墨', titleBarStyle: 'hidden', trafficLightPosition: { x: 17, y: 16 }, backgroundColor: '#f6f3ec', show: false });
+  mainWindow = new BrowserWindow({ ...common, width: 1120, height: 800, minWidth: 980, minHeight: 720, title: '言墨', titleBarStyle: 'hidden', ...(process.platform === 'win32' ? { titleBarOverlay: { color: '#f6f3ec', symbolColor: '#292722', height: 40 } } : {}), trafficLightPosition: { x: 17, y: 16 }, backgroundColor: '#f6f3ec', show: false });
   overlay = new BrowserWindow({ ...common, width: overlaySize.width, height: overlaySize.height, frame: false, transparent: true, backgroundColor: '#00000000', alwaysOnTop: true, focusable: false, skipTaskbar: true, resizable: false, hasShadow: false, show: false, type: 'panel' });
   overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
   overlay.setAlwaysOnTop(true, 'floating');
-  translation = new BrowserWindow({ ...common, width: 740, height: 650, minWidth: 520, minHeight: 400, title: '言墨 · 划词翻译', titleBarStyle: 'hidden', trafficLightPosition: { x: 17, y: 16 }, backgroundColor: '#f6f3ec', show: false });
+  translation = new BrowserWindow({ ...common, width: 740, height: 650, minWidth: 520, minHeight: 400, title: '言墨 · 划词翻译', titleBarStyle: 'hidden', ...(process.platform === 'win32' ? { titleBarOverlay: { color: '#f6f3ec', symbolColor: '#292722', height: 40 } } : {}), trafficLightPosition: { x: 17, y: 16 }, backgroundColor: '#f6f3ec', show: false });
   for (const window of [mainWindow, overlay, translation]) secureWindow(window);
   mainWindow.on('close', event => { if (!quitting) { event.preventDefault(); if (controller?.state.captureAction) void controller.endCapture(); mainWindow.hide(); } });
   mainWindow.on('hide', () => { if (!quitting) updateDock(false); });
@@ -101,16 +102,17 @@ function updateTray() {
     { label: '取消', enabled: busy(state.stage), click: () => void controller.cancel() },
     { type: 'separator' }, { label: '打开言墨', click: reveal },
     { label: '设置…', click: () => { controller.setPage('settings'); reveal(); } },
-    { type: 'separator' }, { label: '所有处理留在本机', enabled: false }, { label: '退出言墨', click: () => app.quit() },
+    { type: 'separator' }, { label: process.platform === 'win32' ? '通过 arti.local 处理' : '所有处理留在本机', enabled: false }, { label: '退出言墨', click: () => app.quit() },
   ]);
 }
 async function importAudio() {
   if (busy(controller.state.stage)) return;
-  const result = await dialog.showOpenDialog(mainWindow, { title: '导入音频', properties: ['openFile'], filters: [{ name: '音频', extensions: ['wav', 'mp3', 'm4a', 'aiff', 'aif', 'flac', 'ogg', 'aac', 'mp4'] }] });
+  const result = await dialog.showOpenDialog(mainWindow, { title: '导入音频', properties: ['openFile'], filters: [{ name: '音频', extensions: process.platform === 'win32' ? ['wav', 'mp3', 'flac', 'ogg', 'aiff', 'aif'] : ['wav', 'mp3', 'm4a', 'aiff', 'aif', 'flac', 'ogg', 'aac', 'mp4'] }] });
   if (!result.canceled && result.filePaths[0]) await controller.importAudio(result.filePaths[0]);
 }
 const appBundle = () => resolve(process.execPath, '../../..');
 async function prepareModels() {
+  if (process.platform === 'win32') throw new Error('此定制版使用局域网 API，无需下载模型。');
   if (busy(controller.state.stage) || controller.state.checking || preparation) return;
   // Windows downloads its models with the PyTorch runtime's Python, so that runtime must exist first.
   const windows = !!windowsRuntime;
@@ -245,32 +247,31 @@ function authorize(senderID: number, url?: string) {
 app.whenReady().then(async () => {
   if (process.platform !== 'darwin' && process.platform !== 'win32') throw new Error('言墨目前只支持 Mac 与 Windows。');
   const windows = process.platform === 'win32';
-  const bridgePath = app.isPackaged ? join(root, windows ? 'native/YanmoBridge.exe' : 'native/YanmoBridge') : join(root, '.build/release/YanmoBridge');
-  // The Win32 helper arrives in P2; until then the runtime pre-check runs via scripts/check-windows-runtime.mts.
-  if (!existsSync(bridgePath)) throw new Error(windows ? 'Windows 系统桥接尚未接入，当前开发版先提供 Mac。' : '缺少系统桥接，请重新构建言墨。');
+  if (windows) {
+    process.env.YANMO_API_ONLY = '1';
+    process.env.YANMO_CA_CERT = join(root, 'deployment/arti/arti-ca.crt');
+  }
+  const bridgePath = app.isPackaged ? join(root, windows ? 'native/YanmoBridge.exe' : 'native/YanmoBridge') : join(root, windows ? 'runtime/windows/native/YanmoBridge.exe' : '.build/release/YanmoBridge');
+  if (!existsSync(bridgePath)) throw new Error(windows ? '缺少 Windows 系统桥接，请先运行 npm run package:win:arti。' : '缺少系统桥接，请重新构建言墨。');
   const python = process.env.YANMO_PYTHON || join(root, windows ? 'python/python.exe' : 'python/bin/python3.12');
   const developmentPython = join(root, windows ? 'runtime/windows/python/python.exe' : 'runtime/macos/python/bin/python3.12');
   const native = new NativeBridge(bridgePath);
   await native.start();
-  let defaults: Settings = windows ? { ...defaultSettings(), ...WINDOWS_MODELS } : defaultSettings();
+  let defaults: Settings = defaultSettings(windows ? 'windows' : 'mac');
   if (!windows && !process.env.YANMO_DATA_DIR) {
     try { defaults = migrateSettings(await native.call('legacySettings')); } catch { /* Invalid legacy settings never overwrite the source. */ }
   }
-  const store = new LibraryStore(dataDirectory, defaults, process.env.YANMO_DATA_DIR ? undefined : join(app.getPath('appData'), 'Yanmo/library.json'));
+  const store = new LibraryStore(dataDirectory, defaults, process.env.YANMO_DATA_DIR || windows ? undefined : join(app.getPath('appData'), 'Yanmo/library.json'));
+  if (windows) {
+    // This distribution cannot fall back to local model downloads or inference.
+    if (!store.settings.online.asr.enabled || !store.settings.online.text.enabled) store.settings.online = defaults.online;
+  }
   runtimePython = existsSync(python) ? python : developmentPython;
   const backend = new BackendClient(runtimePython, root, 3600000, join(dataDirectory, "diagnostics"));
   controller = new Controller(store, native, backend);
   if (windows) {
-    // Multi-GB runtime stays in Local AppData, not the roaming profile.
-    const paths = windowsRuntime = runtimePaths(join(process.env.LOCALAPPDATA || app.getPath('appData'), 'Yanmo'), root);
+    controller.state.apiOnly = true;
     controller.state.platform = 'windows';
-    controller.windowsPrecheck = async () => {
-      const environment = await probeWindows({ python: paths.python, current: runtimeCurrent(paths) });
-      // The bundled Python serves online-only processing; local inference runs on the PyTorch venv.
-      backend.usePython(environment.environment === 'ready' ? paths.python : runtimePython);
-      return environment;
-    };
-    controller.windowsModels = settings => checkWindowsModels(paths, root, settings);
   }
   controller.ownSelection = async () => mainWindow?.isFocused() ? String(await mainWindow.webContents.executeJavaScript(
     `(() => { const field = document.activeElement; return field && 'selectionStart' in field && field.selectionEnd > field.selectionStart ? field.value.slice(field.selectionStart, field.selectionEnd) : String(getSelection() || ''); })()`)) : '';
@@ -283,7 +284,7 @@ app.whenReady().then(async () => {
   controller.on('preferences', () => updateDock(mainWindow?.isVisible() ?? false));
   await createWindows();
   const icon = nativeImage.createFromPath(join(__dirname, 'tray.png'));
-  icon.setTemplateImage(true);
+  icon.setTemplateImage(process.platform === 'darwin');
   tray = new Tray(icon); tray.setToolTip('言墨'); tray.on('click', reveal);
   // A menu attached with setContextMenu also opens on a macOS left-click.
   tray.on('right-click', () => { if (trayMenu) tray.popUpContextMenu(trayMenu); });

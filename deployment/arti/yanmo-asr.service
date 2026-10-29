@@ -1,0 +1,21 @@
+[Unit]
+Description=Yanmo Qwen3-ASR 1.7B FP16 dual GPU layer service
+After=network-online.target atlas-llm-256k.service atlas-inference-single.service
+
+[Service]
+WorkingDirectory=%h/yanmo-asr
+EnvironmentFile=%h/.config/yanmo-asr/service.env
+Environment=CUDA_VISIBLE_DEVICES=GPU-562945c7-4bf8-e974-ab5b-2f47938bb47f,GPU-c144ff72-0b96-03a1-cad1-e341c9118f6b
+Environment=HF_HUB_OFFLINE=1
+Environment=TRANSFORMERS_OFFLINE=1
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+Environment=OMP_NUM_THREADS=4
+ExecStart=%h/yanmo-asr/venv/bin/python -B -u %h/yanmo-asr/asr_server.py
+Restart=on-failure
+RestartSec=15
+TimeoutStartSec=300
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

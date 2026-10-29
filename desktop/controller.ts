@@ -87,6 +87,13 @@ export class Controller extends EventEmitter {
     this.state.checking = true; this.changed();
     try {
       await this.cancelling;
+      if (this.state.apiOnly) {
+        const [value, native] = await Promise.all([this.backend.status(settings), this.native.call<NativeStatus>('status')]);
+        this.state.native = native; this.environment = { environment: 'unsupported', issues: [] };
+        this.refreshRuntime();
+        this.state.notice = value.service_error || '';
+        return;
+      }
       if (this.windowsPrecheck) {
         // No MLX on Windows: the backend is not started just to look for caches.
         const [environment, native] = await Promise.all([this.windowsPrecheck(), this.native.call<NativeStatus>('status')]);
@@ -119,6 +126,8 @@ export class Controller extends EventEmitter {
     if (Object.keys(patch).some(key => !allowed.includes(key))) throw new Error('设置项目无效。');
     const proposed = { ...this.state.settings, ...patch };
     validateSettings(proposed);
+    if (this.state.apiOnly && (!proposed.online.asr.enabled || !proposed.online.text.enabled)) throw new Error('此定制版通过 API 处理，请保持两项服务启用。');
+    if (this.state.apiOnly && Object.values(proposed.shortcuts).flat().some(key => key.keyCode === 63 || key.modifierKeys || (key.modifiers & (256 | (1 << 23))))) throw new Error('Windows 快捷键请使用 Control 搭配 Alt 或 Shift 和普通按键。');
     let native = this.state.native;
     if (JSON.stringify(proposed.shortcuts) !== JSON.stringify(this.state.settings.shortcuts) || proposed.readContext !== this.state.settings.readContext) {
       native = await this.native.call<NativeStatus>('configure', { bindings: this.bindings(proposed), readContext: proposed.readContext });

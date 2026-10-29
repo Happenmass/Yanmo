@@ -47,6 +47,7 @@ class TaskRequest(BaseModel):
 
 
 def create_app(engine=None, token=None, announce=None):
+    api_only = os.environ.get('YANMO_API_ONLY') == '1'
     engine = engine or Engine()
     token = token or os.environ.get("YANMO_BACKEND_TOKEN")
     if not token:
@@ -79,7 +80,12 @@ def create_app(engine=None, token=None, announce=None):
         return await asyncio.get_running_loop().run_in_executor(executor, invoke)
 
     @app.get("/v1/status")
-    async def status(asr_model: str = DEFAULT_ASR, llm_model: str = DEFAULT_LLM, sensevoice_model: str = DEFAULT_SENSEVOICE, model_source: Literal["modelscope", "huggingface"] = "modelscope"):
+    async def status(asr_model: str = DEFAULT_ASR, llm_model: str = DEFAULT_LLM, sensevoice_model: str = DEFAULT_SENSEVOICE, model_source: Literal["modelscope", "huggingface"] = "modelscope", online: str = "{}"):
+        if api_only:
+            from engine.online_provider import check_services
+            configs = json.loads(online)
+            error = await asyncio.get_running_loop().run_in_executor(executor, check_services, configs)
+            return {"protocol": 1, "provider": "api", "offline": False, "metal": False, "models": {}, "service_error": error}
         result = await serial({"command": "check", "asr_model": asr_model, "llm_model": llm_model, "sensevoice_model": sensevoice_model, "model_source": model_source})
         import platform
         available = False
@@ -93,6 +99,8 @@ def create_app(engine=None, token=None, announce=None):
 
     @app.post("/v1/warmup")
     async def warmup(request: dict):
+        if api_only:
+            raise HTTPException(status_code=400, detail="API 版不加载本地模型。")
         allowed = {key: request[key] for key in ("asr_model", "llm_model", "include_llm", "model_source") if key in request}
         try:
             return await serial({"command": "warmup", **allowed})
@@ -105,6 +113,8 @@ def create_app(engine=None, token=None, announce=None):
             payload = TaskRequest.model_validate_json(request).model_dump()
         except ValidationError:
             raise HTTPException(status_code=422, detail="推理任务参数无效。") from None
+        if api_only and set(payload["online"]) != {"asr", "text"}:
+            raise HTTPException(status_code=422, detail="API 版需要配置语音与文字两项服务。")
         task_id = payload["task_id"]
         if tasks:
             raise HTTPException(status_code=409, detail="请等待当前推理任务结束。")

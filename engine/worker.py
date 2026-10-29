@@ -211,6 +211,9 @@ def require_text(output: str) -> str:
 
 class Engine:
     def __init__(self, provider=None):
+        if provider is None and os.environ.get("YANMO_API_ONLY") == "1":
+            from .api_provider import APIOnlyProvider
+            provider = APIOnlyProvider()
         if provider is None:
             # MLX on Apple Silicon; PyTorch/transformers elsewhere (Windows CUDA).
             if sys.platform == "darwin":

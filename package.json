@@ -14,7 +14,9 @@
     "test": "node --import tsx --test desktop/tests/*.test.ts",
     "test:desktop": "playwright test",
     "runtime:mac": "python3 scripts/bundle-runtime.py",
-    "package:mac": "npm run build && npm run runtime:mac && electron-builder --mac --arm64 --dir"
+    "package:mac": "npm run build && npm run runtime:mac && electron-builder --mac --arm64 --dir",
+    "package:win:arti": "node scripts/build-windows-api.mjs && npm run build && electron-builder --config config-windows-api.yml --win --x64",
+    "build:win:arti": "node scripts/build-windows-api.mjs && npm run build"
   },
   "build": {
     "appId": "org.yanmo.desktop",
