@@ -1,5 +1,7 @@
 # 言墨 · Yanmo
 
+> 当前分支为 **Windows arti API 定制版**：默认通过 `https://arti.local/v1` 进行语音识别、整理和翻译，无需下载模型或填写 API Key。Windows 构建入口为 `npm run package:win:arti`；前置环境、安装包位置和实机验收见 [Windows 打包说明](docs/windows-arti-api.md)，GPU 与两路满窗共存结果见 [验收记录](docs/arti-asr-acceptance-2026-10-29.md)。下方 Mac 与本地推理说明保留供主线参考。
+
 **言语之间，自有笔墨。**
 
 以中文表达为中心的本地语音输入工具，采用宣纸、墨色与朱砂视觉。0.4 开始使用 Electron + React 重建桌面端，Python 推理后端独立运行；当前已交付 Apple Silicon Mac 的 MLX 开发版本。
