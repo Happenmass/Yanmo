@@ -62,6 +62,17 @@ class OnlineProviderTests(unittest.TestCase):
             online_provider.generate(CONFIG, "s", {}, 512)
         self.assertNotIn("thinking", calls[0])
 
+    def testCacheUsageReachesContentFreeDiagnostics(self):
+        response = Response(200, {"choices": [{"message": {"content": "unchanged"}, "finish_reason": "stop"}],
+                                  "usage": {"completion_tokens": 7, "prompt_cache_hit_tokens": 128, "prompt_cache_miss_tokens": 32}})
+        with patch.object(online_provider.httpx, "post", return_value=response), patch.object(online_provider, "record") as record:
+            self.assertEqual(online_provider.generate(CONFIG, "private prompt", {"private": "source"}, 512), ("unchanged", "stop"))
+        generation = [call for call in record.call_args_list if call.args == ("api_generation",)][0].kwargs
+        self.assertEqual(generation["prompt_cache_hit_tokens"], 128)
+        self.assertEqual(generation["prompt_cache_miss_tokens"], 32)
+        self.assertNotIn("private", str(generation))
+        self.assertNotIn(CONFIG["api_key"], str(generation))
+
     def testErrorsAreReadableAndNeverEchoTheKey(self):
         for status, body in [(401, {}), (404, {}), (429, {}), (500, {}), (302, {}), (200, {"unexpected": True})]:
             with patch.object(online_provider.httpx, "post", lambda *_a, **_k: Response(status, body)):

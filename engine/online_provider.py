@@ -62,7 +62,12 @@ def generate(config: dict, system: str, payload: dict, max_tokens: int):
         reason = choice.get("finish_reason")
         usage = result.get("usage") or {}
         details = usage.get("completion_tokens_details") or {}
-        token_counts = {key: value for key, value in {"completion_tokens": usage.get("completion_tokens"), "reasoning_tokens": details.get("reasoning_tokens")}.items() if isinstance(value, int)}
+        token_counts = {key: value for key, value in {
+            "completion_tokens": usage.get("completion_tokens"),
+            "reasoning_tokens": details.get("reasoning_tokens"),
+            "prompt_cache_hit_tokens": usage.get("prompt_cache_hit_tokens"),
+            "prompt_cache_miss_tokens": usage.get("prompt_cache_miss_tokens"),
+        }.items() if isinstance(value, int)}
         record("api_generation", thinking_disabled=body.get("thinking") == {"type": "disabled"}, **token_counts, finish_reason=reason if reason in ("stop", "length", "content_filter", "tool_calls", "insufficient_system_resource") else "other", output_chars=len(content), max_tokens=max_tokens)
         return content, reason
     except (KeyError, IndexError, TypeError):

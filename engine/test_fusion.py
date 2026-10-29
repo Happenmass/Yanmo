@@ -57,7 +57,7 @@ class FusionTests(unittest.TestCase):
                 self.assertEqual(engine.polish(request)["text"], "  exact output\n")
                 system, payload = generate.call_args.args[:2]
                 expanded = online and task == "polish"
-                self.assertEqual("mid-sentence" in system or "abandoned sentence starts followed" in system, expanded)
+                self.assertEqual("abandoned sentence starts" in system, expanded)
                 if expanded:
                     self.assertNotIn("仅删除无意义的填充和重复", payload["STYLE"])
                     self.assertIn("即时通讯", payload["STYLE"])
@@ -69,6 +69,41 @@ class FusionTests(unittest.TestCase):
         for output, finish in (("", "stop"), (" ", "stop"), ("partial", "length")):
             with self.subTest(output=output, finish=finish), patch.object(engine, "load_llm", return_value=Path("fixture")), patch.object(engine.provider, "generate", return_value=(output, finish)), self.assertRaises(ValueError):
                 engine.polish({"text": "合成原文"})
+
+    def testOnlinePolishKeepsSystemStableAcrossDynamicInputs(self):
+        engine = Engine()
+        systems, payloads = [], []
+        requests = [
+            {"text": "明天再检查。", "before": "中文上下文", "application": "应用甲", "lexicon": ["术语甲"], "instruction": "输出适合即时通讯的自然短句，不添加问候。"},
+            {"text": "Please review tomorrow.", "before": "English context", "application": "App B", "lexicon": ["Term B"], "instruction": "按语义分段，不增加标题或信息。"},
+        ]
+        for request in requests:
+            with patch.object(engine, "generate_text", return_value="exact output") as generate:
+                engine.polish({**request, "online": {"text": {"model": "fixture"}}})
+                system, payload = generate.call_args.args[:2]
+                systems.append(system)
+                payloads.append(payload)
+        self.assertEqual(systems[0], systems[1])
+        for request, payload in zip(requests, payloads):
+            self.assertEqual(payload["ASR_RESULTS"][0]["transcript"], request["text"])
+            self.assertEqual(payload["CONTEXT"]["before"], request["before"])
+            self.assertEqual(payload["CONTEXT"]["lexicon"], request["lexicon"])
+            self.assertIn(request["instruction"], payload["STYLE"])
+
+    def testOnlinePolishPlacesSourceAfterReusableInstructions(self):
+        engine = Engine()
+        for edited in (False, True):
+            with self.subTest(edited=edited), patch.object(engine, "generate_text", return_value="exact output") as generate:
+                request = {"text": "历史识别", "online": {"text": {"model": "fixture"}}}
+                if edited:
+                    request["user_text"] = "当前修改后的正文"
+                engine.polish(request)
+                payload = generate.call_args.args[1]
+                keys = list(payload)
+                self.assertLess(keys.index("NUMBER_STYLE"), keys.index("CONTEXT"))
+                self.assertLess(keys.index("OUTPUT_LANGUAGE"), keys.index("CONTEXT"))
+                self.assertLess(keys.index("CONTEXT"), keys.index("ASR_RESULTS"))
+                self.assertEqual(keys[-1], "USER_TEXT" if edited else "ASR_RESULTS")
 
 
 if __name__ == "__main__":
