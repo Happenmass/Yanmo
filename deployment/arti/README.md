@@ -6,7 +6,7 @@
 
 权重由 `prepare_model.py` 从官方 ModelScope 读取，逐文件核对元数据中的 SHA-256，保存于用户全局 `~/.cache/codex/models/Qwen3-ASR-1.7B/`，服务配置写入 `~/.config/yanmo-asr/service.env`。已有匹配缓存复用，未完成下载保留 `.part` 供续传。运行服务开启 Hugging Face/Transformers 离线模式，不在推理时联网下载权重。
 
-部署使用独立 `~/yanmo-asr/venv`；固定 PyTorch `2.10.0+cu128` 与 qwen-asr `0.0.6`，后者要求 Transformers `4.57.6`。运行环境安装完成后在服务器保存 `~/yanmo-asr/requirements.lock.txt`。完整现场证据与容量结论见 `docs/arti-asr-acceptance-2026-10-29.md`。
+部署使用独立 `~/yanmo-asr/venv`；固定 PyTorch `2.10.0+cu128` 与 qwen-asr `0.0.6`，后者要求 Transformers `4.57.6`。运行环境安装完成后在服务器保存 `~/yanmo-asr/requirements.lock.txt`。仓库 `requirements-server.lock` 保存本次已验版本，包含固定 CUDA 12.8 PyTorch wheel；新建独立 venv 后可用 `python -m pip install -r requirements-server.lock` 复现。完整现场证据与容量结论见 `docs/arti-asr-acceptance-2026-10-29.md`。
 
 ```bash
 scp deployment/arti/{asr_server.py,prepare_model.py} arti:yanmo-asr/
