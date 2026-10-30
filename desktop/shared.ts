@@ -57,10 +57,34 @@ export const defaultSettings = (platform?: string): Settings => {
   };
   if (platform === 'windows') {
     settings.online = { asr: { enabled: true, baseURL: 'https://arti.local/v1', model: 'Qwen/Qwen3-ASR-1.7B' }, text: { enabled: true, baseURL: 'https://arti.local/v1', model: 'Qwen/Qwen3.6-35B-A3B' } };
-    settings.shortcuts = { dictation: [{ keyCode: 49, modifiers: 6144, keyLabel: 'Space' }], voiceTranslation: [{ keyCode: 49, modifiers: 4608, keyLabel: 'Space' }], selectionTranslation: [{ keyCode: 17, modifiers: 6144, keyLabel: 'T' }] };
+    settings.shortcuts = { dictation: [{ keyCode: 0, modifiers: 0, keyLabel: 'Control', modifierKeys: [59] }], voiceTranslation: [{ keyCode: 0, modifiers: 0, keyLabel: 'Control + Shift', modifierKeys: [59, 56] }], selectionTranslation: [{ keyCode: 49, modifiers: 4096, keyLabel: 'Space' }] };
   }
   return settings;
 };
+// Upgrade the first Windows release's defaults while retaining custom bindings.
+export function migrateWindowsShortcuts(settings: Settings): boolean {
+  const old: Record<Action, Shortcut> = {
+    dictation: { keyCode: 49, modifiers: 6144, keyLabel: 'Space' },
+    voiceTranslation: { keyCode: 49, modifiers: 4608, keyLabel: 'Space' },
+    selectionTranslation: { keyCode: 17, modifiers: 6144, keyLabel: 'T' },
+  };
+  const defaults = defaultSettings('windows').shortcuts;
+  let changed = false;
+  for (const action of Object.keys(ACTIONS) as Action[]) {
+    const keys = settings.shortcuts[action];
+    if (keys.length === 1 && shortcutID(keys[0]) === shortcutID(old[action]) && !Object.entries(settings.shortcuts).some(([other, bindings]) => other !== action && bindings.some(key => shortcutID(key) === shortcutID(defaults[action][0])))) {
+      settings.shortcuts[action] = defaults[action]; changed = true;
+    }
+  }
+  return changed;
+}
+export function validateWindowsShortcuts(settings: Settings) {
+  for (const key of Object.values(settings.shortcuts).flat()) {
+    if (key.keyCode === 63 || (key.modifiers & ~6656) || (key.modifierKeys
+      ? !key.modifierKeys.every(code => [59, 62, 56, 60, 58, 61].includes(code)) || !key.modifierKeys.some(code => [59, 62].includes(code))
+      : !(key.modifiers & 4096))) throw new Error('Windows 快捷键可使用单独的 Control、Control + Shift，或 Control 搭配普通按键。');
+  }
+}
 // transformers-format defaults for the Windows PyTorch runtime, sized for an 8 GB GPU (spec §8.2).
 // The text model is the Mac's Qwen3-4B-Instruct-2507, pre-quantized to 4-bit for bitsandbytes.
 export const WINDOWS_MODELS = { asrModel: 'Qwen/Qwen3-ASR-0.6B-hf', llmModel: 'unsloth/Qwen3-4B-Instruct-2507-bnb-4bit' } as const;
@@ -83,7 +107,10 @@ export function shortcutID(key: Shortcut) {
 export function shortcutNeedsEventTap(key: Shortcut) { return key.keyCode === 63 || !!key.modifierKeys || !!(key.modifiers & FN_MODIFIER) || (key.keyCode === 49 && key.modifiers === 4096); }
 export function shortcutLabel(key: Shortcut, platform?: string | number) {
   if (key.modifierKeys?.includes(63)) return shortcutLabel({ keyCode: 63, modifiers: key.modifierKeys.reduce((bits, code) => bits | (MODIFIER_BITS[code] ?? 0), 0), keyLabel: 'FN' });
-  if (key.modifierKeys) return [...key.modifierKeys].sort((a, b) => a - b).map(code => MODIFIER_NAMES[code]).join(' + ');
+  if (key.modifierKeys) {
+    if (platform === 'windows') return [key.modifierKeys.some(code => [59, 62].includes(code)) ? 'Control' : '', key.modifierKeys.some(code => [58, 61].includes(code)) ? 'Alt' : '', key.modifierKeys.some(code => [56, 60].includes(code)) ? 'Shift' : ''].filter(Boolean).join(' + ');
+    return [...key.modifierKeys].sort((a, b) => a - b).map(code => MODIFIER_NAMES[code]).join(' + ');
+  }
   return [key.keyCode === 63 || (key.modifiers & FN_MODIFIER) ? 'FN' : '',
     key.modifiers & 4096 ? 'Control' : '', key.modifiers & 2048 ? (platform === 'windows' ? 'Alt' : 'Option') : '',
     key.modifiers & 256 ? 'Command' : '', key.modifiers & 512 ? 'Shift' : '',

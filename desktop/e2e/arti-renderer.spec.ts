@@ -13,6 +13,7 @@ test('Windows API renderer exposes both arti endpoints and no local installation
   const app=await electron.launch({args:[fixture],env});
   try {
     const page=await app.firstWindow();
+    await expect(page.locator('.shortcut-row kbd')).toHaveText(['Control', 'Control + Shift', 'Control + 空格']);
     await expect(page.getByRole('heading',{name:'局域网 API',exact:true})).toBeVisible();
     for (const field of await page.getByRole('textbox',{name:'服务地址（Base URL）'}).all()) await expect(field).toHaveValue('https://arti.local/v1');
     await expect(page.getByRole('button',{name:'准备模型',exact:true})).toHaveCount(0);

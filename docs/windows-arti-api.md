@@ -13,7 +13,7 @@ npm ci
 npm run package:win:arti
 ```
 
-安装包输出：`dist-electron/Yanmo-Arti-Setup-0.4.4-win-x64.exe`。
+安装包输出：`dist-electron/Yanmo-Arti-Setup-0.4.5-win-x64.exe`。
 
 脚本下载并核对官方 Python 3.12.10 嵌入版 SHA-256，按哈希锁安装轻量 API 运行库，编译自带 .NET 运行时的 Windows 系统桥接，再生成 NSIS 安装程序。模型不进入安装包，构建不需要连接 GPU 主机。默认每用户安装，无需管理员权限。软件未签名。
 
@@ -32,11 +32,15 @@ npm run package:win:arti
 
 1. 安装、首启及托盘退出后再启动；确认界面显示 arti.local，无模型/CUDA 下载流程。
 2. 在设置确认服务与两项模型；服务器关闭、网络断开时应有可读错误，重新连接可继续。
-3. 在记事本按 **Control + Alt + 空格**，口述后再按结束；确认写入一次。录音途中切换输入框，结果应粘贴到结束处理时的焦点。
-4. **Control + Shift + 空格** 口述翻译；**Control + Alt + T** 划词翻译。按 **Esc** 取消；确认取消后没有迟到的粘贴。
+3. 在记事本按 **Control**，口述后再按结束；确认写入一次。录音途中切换输入框，结果应粘贴到结束处理时的焦点。
+4. **Control + Shift** 口述翻译；**Control + 空格** 划词翻译。按 **Esc** 取消；确认取消后没有迟到的粘贴。
 5. 改快捷键、选择麦克风、导入 WAV/MP3/FLAC/OGG；检查原始转写、整理正文和文稿历史。
 6. 关闭主窗口后快捷键继续有效；完全退出后进程与录音临时文件清理。开始菜单/桌面快捷方式重新启动。
 
 Windows 选区与可选上下文通过 UI Automation 读取；不提供选区的控件会提示先选中。密码控件不读取或写入；Windows 权限限制下无法向以管理员权限运行的程序注入粘贴，正文仍保留在文稿中。构建/单测/交叉打包不能代替上述原生验收。
 
 2026-10-29 用户要求将现有交叉打包版本直接上架，现已可从 [arti.local](http://arti.local/#download) 下载言墨安装包（178.6MiB）。固定下载名为 `Yanmo-Arti-Setup-win-x64.exe`，校验文件为 `Yanmo-Arti-SHA256SUMS.txt`。网页实际完整下载与 SHA-256 已核对；Windows 原生验收仍按上述清单执行。
+
+2026-10-30 快捷键修订：语音输入为单按 Control，口述翻译为 Control + Shift，划词翻译为 Control + 空格。左右 Control / Shift 均可；纯修饰键松开后触发，正常复制、粘贴、选区和鼠标组合不触发语音。升级自动替换 0.4.4 的出厂快捷键，自定义绑定保留。验证命令：`npm test`、`dotnet run --project native/windows-tests --roll-forward Major`；实体键盘/麦克风仍须 Windows 实机检查。
+
+本轮交付：0.4.5 安装器已交叉构建（187289036 bytes，SHA-256 `a293fe3991550a2dbdfdf5913326b1853b98ce5026312f1cda43256b512432bd`）。34 项桌面测试、16 组真实键序状态测试、Windows 界面 1 项及安装器解包完整性通过；包内默认值/升级迁移和新原生桥接摘要已核对。arti.local 当前无法解析，0.4.5 尚未替换网站上的 0.4.4；恢复连接后按 Atlas 私有言墨发布记录暂存、备份、仅更新言墨卡片/安装包/校验文件并完整下载复核。

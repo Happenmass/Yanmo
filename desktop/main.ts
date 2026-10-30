@@ -10,7 +10,7 @@ import { NativeBridge, BackendClient } from './processes';
 import { LibraryStore } from './store';
 import { probeWindows } from './precheck';
 import { checkWindowsModels, prepareWindowsRuntime, RuntimePaths, runtimeCurrent, runtimePaths } from './windows-runtime';
-import { ACTIONS, Action, AppState, busy, Capability, CAPABILITIES, cocoaNow, defaultSettings, migrateSettings, Page, Settings, WINDOWS_MODELS } from './shared';
+import { ACTIONS, Action, AppState, busy, Capability, CAPABILITIES, cocoaNow, defaultSettings, migrateWindowsShortcuts, migrateSettings, Page, Settings, WINDOWS_MODELS } from './shared';
 
 let mainWindow: BrowserWindow;
 let overlay: BrowserWindow;
@@ -263,6 +263,7 @@ app.whenReady().then(async () => {
   }
   const store = new LibraryStore(dataDirectory, defaults, process.env.YANMO_DATA_DIR || windows ? undefined : join(app.getPath('appData'), 'Yanmo/library.json'));
   if (windows) {
+    if (migrateWindowsShortcuts(store.settings)) store.persist();
     // This distribution cannot fall back to local model downloads or inference.
     if (!store.settings.online.asr.enabled || !store.settings.online.text.enabled) store.settings.online = defaults.online;
   }

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { ACTIONS, Action, AppState, ASRResult, Capability, CAPABILITIES, busy, cocoaNow, defaultSettings, Destination, Language, LANGUAGES, LocalEnvironment, Manuscript, NativeStatus, Page, Settings, Shortcut, shortcutID, TaskEvent, Term, validateSettings } from './shared';
+import { ACTIONS, Action, AppState, ASRResult, Capability, CAPABILITIES, busy, cocoaNow, defaultSettings, Destination, Language, LANGUAGES, LocalEnvironment, Manuscript, NativeStatus, Page, Settings, Shortcut, shortcutID, TaskEvent, Term, validateSettings, validateWindowsShortcuts } from './shared';
 import { BackendClient, NativeBridge } from './processes';
 import { LibraryStore } from './store';
 import { decideRuntime } from './precheck';
@@ -127,7 +127,7 @@ export class Controller extends EventEmitter {
     const proposed = { ...this.state.settings, ...patch };
     validateSettings(proposed);
     if (this.state.apiOnly && (!proposed.online.asr.enabled || !proposed.online.text.enabled)) throw new Error('此定制版通过 API 处理，请保持两项服务启用。');
-    if (this.state.apiOnly && Object.values(proposed.shortcuts).flat().some(key => key.keyCode === 63 || key.modifierKeys || (key.modifiers & (256 | (1 << 23))))) throw new Error('Windows 快捷键请使用 Control 搭配 Alt 或 Shift 和普通按键。');
+    if (this.state.apiOnly) validateWindowsShortcuts(proposed);
     let native = this.state.native;
     if (JSON.stringify(proposed.shortcuts) !== JSON.stringify(this.state.settings.shortcuts) || proposed.readContext !== this.state.settings.readContext) {
       native = await this.native.call<NativeStatus>('configure', { bindings: this.bindings(proposed), readContext: proposed.readContext });

@@ -21,3 +21,6 @@ native/windows/bin/
 native/windows/obj/
 runtime/windows/native/
 runtime/windows/python/
+
+native/windows-tests/bin/
+native/windows-tests/obj/

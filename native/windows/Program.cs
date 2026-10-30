@@ -30,7 +30,9 @@ static class Program {
     static bool capturing, active, readContext;
     static long activeGeneration;
     static Form dispatcher = null!;
-    static IntPtr hook;
+    static IntPtr hook, mouseHook;
+    static readonly ShortcutTracker Tracker = new();
+    static readonly HookProc MouseDelegate = Mouse;
     static readonly HookProc HookDelegate = Keyboard;
     static Recorder? recorder;
     static readonly int ParentPID = int.TryParse(Environment.GetEnvironmentVariable("YANMO_PARENT_PID"), out var pid) ? pid : -1;
@@ -43,6 +45,16 @@ static class Program {
         if((key.flags & 0x10) != 0) return CallNextHookEx(hook, code, message, data);
         var vk = (int)key.vkCode; var msg = message.ToInt32();
         bool up = msg == 0x101 || msg == 0x105;
+        int chord = Tracker.Step(vk, up);
+        if (chord != 0) {
+            if (capturing && (chord & 4096) != 0 && (chord & ~6656) == 0) {
+                int[] codes = new[] { 59, 58, 56 }.Where(x => (chord & (x == 59 ? 4096 : x == 58 ? 2048 : 512)) != 0).ToArray();
+                dispatcher.BeginInvoke((Action)(() => Send(new { @event="shortcutCaptured", shortcut=new { keyCode=0, modifiers=0, keyLabel="Control", modifierKeys=codes } })));
+            } else if (!capturing) {
+                var released = bindings.FirstOrDefault(x => x.Key == 0 && x.Modifiers == chord);
+                if (released != null) Fire(released);
+            }
+        }
         if(up && Swallowed.Remove(vk)) return (IntPtr)1;
         if(!up && Swallowed.Contains(vk)) return (IntPtr)1;
         if(!up && (msg == 0x100 || msg == 0x104)) {
@@ -51,7 +63,7 @@ static class Program {
                 dispatcher.BeginInvoke((Action)(() => { if(capturing) Send(new { @event="shortcutCaptured" }); else Send(new { @event="cancel" }); }));
                 return (IntPtr)1;
             }
-            int mods = Modifiers();
+            int mods = Tracker.Modifiers;
             if(capturing && (mods & 4096) != 0 && Keys.ContainsValue(vk)) {
                 int carbon = Keys.First(x => x.Value == vk).Key;
                 Swallowed.Add(vk);
@@ -62,11 +74,17 @@ static class Program {
             if(binding != null) {
                 Swallowed.Add(vk);
                 // Return from the low-level hook before potentially slow UI Automation calls.
-                dispatcher.BeginInvoke((Action)(() => Send(new { @event="shortcut", action=binding.Action, destination=Capture(readContext) })));
+                Fire(binding);
                 return (IntPtr)1;
             }
         }
         return CallNextHookEx(hook, code, message, data);
+    }
+    static void Fire(Binding binding) => dispatcher.BeginInvoke((Action)(() => Send(new { @event="shortcut", action=binding.Action, destination=Capture(readContext) })));
+    static IntPtr Mouse(int code, IntPtr message, IntPtr data) {
+        // Ctrl+click and Ctrl+wheel remain ordinary application gestures.
+        if (code >= 0 && message.ToInt32() is 0x201 or 0x204 or 0x207 or 0x20B or 0x20A or 0x20E) Tracker.Cancel();
+        return CallNextHookEx(mouseHook, code, message, data);
     }
     static Dictionary<string,object> Capture(bool context) {
         GetWindowThreadProcessId(GetForegroundWindow(), out uint pid);
@@ -105,11 +123,17 @@ static class Program {
                 var next=new List<Binding>();
                 foreach(var item in args.GetProperty("bindings").EnumerateArray()) {
                     var key=item.GetProperty("shortcut"); int carbon=key.GetProperty("keyCode").GetInt32(), mods=key.GetProperty("modifiers").GetInt32();
-                    if(!Keys.TryGetValue(carbon,out int vk) || (mods & ~6656)!=0 || (mods & 4096)==0 || key.TryGetProperty("modifierKeys",out _)) throw new Exception("Windows 快捷键请用 Control 搭配普通按键，可加 Alt 或 Shift。");
+                    int vk;
+                    if (key.TryGetProperty("modifierKeys", out var modifierKeys)) {
+                        mods = 0;
+                        foreach (var value in modifierKeys.EnumerateArray()) mods |= value.GetInt32() switch { 59 or 62 => 4096, 56 or 60 => 512, 58 or 61 => 2048, _ => throw new Exception("Windows 不支持该修饰键。") };
+                        vk = 0;
+                    } else if (!Keys.TryGetValue(carbon, out vk)) throw new Exception("Windows 不支持该按键。");
+                    if ((mods & ~6656)!=0 || (mods & 4096)==0 || next.Any(x => x.Key == vk && x.Modifiers == mods)) throw new Exception("Windows 快捷键需要 Control，且不能重复。");
                     next.Add(new Binding(item.GetProperty("action").GetString()!,vk,mods));
                 }
-                bindings=next; capturing=false; readContext=B("readContext"); return Status();
-            case "captureShortcut": capturing=B("enabled"); return Status();
+                bindings=next; capturing=false; Tracker.Reset(); readContext=B("readContext"); return Status();
+            case "captureShortcut": capturing=B("enabled"); Tracker.Cancel(); return Status();
             case "active": active=B("value"); if(!active) { Selections.Clear(); activeGeneration++; } return new {};
             case "capture": return Capture(B("readContext"));
             case "release": Selections.Remove(S("destinationId")); return new {};
@@ -154,6 +178,7 @@ static class Program {
         dispatcher=new Form(); _=dispatcher.Handle;
         hook=SetWindowsHookEx(13,HookDelegate,GetModuleHandle(null),0);
         if(hook==IntPtr.Zero) { Send(new { @event="fault", message="Windows 键盘钩子启动失败。" }); return; }
+        mouseHook=SetWindowsHookEx(14,MouseDelegate,GetModuleHandle(null),0);
         Send(new { @event="ready", protocol=1 });
         _=Task.Run(async () => {
             string? line;
@@ -167,7 +192,7 @@ static class Program {
             }
             dispatcher.BeginInvoke((Action)(() => Application.ExitThread()));
         });
-        try { Application.Run(); } finally { recorder?.Dispose(); UnhookWindowsHookEx(hook); foreach(var path in AudioFiles) try { File.Delete(path); } catch { } }
+        try { Application.Run(); } finally { recorder?.Dispose(); UnhookWindowsHookEx(hook); if(mouseHook!=IntPtr.Zero) UnhookWindowsHookEx(mouseHook); foreach(var path in AudioFiles) try { File.Delete(path); } catch { } }
     }
     delegate IntPtr HookProc(int code,IntPtr message,IntPtr data);
     [StructLayout(LayoutKind.Sequential)] struct KeyboardData { public uint vkCode,scanCode,flags,time; public UIntPtr extra; }
