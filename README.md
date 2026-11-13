@@ -2,9 +2,9 @@
 
 **言语之间，自有笔墨。**
 
-以中文表达为中心的本地语音输入工具，采用宣纸、墨色与朱砂视觉。0.4 开始使用 Electron + React 重建桌面端，Python 推理后端独立运行；当前已交付 Apple Silicon Mac 的 MLX 开发版本。
+言墨是一款**支持中文、英文和中英混说的语音输入法**，适用于 Apple Silicon Mac。按 **FN** 开始说话，再按一次结束。言墨识别语音、整理口语，然后把文字粘贴到此时光标所在的输入框。语音识别和文字整理默认在本机运行。
 
-> A local-first, offline voice input app for macOS (Apple Silicon). Press FN, speak, and the text lands in whatever input box has focus — ASR (Qwen3-ASR + SenseVoice) and the cleanup LLM (Qwen3-4B) run entirely on your Mac via MLX.
+> Yanmo is a local-first voice input app for Apple Silicon Macs. It supports Chinese, English, and mixed Chinese–English dictation. Press **FN** to start and stop recording. Yanmo transcribes and polishes your speech, then pastes it into the active text field. Speech recognition and text processing run on your Mac by default.
 
 [![宣传片](docs/promo-poster.jpg)](https://github.com/Happenmass/Yanmo/releases/latest/download/Yanmo-promo.mp4)
 
@@ -30,28 +30,28 @@ ad-hoc 签名每次构建都会变化，更新版本后若辅助功能显示已�
 
 然后在「设置 → 本地模型」点击「准备模型」（默认从 ModelScope 下载约 5 GB 权重到用户全局缓存，仅此一步需要联网），并按提示授予麦克风与辅助功能权限。
 
-## 当前版本
+## 主要功能
 
-Mac 版保留原型的主要功能：
-
-- 默认 FN 开始／结束语音输入，FN + Shift 口述翻译，FN + 空格划词翻译，Esc 取消；支持自定义多组快捷键和左右纯修饰键。键名使用 FN、Control、Option、Command、Shift；纯修饰键组合全部松开时触发，参与打字或鼠标组合时不触发。更新默认值不会覆盖已保存的自定义配置，设置中可逐项恢复默认。
+- **中英文输入**按口述语言输出。中英混说时，目标是保留句中的中英文片段。若要将口述内容转成指定语言，使用口述翻译。当前本地模型在部分混说样本中仍会误译。见[正文生成评测](docs/asr-fusion.md)。
+- 默认 **FN** 开始或结束语音输入，**FN + Shift** 口述翻译，**FN + 空格**划词翻译，**Esc** 取消。支持自定义多组快捷键和左右纯修饰键。纯修饰键组合全部松开时触发，参与打字或鼠标组合时不触发。更新默认值时保留已保存的自定义配置，设置中可逐项恢复默认。
 - 静音的 200×36 pt 黑墨浮层，显示真实音量、计时、取消和完成；不抢走原输入框焦点。
-- 本机 Qwen3-ASR 先识别并判断语言；中文、英文再用 SenseVoice Small 复核。两路对等结合上下文纠错，可在文稿中对照；数字按语义自然呈现，精确金额等优先使用阿拉伯数字。可关闭语气整理、保留原话或选择即时消息／文档风格。
-- 转录和本地整理保留识别原文的语言：日语仍输出日语，混合语言逐段保留；中文上下文和翻译目标设置不会把转录改成中文。只有翻译模式转换语言。
+- 本机 Qwen3-ASR 先识别语音和语言，检测到中文或英文时由 SenseVoice Small 复核。文字模型结合识别结果、词库和可用上下文生成正文，两路识别结果可在文稿中对照。可选自然整理、保留原话、即时消息或文档风格。
 - 口述翻译直接执行识别→翻译→写入；划词翻译在可拖动的独立宣纸窗口显示，按普通窗口层级切换，不替换选区、不保存历史。
 - 两种翻译分别保存目标语言和快捷键，支持英语、简体中文、日语、德语。
 - Markdown 译文排版／源码、代码着色和代码复制；围栏代码与行内代码由程序保护，不执行 HTML 或加载远程图片。
 - 统计首页、20 周落笔日历、文稿搜索／编辑／复制／导出、个人词库及误识别纠正。
 - 导入 5 分钟以内的音频、麦克风选择、历史保留周期和登录启动。关闭主窗口后隐藏程序坞图标，仅保留菜单栏及快捷键；菜单栏图标左键打开主窗口，右键打开菜单，重新打开窗口时按偏好恢复程序坞图标。
 - 录音与输入框可读性分离；可读正文只作上下文，读取失败仍正常录音。
-- 正文生成后向当时前台应用的当前焦点粘贴一次，允许途中切换应用、窗口和光标；文稿保留正文，导入音频仅生成文稿。
+- 正文生成后向当时前台应用的当前焦点粘贴一次，允许途中切换应用、窗口和光标。开启历史记录时保存文稿。导入音频的结果只在文稿页显示。
 - 连续空闲 1 小时退出推理进程；录音开始后后台预加载，连续输入复用已加载模型。
 
 模型下载来源默认 **ModelScope**，准备时先复用完整的全局缓存；日常推理不自动下载或上传输入。SenseVoice Small 共用一份多语言权重，按 Qwen 检测出的中文、英文分别指定 `zh`、`en`；其他语言或未知语言跳过复核。
 
 Electron、Swift 系统桥接和独立 Python/MLX 运行时均随应用包交付，权重另存用户全局缓存。当前是 ad-hoc 签名的本机开发构建，尚未完成公证及干净机器验收。Mac 可明确启用 OpenAI 兼容的在线接口，默认仍走本机；Windows 本地推理改用原生 PyTorch（CUDA）与 transformers，无可用 CUDA 时推荐在线处理；运行库安装、模型准备与推理适配已实现（[运行时说明](docs/architecture/electron_01_Runtime_运行时与预检查.md)），Windows 系统桥接尚未接入，Windows 版暂不能启动。
 
-[重构方案](docs/architecture/electron_00_Overview_顶层架构.md) · [本轮实现与验证](docs/electron-mac-2026-10-21.md)
+## 模块图
+
+桌面端采用 Electron + React，通过 Swift 系统桥接处理快捷键、录音、选区和跨应用写入。独立 Python 后端负责语音识别、整理与翻译。[查看当前完整模块图与源码入口](docs/architecture/current-modules.md) · [Mac 实现与验证](docs/electron-mac-2026-10-21.md)
 
 ## 构建与启动
 
@@ -107,7 +107,7 @@ ad-hoc 开发签名随构建变化。若系统显示已授权但当前版本仍�
 - 测试可用 `YANMO_DATA_DIR` 指定隔离数据目录，此时不导入个人数据。
 - 临时音频在正常结束、取消或受控退出后删除；系统强制终止时仍可能残留在系统临时目录。
 
-正文质量由提示词和模型负责：两路结合上下文纠错、保留转录原语言、翻译到指定语言，以及数字按语义自然呈现。模型只返回最终正文，程序原样采用；空输出、生成截断、取消和运行失败保留识别原文供重试。手动修改后，后续整理以用户修订为准。当前行为与评测入口见[双路识别与正文生成](docs/asr-fusion.md)。
+程序原样采用模型生成的正文。遇到空输出、生成截断、取消或运行失败时，已取得的识别原文可用于重试。手动修改文稿后，后续整理以用户修订为准。见[双路识别与正文生成](docs/asr-fusion.md)。
 
 ## 开发与验证
 
@@ -144,8 +144,6 @@ YANMO_QA_AUDIO=/tmp/yanmo-synthetic.aiff npm run test:desktop
 设置 `YANMO_QA_APP=/完整路径/言墨.app/Contents/MacOS/言墨` 可检查打包应用。`swift run YanmoShortcutChecks`直接检查监听函数，不向系统发送输入。可选的旧版 `YANMO_QA_NATIVE=1` TextEdit 组合脚本使用 AppleScript，本轮未执行；当前原生交互经 CUA 检查。自动化不代替实体 FN 口述验收。
 
 桌面测试在隔离配置中默认关闭程序坞图标；只有显式设置 `YANMO_QA_DOCK=1` 才运行会反复切换程序坞的系统检查，避免常规回归影响当前桌面。测试结束后应确认没有遗留测试主进程。
-
-关键入口：`desktop/controller.ts` 管理任务，`desktop/processes.ts` 管理子进程及通信，`Sources/YanmoBridge/` 管理系统能力，`backend/server.py` 提供认证 HTTP/SSE，`backend/pipeline.py` 组织推理，`engine/mlx_provider.py` 实现 MLX。原逐行 JSON worker 仍用于原生原型。
 
 视觉与动效依据 [已确认设计](docs/design/README.md)。原生版本的 [输入验证](docs/verification-2026-10-21.md)、[翻译](docs/translation-0.3.md)、[Markdown](docs/markdown-translation-2026-10-21.md) 可作为迁移对照。
 
