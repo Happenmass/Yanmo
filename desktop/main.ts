@@ -95,7 +95,8 @@ function broadcast(state: AppState) {
 function updateTray() {
   if (quitting || !tray || tray.isDestroyed()) return;
   const state = controller.state;
-  const key = state.stage + ':' + state.settings.voiceTarget;
+  const { asr, text } = state.settings.online;
+  const key = [state.stage, state.settings.voiceTarget, asr.enabled, text.enabled].join(':');
   if (key === trayState) return;
   trayState = key;
   trayMenu = Menu.buildFromTemplate([
@@ -104,7 +105,7 @@ function updateTray() {
     { label: '取消', enabled: busy(state.stage), click: () => void controller.cancel() },
     { type: 'separator' }, { label: '打开言墨', click: reveal },
     { label: '设置…', click: () => { controller.setPage('settings'); reveal(); } },
-    { type: 'separator' }, { label: '所有处理留在本机', enabled: false }, { label: '退出言墨', click: () => app.quit() },
+    { type: 'separator' }, { label: text.enabled ? '文字处理使用 API' : '文字处理 API 待配置', enabled: false }, { label: '退出言墨', click: () => app.quit() },
   ]);
 }
 async function importAudio() {
