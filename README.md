@@ -1,22 +1,16 @@
 # 言墨 · Yanmo
 
-> 当前开发源码默认在本机识别语音，整理和翻译需要配置一个文字处理 API。GitHub Releases 的 v0.4.4 安装包仍支持本地文字模型，使用说明见 [v0.4.4 README](https://github.com/Happenmass/Yanmo/blob/3c5df91165f14f838961c5e7ea3994afe267265d/README.md)。
-
 **言语之间，自有笔墨。**
 
 言墨是一款**支持中文、英文和中英混说的语音输入法**，适用于 Apple Silicon Mac。按 **FN** 开始说话，再按一次结束。言墨默认在本机识别语音，通过你配置的文字 API 整理正文，再将结果粘贴到当前输入框。
 
 > Yanmo supports Chinese, English, and mixed Chinese–English dictation on Apple Silicon Macs. Press **FN** to start and stop recording. By default, speech recognition runs on your Mac. Yanmo uses your configured text API for polishing and translation.
 
-[![宣传片](docs/promo-poster.jpg)](https://github.com/Happenmass/Yanmo/releases/latest/download/Yanmo-promo.mp4)
-
-▶ [观看 32 秒宣传片](https://github.com/Happenmass/Yanmo/releases/latest/download/Yanmo-promo.mp4)
-
 ![主窗口](docs/design/main-window-v2.png)
 
 ## 下载安装
 
-从 [Releases](https://github.com/Happenmass/Yanmo/releases/latest) 下载 `Yanmo-<版本>-mac-arm64.zip`，解压后把 `言墨.app` 拖入「应用程序」。要求 Apple Silicon、macOS 14+。
+从[下载页](https://happenmass.github.io/Yanmo/)或 [GitHub Releases](https://github.com/Happenmass/Yanmo/releases/latest) 下载 `Yanmo-<版本>-mac-arm64.zip`，解压后把 `言墨.app` 拖入「应用程序」。要求 Apple Silicon、macOS 14+。升级前请完整退出旧版，再替换整个应用。
 
 言墨是个人开源项目，未加入 Apple 开发者计划，应用为 ad-hoc 签名、未经 Apple 公证，首次打开会被 Gatekeeper 拦截。确认来源后任选一种方式放行：
 
@@ -30,7 +24,7 @@
 
 ad-hoc 签名每次构建都会变化，更新版本后若辅助功能显示已授权却无法使用，请在系统设置中移除旧条目后重新添加。
 
-使用当前开发源码时，在「设置 → 本地模型」准备本机语音模型，再到「设置 → API 服务」启用「文字整理与翻译」，填写兼容 OpenAI 的服务地址、模型 ID 和服务要求的 API Key。按提示授予麦克风与辅助功能权限。
+从 0.4.5 起，在「设置 → 本地模型」准备本机语音模型，再到「设置 → API 服务」启用「文字整理与翻译」，填写兼容 OpenAI 的服务地址、模型 ID 和服务要求的 API Key。按提示授予麦克风与辅助功能权限。升级时沿用已启用的文字 API 配置。
 
 ## 主要功能
 
@@ -49,7 +43,7 @@ ad-hoc 签名每次构建都会变化，更新版本后若辅助功能显示已�
 
 语音模型下载来源默认 **ModelScope**，准备时先复用完整的全局缓存。SenseVoice Small 共用一份多语言权重，按 Qwen 检测出的中文、英文分别指定 `zh`、`en`；其他语言或未知语言跳过复核。
 
-Electron、Swift 系统桥接和独立 Python/MLX 运行时均随应用包交付，权重另存用户全局缓存。当前是 ad-hoc 签名的本机开发构建，尚未完成公证及干净机器验收。语音识别可另行启用 OpenAI 兼容 API。Windows 主线已有 PyTorch（CUDA）语音识别适配和运行时准备，仍缺 Windows 系统桥接。见[运行时说明](docs/architecture/electron_01_Runtime_运行时与预检查.md)。
+Electron、Swift 系统桥接和独立 Python/MLX 运行时均随应用包交付，权重另存用户全局缓存。语音识别可另行启用 OpenAI 兼容 API。Windows 主线已有 PyTorch（CUDA）语音识别适配和运行时准备，仍缺 Windows 系统桥接。见[运行时说明](docs/architecture/electron_01_Runtime_运行时与预检查.md)。
 
 ## 模块图
 

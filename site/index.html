@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>言墨 · 本地语音输入</title>
-  <meta name="description" content="言墨：按下 FN，开口说话，文字落进任何输入框。默认在你的 Mac 上离线识别与整理，也可自行启用在线模型。开源免费。">
+  <title>言墨 · 中英文语音输入法</title>
+  <meta name="description" content="言墨是 Apple Silicon Mac 上的开源语音输入法，支持中文、英文及中英混说。默认在本机识别语音，使用你配置的文字 API 整理和翻译。">
   <link rel="icon" href="assets/logo.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -22,21 +22,21 @@
       <a href="#faq">常见问题</a>
       <a href="https://github.com/Happenmass/Yanmo">GitHub</a>
     </nav>
-    <a class="seal small" href="https://github.com/Happenmass/Yanmo/releases/latest">下载</a>
+    <a class="seal small" href="https://github.com/Happenmass/Yanmo/releases/download/v0.4.5/Yanmo-0.4.5-mac-arm64.zip">下载</a>
   </header>
 
   <main id="top">
     <!-- 首屏 -->
     <section class="hero">
-      <p class="eyebrow">本地语音输入 · Mac</p>
+      <p class="eyebrow">中英文语音输入 · Mac</p>
       <h1 class="write"><span>言语之间，</span><span>自有笔墨。</span></h1>
       <p class="kai lead">按下 FN，开口说话，文字落进任何输入框。</p>
-      <p class="muted">默认在你的 Mac 上离线识别与整理，也可自行启用在线模型。</p>
+      <p class="muted">支持中文、英文和中英混说。默认在 Mac 上识别语音，整理和翻译使用你配置的文字 API。</p>
       <div class="actions">
-        <a class="seal" href="https://github.com/Happenmass/Yanmo/releases/latest">下载 Mac 版 · 0.4.4</a>
-        <a class="link" href="https://github.com/Happenmass/Yanmo/releases/latest/download/Yanmo-promo.mp4">观看宣传片 ▸</a>
+        <a class="seal" href="https://github.com/Happenmass/Yanmo/releases/download/v0.4.5/Yanmo-0.4.5-mac-arm64.zip">下载 Mac 版 · 0.4.5</a>
+        <a class="link" href="https://github.com/Happenmass/Yanmo/releases/tag/v0.4.5">安装说明与校验</a>
       </div>
-      <p class="fine">Apple Silicon · macOS 14+ · 2026-10-27 更新 · 开源免费</p>
+      <p class="fine">Apple Silicon · macOS 14+ · 2026-11-13 更新 · 开源免费</p>
 
       <div class="flow" aria-hidden="true">
         <svg viewBox="0 0 1200 260" preserveAspectRatio="xMidYMid meet">
@@ -93,7 +93,7 @@
         <div class="captions">
           <div class="cap on"><h3>在任何输入框按下 FN</h3><p>黑墨浮层悬于屏幕底部，不抢走原输入框的焦点。</p></div>
           <div class="cap"><h3>像平时一样说</h3><p>停顿、改口都没关系。音量是笔压，墨迹随声音浓淡。</p></div>
-          <div class="cap"><h3>再按一次，正文落下</h3><p>本机识别、保守整理，抹去语气词，写进你刚才的光标处。</p></div>
+          <div class="cap"><h3>再按一次，正文落下</h3><p>语音识别后，由文字 API 整理口语，结果写入此时光标所在的输入框。</p></div>
         </div>
       </div>
     </section>
@@ -133,15 +133,15 @@
     <!-- 隐私 -->
     <section class="privacy" id="privacy">
       <div class="privacy-head">
-        <h2>所有处理，<br>留在本机。</h2>
+        <h2>语音默认<br>在本机识别。</h2>
         <div class="stamp" aria-label="本机"><span>本</span><span>机</span></div>
       </div>
       <ul class="ledger">
         <li><i></i>语音识别<span>Qwen3-ASR</span><em>本地 · MLX</em></li>
         <li><i></i>双路复核<span>SenseVoice Small</span><em>本地 · MLX</em></li>
-        <li><i></i>文字整理<span>Qwen3-4B</span><em>本地 · MLX</em></li>
+        <li><i></i>整理与翻译<span>OpenAI 兼容接口</span><em>使用你配置的文字 API</em></li>
       </ul>
-      <p class="kai muted">仅首次准备模型时需要联网（约 5 GB，默认 ModelScope）。之后断网照常使用，录音与文字不离开你的 Mac。</p>
+      <p class="kai muted">文字 API 接收转写或选中的文字。整理任务可带上词库与已启用的光标上下文。只有启用在线语音识别时才发送音频。</p>
     </section>
 
     <!-- 随处落笔 -->
@@ -165,10 +165,11 @@
     <section class="faq" id="faq">
       <h2>常见问题</h2>
       <details><summary>首次打开被系统拦截怎么办？</summary><div><p>言墨是个人开源项目，应用为 ad-hoc 签名、未经 Apple 公证。确认来源后，在终端执行：</p><pre><code>xattr -dr com.apple.quarantine /Applications/言墨.app</code></pre><p>或先打开一次，再到「系统设置 → 隐私与安全性」底部点「仍要打开」。</p></div></details>
-      <details><summary>需要联网吗？会上传录音吗？</summary><div><p>默认离线模式仅首次准备模型时联网下载权重，日常识别和整理不上传音频、上下文或转写。若在设置中主动启用在线模型，对应音频或文字及启用的上下文会发送到你配置的服务。</p></div></details>
-      <details><summary>对电脑有什么要求？</summary><div><p>Apple Silicon（M 系列芯片）、macOS 14 及以上；模型约占 5 GB 磁盘空间。</p></div></details>
+      <details><summary>首次使用需要配置什么？</summary><div><p>在「设置 → 本地模型」准备语音识别模型，默认从 ModelScope 下载并复用已有缓存。在「设置 → API 服务」填写并启用一个 OpenAI 兼容文字接口，包括服务地址、模型 ID 和服务要求的 API Key。按提示允许麦克风和辅助功能权限。</p></div></details>
+      <details><summary>需要联网吗？会上传录音吗？</summary><div><p>首次下载语音模型和访问远程文字 API 需要联网。默认语音识别在 Mac 上运行。只有主动启用在线语音识别时，才会把音频发给所配置的语音服务。</p></div></details>
+      <details><summary>对电脑有什么要求？</summary><div><p>需要 Apple Silicon（M 系列芯片）及 macOS 14 或更高版本。语音模型首次单独下载。</p></div></details>
       <details><summary>支持 Windows 吗？</summary><div><p>Windows 版正在开发中，暂不能使用。</p></div></details>
-      <details><summary>收费吗？</summary><div><p>免费，MIT 协议开源。</p></div></details>
+      <details><summary>收费吗？</summary><div><p>言墨免费，采用 MIT 开源协议。API 费用由你选择的服务商决定。</p></div></details>
     </section>
 
     <!-- 收尾 -->
@@ -176,9 +177,9 @@
       <div class="cta-bg"><img src="assets/ink-mountains.jpg" alt=""></div>
       <div class="cta-text">
         <h2 class="write"><span>开口，</span><span>即成文。</span></h2>
-        <p class="kai">本地运行 · 开源 · 私密 · 离线</p>
+        <p class="kai">本机语音识别 · 自选文字 API</p>
         <div class="actions">
-          <a class="seal" href="https://github.com/Happenmass/Yanmo/releases/latest">下载 Mac 版 · 0.4.4</a>
+          <a class="seal" href="https://github.com/Happenmass/Yanmo/releases/download/v0.4.5/Yanmo-0.4.5-mac-arm64.zip">下载 Mac 版 · 0.4.5</a>
           <a class="link" href="https://github.com/Happenmass/Yanmo">在 GitHub 查看源码</a>
         </div>
       </div>
@@ -187,7 +188,7 @@
 
   <footer>
     <div class="foot-links">
-      <span class="kai">开源 · 私密 · 离线</span>
+      <span class="kai">中英文语音输入 · MIT 开源</span>
       <a href="https://github.com/Happenmass/Yanmo">GitHub</a>
       <a href="https://github.com/Happenmass/Yanmo/releases">版本发布</a>
       <a href="https://github.com/Happenmass/Yanmo/blob/main/LICENSE">MIT 协议</a>
