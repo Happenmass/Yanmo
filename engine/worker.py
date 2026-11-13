@@ -35,6 +35,7 @@ ASR: 改到周三出发。 CONTEXT: 原定周二出发。
 Output: 改到周三出发。
 """
 POLISH_PROMPT = Path(__file__).with_name("polish.txt").read_text(encoding="utf-8")
+CORRECTION_PROMPT = Path(__file__).with_name("correction-terms.txt").read_text(encoding="utf-8")
 
 if __package__:
     from .fusion import build_fusion_payload, build_polish_payload
@@ -223,6 +224,19 @@ class Engine:
         if finish_reason != "stop":
             raise ValueError("处理超出长度上限，未写入截断内容；请分段后重试。")
         return require_text(text)
+
+    def extract_correction_terms(self, original: str, corrected: str, online: dict, transcript: str | None = None) -> list[str]:
+        if original == corrected or not corrected.strip():
+            return []
+        payload = {"ORIGINAL": original, "CORRECTED": corrected}
+        if transcript:
+            payload["ASR"] = transcript
+        output = self.generate_text(CORRECTION_PROMPT, payload, sum(map(len, payload.values())), online=online)
+        terms = json.loads(output)
+        if not isinstance(terms, list) or len(terms) > 10 or any(not isinstance(term, str) for term in terms):
+            raise ValueError("词库提取结果格式无效。")
+        terms = [term.strip() for term in terms]
+        return list(dict.fromkeys(term for term in terms if 1 <= len(term) <= 64 and len(term.splitlines()) == 1 and term in corrected))
 
     def translate(self, request: dict) -> dict:
         payload = translation_payload(request)

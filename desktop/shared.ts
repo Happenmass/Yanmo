@@ -27,6 +27,7 @@ export interface LocalEnvironment { environment: 'ready' | 'repair' | 'unsupport
 export type RuntimeStatus = 'checking' | 'models-pending' | 'local-repair' | 'recommend-online' | 'api-pending' | 'online-ready';
 export interface RuntimeState { status: RuntimeStatus; issues: string[]; gpu?: string; capabilities: { asr: 'local' | 'online' | 'unavailable'; text: 'online' | 'unavailable' } }
 export interface AppState {
+  update?: { version: string; busy: boolean; message: string };
   learnedTerms?: string[];
   page: Page; stage: Stage; action: Action; settings: Settings; library: Library;
   selectedID: string | null; draft: string; original: string; notice: string;

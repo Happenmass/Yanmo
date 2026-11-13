@@ -28,6 +28,28 @@ def synthetic_wav():
 
 
 class ServerTests(unittest.TestCase):
+    def testCorrectionTermsUseDedicatedPromptAndOnlyTheTwoVersions(self):
+        from engine.worker import CORRECTION_PROMPT
+
+        headers = {"Authorization": "Bearer test-only"}
+        request = {"original": "联系沈燕。", "corrected": "联系沈砚。", "online": ENDPOINT}
+        with patch.object(online_provider, "generate", return_value=('["沈砚", "沈砚", "编造词"]', "stop")) as generate, \
+                TestClient(create_app(Engine(), token="test-only")) as client:
+            response = client.post("/v1/corrections/terms", json=request, headers=headers)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json(), {"terms": ["沈砚"]})
+            self.assertEqual(generate.call_args.args[:3], (ENDPOINT, CORRECTION_PROMPT, {"ORIGINAL": "联系沈燕。", "CORRECTED": "联系沈砚。"}))
+            request.update(corrected="草稿：联系沈砚。", transcript="联系沈燕")
+            response = client.post("/v1/corrections/terms", json=request, headers=headers)
+            self.assertEqual(response.json(), {"terms": ["沈砚"]})
+            self.assertEqual(generate.call_args.args[2], {"ORIGINAL": "联系沈燕。", "CORRECTED": "草稿：联系沈砚。", "ASR": "联系沈燕"})
+            request["corrected"] = request["original"]
+            self.assertEqual(client.post("/v1/corrections/terms", json=request, headers=headers).json(), {"terms": []})
+            self.assertEqual(generate.call_count, 2)
+            request["corrected"] = "联系沈砚。"
+            generate.return_value = ('{"terms": ["沈砚"]}', "stop")
+            self.assertEqual(client.post("/v1/corrections/terms", json=request, headers=headers).status_code, 502)
+
     def testAuthorizationAndInvalidRequestsNeverReachProvider(self):
         with TestClient(create_app(FakeEngine(), token="test-only")) as client:
             self.assertEqual(client.post("/v1/warmup", json={}).status_code, 401)

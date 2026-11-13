@@ -42,6 +42,7 @@ final class Bridge {
         keys.isActive = { [weak self] in self?.active == true }
         keys.onCaptureFn = { [weak self] in self?.captured(.fn) }
         keys.onCaptureShortcut = { [weak self] in self?.captured($0) }
+        keys.onReturn = { [weak self] in self?.correction?.returnPressed() }
     }
 
     func send(_ value: [String: Any]) {
@@ -208,11 +209,14 @@ final class Bridge {
                 guard let text = args["text"] as? String else { throw EngineError(message: "没有可写入的正文。") }
                 correction?.stop(); correction = nil
                 let observationID = args["observationId"] as? String
+                let transcript = args["transcript"] as? String
                 let writing = Task {
-                    try await InputDestination.pasteAtCurrentFocus(text) { target in
+                    try await InputDestination.pasteAtCurrentFocus(text) {
                         guard let observationID else { return }
-                        self.correction = CorrectionObservation(target: target, text: text) { [weak self] original, final in
-                            self?.send(["event": "correction", "observationId": observationID, "original": original, "text": final])
+                        self.correction = CorrectionObservation(text: text, transcript: transcript) { [weak self] original, final, transcript in
+                            var event = ["event": "correction", "observationId": observationID, "original": original, "text": final]
+                            if let transcript { event["transcript"] = transcript }
+                            self?.send(event)
                         }
                     }
                 }; deliveryTask = writing
@@ -220,7 +224,6 @@ final class Bridge {
                 let name: String
                 do { name = try await writing.value }
                 catch { correction?.stop(); correction = nil; throw error }
-                correction?.start()
                 result = ["delivery": "attempted_unverified", "name": name, "message": "已向写入时的前台输入位置发送一次粘贴。"]
             case "record.start":
                 correction?.stop(); correction = nil

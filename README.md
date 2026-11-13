@@ -10,7 +10,9 @@
 
 ## 下载安装
 
-从[下载页](https://happenmass.github.io/Yanmo/)或 [GitHub Releases](https://github.com/Happenmass/Yanmo/releases/latest) 下载 `Yanmo-<版本>-mac-arm64.zip`，解压后把 `言墨.app` 拖入「应用程序」。要求 Apple Silicon、macOS 14+。升级前请完整退出旧版，再替换整个应用。
+从[下载页](https://happenmass.github.io/Yanmo/)或 [GitHub Releases](https://github.com/Happenmass/Yanmo/releases/latest) 下载 `Yanmo-<版本>-mac-arm64.zip`，解压后把 `言墨.app` 拖入「应用程序」。要求 Apple Silicon、macOS 14+。从 0.4.5 或更早版本升级时，请完整退出旧版，再替换整个应用。
+
+从 0.4.6 起，可在「设置 → 软件更新」或言墨菜单中检查更新。确认后，言墨会下载并校验 GitHub 安装包，完整退出后替换应用并重新启动。当前版本采用 ad-hoc 签名，macOS 更新后仍可能要求重新授权辅助功能、麦克风或钥匙串访问。
 
 言墨是个人开源项目，未加入 Apple 开发者计划，应用为 ad-hoc 签名、未经 Apple 公证，首次打开会被 Gatekeeper 拦截。确认来源后任选一种方式放行：
 
@@ -97,7 +99,7 @@ ad-hoc 开发签名随构建变化。若系统显示已授权但当前版本仍�
 - ModelScope 缓存：`~/.cache/codex/models/modelscope/`，可通过 `MODELSCOPE_CACHE` 指定其他用户全局位置；同时复用 SDK 既有缓存与 `~/.cache/huggingface/`。不在项目和安装包中复制权重。
 - Python 后端仅监听 `127.0.0.1` 动态端口，以每次启动的随机密钥认证；主进程通过私有管道取得端口。Renderer 不持有密钥或音频路径。
 - 运行时设置 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`，模型定位只使用本地缓存；显式准备模型在单独进程中执行。
-- 只有显式启用在线语音识别时才会发送音频。文字 API 接收转写或选中的文字，整理任务可同时带上词库与光标上下文。光标上下文默认关闭，启用后可读取前后各最多 300 字。SenseVoice 独立识别，不接收文本提示。
+- 只有显式启用在线语音识别时才会发送音频。文字 API 接收转写或选中的文字，整理任务可同时带上词库与光标上下文。光标上下文默认关闭，启用后可读取前后各最多 300 字。Mac 上在语音写入后 10 秒内按 Enter，当前输入框的可读正文可能与上一段口述一起发送给同一文字 API。模型判断两段对应时才提取纠词词条。SenseVoice 独立识别。
 - Electron 数据在 `~/Library/Application Support/Yanmo/electron/`；文件权限为 600，目录为 700，原子保存。
 - 首次启动复制旧版 `library.json`、保存迁移备份，并导入 macOS UserDefaults 中的快捷键、语言及隐私设置；保留旧数据源。损坏文件暂停覆盖保存。
 - 测试可用 `YANMO_DATA_DIR` 指定隔离数据目录，此时不导入个人数据。

@@ -92,5 +92,13 @@ struct ShortcutCaptureChecks {
         let functionKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.control, .function], timestamp: 0, windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 122)!
         precondition(HotKeys.shortcut(for: functionKey).modifiers == 4096)
         print("PASS: original custom shortcuts coexist; F-keys are not mistaken for physical FN")
+
+        var returns = 0
+        keys.onReturn = { returns += 1 }
+        precondition(!send(.keyDown, 36) && !send(.keyUp, 36))
+        precondition(!send(.keyDown, 76))
+        precondition(!send(.keyDown, 36, shift) && !send(.keyDown, 36, repeatKey: true))
+        precondition(returns == 2)
+        print("PASS: plain Return and keypad Enter are observed once and passed through")
     }
 }

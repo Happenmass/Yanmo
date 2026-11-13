@@ -11,9 +11,15 @@ editItem.submenu = edit; menu.addItem(editItem); app.mainMenu = menu
 let folder = URL(fileURLWithPath: CommandLine.arguments[1])
 let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 600, height: 250), styleMask: [.titled, .closable], backing: .buffered, defer: false)
 window.title = "言墨 · 纠词隔离测试"
-let editor = NSTextView(frame: NSRect(x: 0, y: 0, width: 600, height: 170))
+final class SendEditor: NSTextView {
+    override func insertNewline(_ sender: Any?) {
+        save("sent.txt", string)
+        string = ""
+    }
+}
+let editor = SendEditor(frame: NSRect(x: 0, y: 0, width: 600, height: 170))
 editor.font = .systemFont(ofSize: 20)
-let other = NSTextField(frame: NSRect(x: 10, y: 180, width: 500, height: 30))
+let other = SendEditor(frame: NSRect(x: 10, y: 180, width: 500, height: 30))
 let container = NSView(frame: NSRect(x: 0, y: 0, width: 600, height: 250))
 container.addSubview(editor); container.addSubview(other); window.contentView = container
 window.makeKeyAndOrderFront(nil); window.makeFirstResponder(editor); app.activate(ignoringOtherApps: true)
@@ -24,9 +30,14 @@ Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
     guard let data = try? Data(contentsOf: command), let value = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
     try? FileManager.default.removeItem(at: command)
     if value["action"] == "quit" { app.terminate(nil) }
-    if value["action"] == "focusOther" { window.makeFirstResponder(other) }
+    if value["action"] == "focusOther" {
+        other.string = value["text"] ?? ""
+        window.makeFirstResponder(other)
+    }
     if value["action"] == "reset" {
+        try? FileManager.default.removeItem(at: folder.appendingPathComponent("sent.txt"))
         editor.string = value["text"] ?? ""; window.makeFirstResponder(editor)
+        other.string = ""
         editor.setSelectedRange(NSRange(location: editor.string.utf16.count, length: 0))
         app.activate(ignoringOtherApps: true)
     }
@@ -40,6 +51,10 @@ Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
             down.post(tap: .cghidEventTap)
             CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)!.post(tap: .cghidEventTap)
         }
+    }
+    if value["action"] == "enter" {
+        CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: true)?.post(tap: .cghidEventTap)
+        CGEvent(keyboardEventSource: nil, virtualKey: 36, keyDown: false)?.post(tap: .cghidEventTap)
     }
     save("ack", value["id"] ?? "")
 }

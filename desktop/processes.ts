@@ -121,6 +121,14 @@ export class BackendClient {
   async warmup(settings: Settings) {
     await this.request('/v1/warmup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ asr_model: settings.asrModel, model_source: settings.modelSource }) });
   }
+  async extractCorrectionTerms(original: string, corrected: string, online: { base_url: string; model: string; api_key: string }, transcript?: string): Promise<string[]> {
+    const response = await this.request('/v1/corrections/terms', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ original, corrected, online, transcript }),
+    });
+    const { terms } = await response.json();
+    if (!Array.isArray(terms) || terms.some(term => typeof term !== 'string')) throw new Error('词库提取结果格式无效。');
+    return terms;
+  }
   async run(payload: Record<string, unknown>, audio: string | undefined, onEvent: (event: TaskEvent) => void) {
     const body = new FormData(); body.set('request', JSON.stringify(payload));
     if (audio) body.set('audio', new Blob([await readFile(audio)]), 'recording.wav');

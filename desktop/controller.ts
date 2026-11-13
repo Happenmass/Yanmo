@@ -4,7 +4,6 @@ import { ACTIONS, Action, AppState, ASRResult, Capability, busy, cocoaNow, defau
 import { BackendClient, NativeBridge } from './processes';
 import { LibraryStore } from './store';
 import { decideRuntime } from './precheck';
-import { correctedTerms } from './correction-learning';
 
 interface Task {
   id: string; action: Action; settings: Settings; destination: Destination; lexicon: Term[];
@@ -16,6 +15,7 @@ export class Controller extends EventEmitter {
   readonly state: AppState;
   private task?: Task;
   private observationID?: string;
+  private shuttingDown = false;
   private learned: Term[] = [];
   private learningDismiss?: NodeJS.Timeout;
   private userEdited = false;
@@ -44,7 +44,7 @@ export class Controller extends EventEmitter {
     native.on('shortcut', ({ action, destination }: { action: Action; destination: Destination }) => {
       if (action in ACTIONS) void this.perform(action, destination);
     });
-    native.on('correction', value => this.learnCorrections(value));
+    native.on('correction', value => void this.learnCorrections(value));
     native.on('cancel', () => void this.cancel());
     native.on('permissions', () => void this.permissions());
     native.on('meter', ({ taskId, level }: { taskId: string; level: number }) => {
@@ -59,7 +59,13 @@ export class Controller extends EventEmitter {
   private keys: Partial<Record<Capability, string>> = {};
   /** Decrypted by the main process; the renderer only learns whether a key exists. */
   setOnlineKeys(keys: Partial<Record<Capability, string>>) { this.keys = keys; this.state.onlineKeys = { asr: !!keys.asr, text: !!keys.text }; this.changed(); }
-  changed() { this.emit('state', this.state); }
+  changed() {
+    if (!busy(this.state.stage) && this.learned.length && !this.state.learnedTerms) {
+      this.state.learnedTerms = this.learned.map(item => item.term);
+      this.learningDismiss = setTimeout(() => { this.clearLearningNotice(); this.changed(); }, 6000);
+    }
+    this.emit('state', this.state);
+  }
   private refreshRuntime() {
     const { models } = this.state;
     // Windows has no SenseVoice review, so its local ASR needs only the ASR model.
@@ -87,7 +93,7 @@ export class Controller extends EventEmitter {
     this.changed();
   }
   async checkModels() {
-    if (busy(this.state.stage) || this.state.checking || this.state.captureAction) return;
+    if (this.shuttingDown || busy(this.state.stage) || this.state.checking || this.state.captureAction) return;
     const settings = structuredClone(this.state.settings);
     const outdated = () => settings.asrModel !== this.state.settings.asrModel || settings.senseVoiceModel !== this.state.settings.senseVoiceModel || settings.modelSource !== this.state.settings.modelSource;
     this.state.checking = true; this.changed();
@@ -168,7 +174,7 @@ export class Controller extends EventEmitter {
   }
   setPage(page: Page) { if (['desk', 'manuscripts', 'dictionary', 'settings'].includes(page)) { if (this.state.captureAction) void this.endCapture(); this.state.page = page; this.changed(); } }
   private async begin(action: Action, captured?: Destination, showOverlay = true): Promise<Task | undefined> {
-    if (busy(this.state.stage) || this.state.checking || this.state.captureAction) return;
+    if (this.shuttingDown || busy(this.state.stage) || this.state.checking || this.state.captureAction) return;
     const needsAudio = action !== 'selectionTranslation' && showOverlay;
     const missingText = this.state.runtime.capabilities.text === 'unavailable';
     const missingASR = needsAudio && this.state.runtime.capabilities.asr === 'unavailable';
@@ -282,7 +288,8 @@ export class Controller extends EventEmitter {
       try {
         const observationId = task.action === 'dictation' && this.state.platform === 'mac' ? task.id : undefined;
         this.observationID = observationId;
-        const response = await this.native.call<{ delivery: string; message?: string; name?: string }>('insert', { text: result.text, ...(observationId ? { observationId } : {}) });
+        const transcript = task.original !== result.text && task.original.length <= 2000 ? task.original : undefined;
+        const response = await this.native.call<{ delivery: string; message?: string; name?: string }>('insert', { text: result.text, ...(observationId ? { observationId, transcript } : {}) });
         if (!this.valid(task)) return;
         if (response.name) {
           this.state.destinationName = response.name;
@@ -420,20 +427,34 @@ export class Controller extends EventEmitter {
   private clearLearningNotice() {
     clearTimeout(this.learningDismiss); this.state.learnedTerms = undefined; this.learned = [];
   }
-  private learnCorrections(value: { observationId: string; original: string; text: string }) {
+  private async learnCorrections(value: { observationId: string; original: string; text: string; transcript?: string }) {
     if (!this.observationID || value.observationId !== this.observationID) return;
     this.observationID = undefined;
-    if (typeof value.original !== 'string' || typeof value.text !== 'string') return;
-    const terms = correctedTerms(value.original, value.text).filter(term => !this.state.library.lexicon.some(item => item.term.toLocaleLowerCase() === term.toLocaleLowerCase()));
+    if (typeof value.original !== 'string' || typeof value.text !== 'string' || value.original === value.text || !value.text.trim()) return;
+    const endpoint = this.state.settings.online.text;
+    if (!endpoint.enabled || this.shuttingDown) return;
+    let candidates: string[];
+    try {
+      candidates = await this.backend.extractCorrectionTerms(value.original, value.text, {
+        base_url: endpoint.baseURL, model: endpoint.model.trim(), api_key: this.keys.text || '',
+      }, typeof value.transcript === 'string' && value.transcript ? value.transcript : undefined);
+    } catch { return; }
+    if (this.shuttingDown || !this.state.settings.online.text.enabled) return;
+    const seen = new Set(this.state.library.lexicon.map(item => item.term.toLocaleLowerCase()));
+    const terms = candidates.filter(term => {
+      const key = term.toLocaleLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     if (!terms.length) return;
     const added = terms.map(term => ({ id: randomUUID(), term, hint: '', aliases: [] }));
     const previous = this.state.library.lexicon;
     this.state.library.lexicon = [...previous, ...added]; this.store.library = this.state.library;
     try { this.store.persist(); }
     catch { this.state.library.lexicon = previous; this.notice('词库保存失败，本次纠词未收录。'); return; }
-    this.learned = added; this.state.learnedTerms = terms;
-    clearTimeout(this.learningDismiss);
-    this.learningDismiss = setTimeout(() => { this.clearLearningNotice(); this.changed(); }, 6000);
+    this.learned.push(...added);
+    clearTimeout(this.learningDismiss); this.state.learnedTerms = undefined;
     this.changed();
   }
   undoLearnedTerms() {
@@ -445,5 +466,5 @@ export class Controller extends EventEmitter {
     catch { this.state.library.lexicon = previous; this.notice('撤销未保存，请重试。'); return; }
     this.clearLearningNotice(); this.changed();
   }
-  async shutdown() { this.observationID = undefined; this.clearLearningNotice(); clearTimeout(this.dismiss); clearInterval(this.clock); await this.cancel(); this.native.stop(); await this.backend.stop(); }
+  async shutdown() { this.shuttingDown = true; this.observationID = undefined; this.clearLearningNotice(); clearTimeout(this.dismiss); clearInterval(this.clock); await this.cancel(); this.native.stop(); await this.backend.stop(); }
 }

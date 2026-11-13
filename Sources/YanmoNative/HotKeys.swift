@@ -7,6 +7,7 @@ public final class HotKeys {
     public var onAction: ((InputAction) -> Void)?
     public var onCancel: (() -> Void)?
     public var onCaptureFn: (() -> Void)?
+    public var onReturn: (() -> Void)?
     public var isActive: (() -> Bool)?
     public var capturing = false { didSet { pressed.removeAll(); modifierChord.reset() } }
     private var bindings: [ShortcutBinding] = []
@@ -120,6 +121,10 @@ public final class HotKeys {
                 suppressedKeys.insert(keyCode)
                 onAction?(binding.action)
                 return true
+            }
+            if !capturing, !keyEvent.isARepeat, shortcut.modifiers == 0,
+               keyCode == kVK_Return || keyCode == kVK_ANSI_KeypadEnter {
+                onReturn?()
             }
         }
         if !capturing && type == .keyDown && keyCode == 53 && isActive?() == true { onCancel?(); return true }

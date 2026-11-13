@@ -80,25 +80,28 @@ public struct InputDestination {
         return InputDestination(application: app, element: textInput ? element : nil, selection: range, before: before, after: after, secure: secure)
     }
 
-    /// Same-element check is deliberately independent from recording-time context.
-    public func observedValue() -> String? {
-        guard !secure, !application.isTerminated, let element,
-              NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier,
-              let focused = Self.focusedElement(in: application, timeout: 0.15), CFEqual(element, focused) else { return nil }
-        AXUIElementSetMessagingTimeout(element, 0.15)
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value) == .success,
-              let text = value as? String, text.utf16.count <= 32000 else { return nil }
+    /// Read before Return reaches the app. This lookup does not need a selection.
+    @MainActor
+    static func correctionDraft() -> String? {
+        let timeout: Float = 0.025
+        guard !IsSecureEventInputEnabled(), let app = NSWorkspace.shared.frontmostApplication,
+              let field = focusedElement(in: app, timeout: timeout) else { return nil }
+        AXUIElementSetMessagingTimeout(field, timeout)
+        func attribute(_ name: String) -> CFTypeRef? {
+            var value: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(field, name as CFString, &value) == .success else { return nil }
+            return value
+        }
+        let role = attribute(kAXRoleAttribute) as? String ?? ""
+        guard [kAXTextAreaRole, kAXTextFieldRole, kAXComboBoxRole].contains(role) || attribute("AXEditable") as? Bool == true,
+              role != "AXSecureTextField", attribute(kAXSubroleAttribute) as? String != "AXSecureTextField" else { return nil }
+        if let marker = attribute("AXMarkedTextRange"), CFGetTypeID(marker) == AXValueGetTypeID() {
+            var range = CFRange()
+            if AXValueGetValue(marker as! AXValue, .cfRange, &range), range.length > 0 { return nil }
+        }
+        guard let text = attribute(kAXValueAttribute) as? String, text.utf16.count <= 4000,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier else { return nil }
         return text
-    }
-
-    public func hasMarkedText() -> Bool {
-        guard let element else { return true }
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, "AXMarkedTextRange" as CFString, &value) == .success,
-              let value, CFGetTypeID(value) == AXValueGetTypeID() else { return false }
-        var range = CFRange()
-        return AXValueGetValue(value as! AXValue, .cfRange, &range) && range.length > 0
     }
 
     /// Read only the explicit selection. Never substitute the whole field or an
@@ -182,7 +185,7 @@ public struct InputDestination {
     /// Deliver a normal paste to the application that owns focus now. The
     /// recording-time AX snapshot is context only, never an insertion lock.
     @MainActor
-    public static func pasteAtCurrentFocus(_ text: String, willPaste: ((InputDestination?) -> Void)? = nil) async throws -> String {
+    public static func pasteAtCurrentFocus(_ text: String, didPostPaste: (() -> Void)? = nil) async throws -> String {
         guard AXIsProcessTrusted() else { throw EngineError(message: "写入其他应用需要辅助功能权限。可先在文稿中复制文字。") }
         guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: true),
               let up = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: false) else {
@@ -211,9 +214,9 @@ public struct InputDestination {
         guard let application = NSWorkspace.shared.frontmostApplication else {
             throw EngineError(message: "没有前台应用，正文已保留，请手动复制。")
         }
-        willPaste?(Self.capture(readContext: false, in: application))
         down.flags = .maskCommand; up.flags = .maskCommand
         down.postToPid(application.processIdentifier); up.postToPid(application.processIdentifier)
+        didPostPaste?()
         try await Task.sleep(nanoseconds: 650_000_000)
         return application.localizedName ?? "当前应用"
     }

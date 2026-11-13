@@ -1,6 +1,6 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, safeStorage, screen, shell, Tray } from 'electron';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawn, ChildProcess } from 'node:child_process';
@@ -8,6 +8,7 @@ import { createInterface } from 'node:readline';
 import { Controller } from './controller';
 import { NativeBridge, BackendClient } from './processes';
 import { LibraryStore } from './store';
+import { findUpdate, installOnExit, stageUpdate, UpdateError } from './updates';
 import { probeWindows } from './precheck';
 import { checkWindowsModels, prepareWindowsRuntime, RuntimePaths, runtimeCurrent, runtimePaths } from './windows-runtime';
 import { ACTIONS, Action, AppState, busy, Capability, CAPABILITIES, cocoaNow, defaultSettings, migrateSettings, Page, Settings, WINDOWS_MODELS } from './shared';
@@ -105,6 +106,7 @@ function updateTray() {
     { label: '取消', enabled: busy(state.stage), click: () => void controller.cancel() },
     { type: 'separator' }, { label: '打开言墨', click: reveal },
     { label: '设置…', click: () => { controller.setPage('settings'); reveal(); } },
+    ...(state.update ? [{ label: '检查更新…', click: showUpdates }] : []),
     { type: 'separator' }, { label: text.enabled ? '文字处理使用 API' : '文字处理 API 待配置', enabled: false }, { label: '退出言墨', click: () => app.quit() },
   ]);
 }
@@ -114,6 +116,47 @@ async function importAudio() {
   if (!result.canceled && result.filePaths[0]) await controller.importAudio(result.filePaths[0]);
 }
 const appBundle = () => resolve(process.execPath, '../../..');
+function showUpdates() {
+  controller.setPage('settings'); reveal();
+  void checkUpdates();
+}
+async function checkUpdates() {
+  const status = controller.state.update;
+  if (!status || status.busy || quitting) return;
+  const report = (message: string) => { status.message = message; controller.changed(); };
+  status.busy = true;
+  report('正在检查更新…');
+  let staged: Awaited<ReturnType<typeof stageUpdate>> | undefined;
+  let scheduled = false;
+  try {
+    const update = await findUpdate(status.version, fetch);
+    if (!update) { report('当前已是最新版本。'); return; }
+    const confirm = await dialog.showMessageBox(mainWindow, {
+      type: 'info', title: '言墨更新', message: '言墨 ' + update.version + ' 可用',
+      detail: '下载约 ' + Math.ceil(update.size / 1024 ** 2) + ' MB。下载完成后可立即重启安装。macOS 可能要求重新授予辅助功能或钥匙串访问权限。',
+      buttons: ['下载更新', '稍后'], defaultId: 0, cancelId: 1,
+    });
+    if (confirm.response !== 0) { report('可更新至 ' + update.version + '。'); return; }
+    staged = await stageUpdate(appBundle(), join(root, 'install-mac-update.sh'), update, fetch, percent => {
+      report(percent === 100 ? '正在验证安装包…' : '正在下载更新 · ' + percent + '%');
+    });
+    const install = await dialog.showMessageBox(mainWindow, {
+      type: 'info', title: '言墨更新', message: '已下载言墨 ' + update.version,
+      buttons: ['安装并重启', '稍后'], defaultId: 0, cancelId: 1,
+    });
+    if (install.response !== 0) { report('已取消安装。'); return; }
+    if (busy(controller.state.stage) || controller.state.checking || preparation) throw new UpdateError('请等当前任务完成，再安装更新。');
+    await installOnExit(appBundle(), staged);
+    scheduled = true;
+    app.quit();
+  } catch (error) {
+    report(error instanceof UpdateError ? error.message : '更新未完成，请检查网络和应用目录后重试。');
+  } finally {
+    if (staged && !scheduled) await rm(staged.staging, { recursive: true, force: true }).catch(() => {});
+    status.busy = false;
+    controller.changed();
+  }
+}
 async function prepareModels() {
   if (busy(controller.state.stage) || controller.state.checking || preparation) return;
   // Windows downloads its models with the PyTorch runtime's Python, so that runtime must exist first.
@@ -179,7 +222,7 @@ async function saveOnline(value: any) {
   controller.notice(value.enabled ? CAPABILITIES[capability] + '将使用 API 模型 ' + value.model.trim() + '。' : (capability === 'asr' ? '语音识别使用本机模型。' : '文字处理 API 未启用。'));
 }
 async function invoke(action: string, value: any) {
-  if (!controller) throw new Error('言墨正在启动，请稍候。');
+  if (!controller || quitting) throw new Error('请等待言墨启动或退出完成。');
   switch (action) {
     case 'page': controller.setPage(value as Page); break;
     case 'clearNotice': controller.notice(''); break;
@@ -188,6 +231,7 @@ async function invoke(action: string, value: any) {
     case 'cancel': await controller.cancel(); break;
     case 'import': await importAudio(); break;
     case 'check': await controller.checkModels(); break;
+    case 'checkUpdates': await checkUpdates(); break;
     case 'prepareModels': await prepareModels(); break;
     case 'prepareRuntime': await prepareRuntime(); break;
     case 'permissions': {
@@ -265,6 +309,7 @@ app.whenReady().then(async () => {
   runtimePython = existsSync(python) ? python : developmentPython;
   const backend = new BackendClient(runtimePython, root, 3600000, join(dataDirectory, "diagnostics"));
   controller = new Controller(store, native, backend);
+  if (app.isPackaged && !windows && process.arch === 'arm64') controller.state.update = { version: app.getVersion(), busy: false, message: '' };
   if (windows) {
     // Multi-GB runtime stays in Local AppData, not the roaming profile.
     const paths = windowsRuntime = runtimePaths(join(process.env.LOCALAPPDATA || app.getPath('appData'), 'Yanmo'), root);
@@ -308,7 +353,7 @@ app.whenReady().then(async () => {
     } },
   ] : [];
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { label: '言墨', submenu: [{ role: 'about' }, { label: '设置…', accelerator: 'CmdOrCtrl+,', click: () => { controller.setPage('settings'); reveal(); } }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] },
+    { label: '言墨', submenu: [{ role: 'about' }, ...(controller.state.update ? [{ label: '检查更新…', click: showUpdates }] : []), { label: '设置…', accelerator: 'CmdOrCtrl+,', click: () => { controller.setPage('settings'); reveal(); } }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] },
     { label: '文件', submenu: [{ label: '导入音频…', accelerator: 'CmdOrCtrl+O', click: () => void importAudio() }, { role: 'close' }, ...diagnostics] },
     { label: '编辑', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
     { label: '窗口', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { label: '打开言墨', click: reveal }] },

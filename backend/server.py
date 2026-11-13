@@ -32,6 +32,14 @@ class OnlineEndpoint(BaseModel):
     api_key: str = Field(default="", max_length=1000)
 
 
+class CorrectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    original: str = Field(min_length=1, max_length=2000)
+    corrected: str = Field(min_length=1, max_length=4000)
+    transcript: str | None = Field(default=None, max_length=2000)
+    online: OnlineEndpoint
+
+
 class TaskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     task_id: str = Field(pattern=r"^[a-zA-Z0-9-]{1,64}$")
@@ -98,6 +106,16 @@ def create_app(engine=None, token=None, announce=None):
             return await serial({"command": "warmup", **allowed})
         except Exception:
             raise HTTPException(status_code=503, detail="本地模型预加载未完成，正式处理时会重试。") from None
+
+    @app.post("/v1/corrections/terms")
+    async def correction_terms(request: CorrectionRequest):
+        # This is an online text request with no local model state. Keep it off
+        # the inference queue so a slow extraction cannot delay the next dictation.
+        try:
+            terms = await asyncio.to_thread(engine.extract_correction_terms, request.original, request.corrected, request.online.model_dump(), request.transcript)
+        except ValueError:
+            raise HTTPException(status_code=502, detail="词库提取未完成。") from None
+        return {"terms": terms}
 
     @app.post("/v1/tasks")
     async def task(request: str = Form(...), audio: UploadFile | None = File(default=None)):

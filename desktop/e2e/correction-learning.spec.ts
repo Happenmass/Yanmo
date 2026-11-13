@@ -25,8 +25,10 @@ test('入库提醒按设计显示，不聚焦，撤销移除本次词条', async
     const page = await application.firstWindow();
     await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible();
     await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).modelsChecked)).toBe(true);
-    await application.evaluate(() => {
+    await application.evaluate(async () => {
       const controller = (globalThis as any).learningController;
+      controller.state.settings.online.text = { enabled: true, baseURL: 'http://127.0.0.1:9/v1', model: 'fixture' };
+      controller.backend.extractCorrectionTerms = async () => ['沈砚'];
       controller.observationID = 'ui-fixture';
       controller.native.emit('correction', { observationId: 'ui-fixture', original: '明天联系沈言确认方案。', text: '明天联系沈砚确认方案。' });
     });

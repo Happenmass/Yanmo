@@ -18,6 +18,11 @@ class Native extends EventEmitter {
 class Backend {
   mode = 'failure'; done?: () => void;
   requests: any[] = [];
+  correctionRequests: { original: string; corrected: string; model: string }[] = [];
+  async extractCorrectionTerms(original: string, corrected: string, online: { model: string }) {
+    this.correctionRequests.push({ original, corrected, model: online.model });
+    return ['沈砚', '沈砚', '已有词'];
+  }
   setActive(_value: boolean) {} async stop() {} async status() { return { metal: true, models: { asr: { ready: true }, sensevoice: { ready: true } } }; } async warmup() {}
   async run(request: any, _audio: unknown, emit: (event: TaskEvent) => void) {
     this.requests.push(request);
@@ -296,12 +301,15 @@ test('限时纠词事件入库、去重并可撤销；不影响已有词', async
     value.native.emit('correction', { observationId: 'stale', original: '联系沈言。', text: '联系沈砚。' });
     assert.equal(value.controller.state.library.lexicon.length, 1);
     value.native.emit('correction', { observationId: id, original: '联系沈言。', text: '联系沈砚。' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(value.backend.correctionRequests, [{ original: '联系沈言。', corrected: '联系沈砚。', model: 'fixture' }]);
     assert.deepEqual(value.controller.state.learnedTerms, ['沈砚']);
     assert.equal(value.controller.state.library.lexicon.length, 2);
     assert.deepEqual(value.controller.state.library.lexicon[1].aliases, []);
     const disk = new LibraryStore(value.directory, defaultSettings());
     assert.equal(disk.library.lexicon.length, 2);
     value.native.emit('correction', { observationId: id, original: '联系沈言。', text: '联系沈砚。' });
+    assert.equal(value.backend.correctionRequests.length, 1);
     assert.equal(value.controller.state.library.lexicon.length, 2);
     value.controller.undoLearnedTerms();
     assert.equal(value.controller.state.learnedTerms, undefined);
@@ -318,6 +326,7 @@ test('开始新录音会使旧纠词事件失效', async () => {
     await value.controller.perform('dictation', {});
     value.native.emit('correction', { observationId: id, original: '联系沈言。', text: '联系沈砚。' });
     assert.equal(value.controller.state.library.lexicon.length, 0);
+    assert.equal(value.backend.correctionRequests.length, 0);
     assert.ok(value.native.calls.includes('correction.stop'));
   } finally { await value.close(); }
 });
