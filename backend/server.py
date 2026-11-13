@@ -21,7 +21,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from typing import Literal
 
-from engine.worker import DEFAULT_ASR, DEFAULT_LLM, DEFAULT_SENSEVOICE, Engine
+from engine.worker import DEFAULT_ASR, DEFAULT_SENSEVOICE, Engine
 from backend.pipeline import run_pipeline
 
 
@@ -79,8 +79,8 @@ def create_app(engine=None, token=None, announce=None):
         return await asyncio.get_running_loop().run_in_executor(executor, invoke)
 
     @app.get("/v1/status")
-    async def status(asr_model: str = DEFAULT_ASR, llm_model: str = DEFAULT_LLM, sensevoice_model: str = DEFAULT_SENSEVOICE, model_source: Literal["modelscope", "huggingface"] = "modelscope"):
-        result = await serial({"command": "check", "asr_model": asr_model, "llm_model": llm_model, "sensevoice_model": sensevoice_model, "model_source": model_source})
+    async def status(asr_model: str = DEFAULT_ASR, sensevoice_model: str = DEFAULT_SENSEVOICE, model_source: Literal["modelscope", "huggingface"] = "modelscope"):
+        result = await serial({"command": "check", "asr_model": asr_model, "sensevoice_model": sensevoice_model, "model_source": model_source})
         import platform
         available = False
         try:
@@ -88,12 +88,12 @@ def create_app(engine=None, token=None, announce=None):
             available = mx.metal.is_available()
         except ImportError:
             pass
-        return {"protocol": 1, "provider": "mlx", "offline": True, "metal": available,
+        return {"protocol": 1, "provider": "mlx", "metal": available,
                 "architecture": platform.machine(), "capabilities": ["transcribe", "polish", "translate"], **result}
 
     @app.post("/v1/warmup")
     async def warmup(request: dict):
-        allowed = {key: request[key] for key in ("asr_model", "llm_model", "include_llm", "model_source") if key in request}
+        allowed = {key: request[key] for key in ("asr_model", "model_source") if key in request}
         try:
             return await serial({"command": "warmup", **allowed})
         except Exception:
@@ -108,8 +108,10 @@ def create_app(engine=None, token=None, announce=None):
         task_id = payload["task_id"]
         if tasks:
             raise HTTPException(status_code=409, detail="请等待当前推理任务结束。")
-        if set(payload["models"]) - {"asr_model", "llm_model", "sensevoice_model", "model_source"}:
+        if set(payload["models"]) - {"asr_model", "sensevoice_model", "model_source"}:
             raise HTTPException(status_code=422, detail="模型配置无效。")
+        if "text" not in payload["online"]:
+            raise HTTPException(status_code=422, detail="请先在设置中配置并启用文字处理 API。")
         context_keys = {"application", "category", "key_terms", "term_notes", "lexicon", "before", "after", "user_text"}
         if set(payload["context"]) - context_keys:
             raise HTTPException(status_code=422, detail="上下文参数无效。")

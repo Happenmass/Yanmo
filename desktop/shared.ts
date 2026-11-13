@@ -10,7 +10,7 @@ export interface Library { manuscripts: Manuscript[]; lexicon: Term[] }
 export type Capability = 'asr' | 'text';
 export interface OnlineEndpoint { enabled: boolean; baseURL: string; model: string }
 export interface Settings {
-  asrModel: string; senseVoiceModel: string; llmModel: string; modelSource: 'modelscope' | 'huggingface'; polishEnabled: boolean; style: string; readContext: boolean;
+  asrModel: string; senseVoiceModel: string; modelSource: 'modelscope' | 'huggingface'; polishEnabled: boolean; style: string; readContext: boolean;
   keepHistory: boolean; microphone: string; showDock: boolean; retention: number;
   // False only for a fresh install until the first-run guide is finished or skipped.
   onboarded: boolean;
@@ -24,15 +24,15 @@ export interface NativeStatus { accessibility: boolean; eventTap: boolean; micro
 export interface Translation { source: string; result: string; language: Language; loading: boolean; error: string }
 // Pre-check result of this machine's local inference environment, before models are considered.
 export interface LocalEnvironment { environment: 'ready' | 'repair' | 'unsupported'; issues: string[]; gpu?: string }
-export type RuntimeStatus = 'checking' | 'local-ready' | 'models-pending' | 'local-repair' | 'recommend-online' | 'api-pending' | 'online-ready';
-export interface RuntimeState { status: RuntimeStatus; issues: string[]; gpu?: string; capabilities: Record<Capability, 'local' | 'online' | 'unavailable'> }
+export type RuntimeStatus = 'checking' | 'models-pending' | 'local-repair' | 'recommend-online' | 'api-pending' | 'online-ready';
+export interface RuntimeState { status: RuntimeStatus; issues: string[]; gpu?: string; capabilities: { asr: 'local' | 'online' | 'unavailable'; text: 'online' | 'unavailable' } }
 export interface AppState {
   learnedTerms?: string[];
   page: Page; stage: Stage; action: Action; settings: Settings; library: Library;
   selectedID: string | null; draft: string; original: string; notice: string;
   asrResults: ASRResult[];
   seconds: number; level: number; destinationName: string; checking: boolean; modelsChecked: boolean; overlayVisible: boolean;
-  models: { asr: boolean; sensevoice: boolean; llm: boolean; metal: boolean }; native: NativeStatus;
+  models: { asr: boolean; sensevoice: boolean; metal: boolean }; native: NativeStatus;
   translation: Translation; captureAction: Action | null; shortcutNotice: string; launchAtLogin: boolean;
   onlineKeys: Record<Capability, boolean>; runtime: RuntimeState; platform: 'mac' | 'windows';
 }
@@ -46,7 +46,7 @@ export const FN_MODIFIER = 1 << 23;
 export const MODIFIER_NAMES: Record<number, string> = { 63: 'FN', 59: '左 Control', 62: '右 Control', 56: '左 Shift', 60: '右 Shift', 58: '左 Option', 61: '右 Option', 55: '左 Command', 54: '右 Command' };
 const MODIFIER_BITS: Record<number, number> = { 59: 4096, 62: 4096, 56: 512, 60: 512, 58: 2048, 61: 2048, 55: 256, 54: 256 };
 export const defaultSettings = (): Settings => ({
-  asrModel: 'mlx-community/Qwen3-ASR-1.7B-8bit', senseVoiceModel: 'mlx-community/SenseVoiceSmall', llmModel: 'mlx-community/Qwen3-4B-Instruct-2507-4bit', modelSource: 'modelscope',
+  asrModel: 'mlx-community/Qwen3-ASR-1.7B-8bit', senseVoiceModel: 'mlx-community/SenseVoiceSmall', modelSource: 'modelscope',
   polishEnabled: true, style: '自然整理', readContext: false, keepHistory: true, microphone: '', showDock: true, retention: 0, onboarded: true,
   voiceTarget: 'en', selectionTarget: 'en', shortcuts: {
     dictation: [{ keyCode: 63, modifiers: 0, keyLabel: 'FN' }],
@@ -55,9 +55,8 @@ export const defaultSettings = (): Settings => ({
   },
   online: { asr: { enabled: false, baseURL: '', model: '' }, text: { enabled: false, baseURL: '', model: '' } },
 });
-// transformers-format defaults for the Windows PyTorch runtime, sized for an 8 GB GPU (spec §8.2).
-// The text model is the Mac's Qwen3-4B-Instruct-2507, pre-quantized to 4-bit for bitsandbytes.
-export const WINDOWS_MODELS = { asrModel: 'Qwen/Qwen3-ASR-0.6B-hf', llmModel: 'unsloth/Qwen3-4B-Instruct-2507-bnb-4bit' } as const;
+// transformers-format ASR for the Windows PyTorch runtime.
+export const WINDOWS_MODELS = { asrModel: 'Qwen/Qwen3-ASR-0.6B-hf' } as const;
 export const CAPABILITIES: Record<Capability, string> = { asr: '语音识别', text: '文字整理与翻译' };
 /** https only; plain http is allowed for a server on this Mac. Credentials or query strings in the URL are refused. */
 export function checkOnlineURL(value: string) {
@@ -85,7 +84,7 @@ export function shortcutLabel(key: Shortcut) {
 }
 export function validateSettings(settings: Settings) {
   if (!settings || typeof settings !== 'object') throw new Error('设置无效。');
-  for (const name of ['asrModel', 'senseVoiceModel', 'llmModel', 'microphone'] as const) if (typeof settings[name] !== 'string' || settings[name].length > 2000) throw new Error('模型或设备配置无效。');
+  for (const name of ['asrModel', 'senseVoiceModel', 'microphone'] as const) if (typeof settings[name] !== 'string' || settings[name].length > 2000) throw new Error('模型或设备配置无效。');
   for (const name of ['polishEnabled', 'readContext', 'keepHistory', 'showDock', 'onboarded'] as const) if (typeof settings[name] !== 'boolean') throw new Error('设置值无效。');
   if (!STYLES.includes(settings.style) || ![0, 1, 7, 30, 365].includes(settings.retention)) throw new Error('整理风格或保留时间无效。');
   if (!['modelscope', 'huggingface'].includes(settings.modelSource)) throw new Error('模型下载源无效。');
@@ -117,7 +116,7 @@ export function validateSettings(settings: Settings) {
 }
 export function migrateSettings(legacy: Record<string, unknown>): Settings {
   const settings = defaultSettings();
-  const map = { asr: 'asrModel', llm: 'llmModel', polish: 'polishEnabled', context: 'readContext', history: 'keepHistory', microphone: 'microphone', showDock: 'showDock', retention: 'retention', style: 'style', voiceTarget: 'voiceTarget', selectionTarget: 'selectionTarget' } as const;
+  const map = { asr: 'asrModel', polish: 'polishEnabled', context: 'readContext', history: 'keepHistory', microphone: 'microphone', showDock: 'showDock', retention: 'retention', style: 'style', voiceTarget: 'voiceTarget', selectionTarget: 'selectionTarget' } as const;
   for (const [old, name] of Object.entries(map)) if (legacy[old] !== undefined) (settings as unknown as Record<string, unknown>)[name] = legacy[old];
   const used = new Set<string>();
   for (const [action, key] of Object.entries({ dictation: 'shortcuts', voiceTranslation: 'voiceTranslationShortcuts', selectionTranslation: 'selectionTranslationShortcuts' }) as [Action, string][]) {

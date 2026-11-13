@@ -38,7 +38,7 @@ def main():
     ]
     report = {'date': datetime.now(timezone.utc).isoformat(), 'method': 'Synthetic transcripts with real offline Qwen3-4B; mock only ASR for text cases. Optional synthetic audio uses actual Qwen3-ASR + SenseVoice. Assert quality and exact model-body delivery offline; no runtime content rules.',
               'source_sha256': {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in ('engine/prompt.txt', 'engine/fusion.py', 'engine/worker.py', 'backend/pipeline.py')}, 'cases': []}
-    engine, raw = Engine(), []
+    engine, raw = Engine(allow_local_text=True), []
     generate = engine.generate_text
 
     def trace(*values, **options):

@@ -13,7 +13,7 @@ class PipelineTests(unittest.TestCase):
     def testDictationUsesPromptForLanguageAndDeliversModelOutputAsIs(self):
         original = "今日はいい天気ですね。散歩に行きましょう。"
         translated = "今天天气真好。我们去散步吧。"
-        engine, events = Engine(), []
+        engine, events = Engine(allow_local_text=True), []
         request = self.request("dictation")
         request["target_language"] = "zh-Hans"
         request["context"] = {"before": "这是一段中文上下文。"}
@@ -157,3 +157,14 @@ class PipelineTests(unittest.TestCase):
         run_pipeline(Engine(), request, None, Event(), events.append)
         self.assertEqual(requests[0]["asr_results"], request["asr_results"])
         self.assertEqual(requests[0]["user_text"], "预算102元")
+
+    def testNaturalPolishDoesNotInjectOldEditingRules(self):
+        engine = Engine(allow_local_text=True)
+        for style, instruction in (("自然整理", ""), ("即时消息", "整理为即时消息。"), ("文档段落", "整理为文档段落。")):
+            with self.subTest(style=style), patch.object(engine, "load_llm", return_value=Path("fixture")), patch.object(engine, "generate_text", return_value="整理后的正文") as generate:
+                request = self.request("polish")
+                request["style"] = style
+                events = []
+                run_pipeline(engine, request, None, Event(), events.append)
+                self.assertEqual(events[-1]["event"], "result")
+                self.assertEqual(generate.call_args.args[1]["INSTRUCTION"], instruction)

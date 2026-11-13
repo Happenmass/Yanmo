@@ -51,10 +51,10 @@ def transcribe(config: dict, audio: Path, language=None) -> str:
 def generate(config: dict, system: str, payload: dict, max_tokens: int):
     messages = [{"role": "system", "content": system}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
     body = {"model": config["model"], "messages": messages, "temperature": 0, "max_tokens": max_tokens}
-    # DeepSeek defaults to thinking; short transcript budgets can run out before content.
     # Keep vendor-specific parameters out of other OpenAI-compatible endpoints.
     if urlsplit(config["base_url"]).hostname == "api.deepseek.com":
-        body["thinking"] = {"type": "disabled"}
+        body["thinking"] = {"type": "enabled"}
+        body["reasoning_effort"] = "low"
     result = _post(config, "/chat/completions", json=body)
     try:
         choice = result["choices"][0]
@@ -62,8 +62,13 @@ def generate(config: dict, system: str, payload: dict, max_tokens: int):
         reason = choice.get("finish_reason")
         usage = result.get("usage") or {}
         details = usage.get("completion_tokens_details") or {}
-        token_counts = {key: value for key, value in {"completion_tokens": usage.get("completion_tokens"), "reasoning_tokens": details.get("reasoning_tokens")}.items() if isinstance(value, int)}
-        record("api_generation", thinking_disabled=body.get("thinking") == {"type": "disabled"}, **token_counts, finish_reason=reason if reason in ("stop", "length", "content_filter", "tool_calls", "insufficient_system_resource") else "other", output_chars=len(content), max_tokens=max_tokens)
+        token_counts = {key: value for key, value in {
+            "completion_tokens": usage.get("completion_tokens"),
+            "reasoning_tokens": details.get("reasoning_tokens"),
+            "prompt_cache_hit_tokens": usage.get("prompt_cache_hit_tokens"),
+            "prompt_cache_miss_tokens": usage.get("prompt_cache_miss_tokens"),
+        }.items() if isinstance(value, int)}
+        record("api_generation", thinking_enabled=body.get("thinking") == {"type": "enabled"}, reasoning_effort=body.get("reasoning_effort"), **token_counts, finish_reason=reason if reason in ("stop", "length", "content_filter", "tool_calls", "insufficient_system_resource") else "other", output_chars=len(content), max_tokens=max_tokens)
         return content, reason
     except (KeyError, IndexError, TypeError):
         record("api_error", error_type="InvalidResponseShape")

@@ -66,7 +66,7 @@ test('模型检查用运行库 Python，在应用资源目录运行且不检查 
   const paths = runtimePaths('C:\\Users\\u\\AppData\\Local\\Yanmo', 'C:\\r');
   let seen: { file: string; args: string[]; cwd?: string } | undefined;
   const stream: Stream = async (file, args, onLine, cwd) => { seen = { file, args, cwd }; onLine('noise'); onLine('{"event":"checked","model":"asr-id","ready":true}'); onLine('{"event":"checked","model":"llm-id","ready":false}'); return true; };
-  assert.deepEqual(await checkWindowsModels(paths, 'C:\\r', { modelSource: 'modelscope', asrModel: 'asr-id', llmModel: 'llm-id' }, stream), { asr: true, llm: false });
+  assert.deepEqual(await checkWindowsModels(paths, 'C:\\r', { modelSource: 'modelscope', asrModel: 'asr-id' }, stream), true);
   assert.equal(seen!.file, paths.python); assert.equal(seen!.cwd, 'C:\\r');
-  assert.ok(seen!.args.includes('--check') && seen!.args.includes('--without-sensevoice'));
+  assert.deepEqual(seen!.args, ['-B', '-m', 'backend.prepare_models', '--check', '--without-sensevoice', '--source', 'modelscope', '--asr', 'asr-id']);
 });

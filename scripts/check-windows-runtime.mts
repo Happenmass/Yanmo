@@ -7,5 +7,5 @@ import { defaultSettings } from '../desktop/shared.ts';
 
 const paths = runtimePaths(join(process.env.LOCALAPPDATA!, 'Yanmo'), resolve(import.meta.dirname, '..'));
 const environment = await probeWindows({ python: paths.python, current: runtimeCurrent(paths) });
-const runtime = decideRuntime(defaultSettings().online, { asr: false, text: false }, environment);
+const runtime = decideRuntime(defaultSettings().online, false, environment);
 console.log(JSON.stringify({ checkedAt: new Date().toISOString(), environment, status: runtime.status }, null, 2));

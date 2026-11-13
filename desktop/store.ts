@@ -25,7 +25,8 @@ export class LibraryStore {
     try {
       const settingsPath = join(directory, 'settings.json');
       if (existsSync(settingsPath)) {
-        this.settings = { ...defaults, ...JSON.parse(readFileSync(settingsPath, 'utf8')) };
+        const { llmModel: _legacyLocalModel, ...saved } = JSON.parse(readFileSync(settingsPath, 'utf8'));
+        this.settings = { ...defaults, ...saved };
         validateSettings(this.settings);
       } else if (!legacyLibrary || !existsSync(legacyLibrary)) this.settings = { ...defaults, onboarded: false };
       const path = join(directory, 'library.json');

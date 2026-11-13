@@ -115,11 +115,11 @@ export class BackendClient {
     finally { this.requests--; this.scheduleIdle(); }
   }
   async status(settings: Settings) {
-    const params = new URLSearchParams({ asr_model: settings.asrModel, llm_model: settings.llmModel, sensevoice_model: settings.senseVoiceModel, model_source: settings.modelSource });
+    const params = new URLSearchParams({ asr_model: settings.asrModel, sensevoice_model: settings.senseVoiceModel, model_source: settings.modelSource });
     return (await this.request('/v1/status?' + params)).json();
   }
-  async warmup(settings: Settings, includeLLM: boolean) {
-    await this.request('/v1/warmup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ asr_model: settings.asrModel, llm_model: settings.llmModel, sensevoice_model: settings.senseVoiceModel, model_source: settings.modelSource, include_llm: includeLLM }) });
+  async warmup(settings: Settings) {
+    await this.request('/v1/warmup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ asr_model: settings.asrModel, model_source: settings.modelSource }) });
   }
   async run(payload: Record<string, unknown>, audio: string | undefined, onEvent: (event: TaskEvent) => void) {
     const body = new FormData(); body.set('request', JSON.stringify(payload));

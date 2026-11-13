@@ -33,18 +33,20 @@ class OnlineProviderTests(unittest.TestCase):
         self.assertEqual(kwargs["json"]["model"], "remote-model")
         self.assertNotIn("follow_redirects", kwargs)
 
-    def testDeepSeekDisablesDefaultThinkingBeforeShortTranscriptBudget(self):
+    def testDeepSeekEnablesLowThinkingWithFixed4096Budget(self):
         calls = []
         def post(url, **kwargs):
             body = kwargs["json"]
             calls.append(body)
-            if body.get("thinking") != {"type": "disabled"}:
-                return Response(200, {"choices": [{"message": {"content": "", "reasoning_content": "synthetic reasoning"}, "finish_reason": "length"}]})
-            return Response(200, {"choices": [{"message": {"content": "合成测试。"}, "finish_reason": "stop"}]})
+            return Response(200, {"choices": [{"message": {"content": "合成测试。", "reasoning_content": "synthetic reasoning"}, "finish_reason": "stop"}]})
         config = {**CONFIG, "base_url": "https://api.deepseek.com/v1", "model": "deepseek-flash"}
         with patch.object(online_provider.httpx, "post", post):
-            self.assertEqual(Engine().generate_text("system", {}, 19, online=config), "合成测试。")
-        self.assertEqual(calls[0]["max_tokens"], 512)
+            for length in (19, 5000):
+                self.assertEqual(Engine().generate_text("system", {}, length, online=config), "合成测试。")
+        for body in calls:
+            self.assertEqual(body["thinking"], {"type": "enabled"})
+            self.assertEqual(body["reasoning_effort"], "low")
+            self.assertEqual(body["max_tokens"], 4096)
 
     def testTruncatedDeepSeekOutputStillFailsInsteadOfBeingInserted(self):
         response = Response(200, {"choices": [{"message": {"content": "不完整的正文"}, "finish_reason": "length"}]})
@@ -61,6 +63,18 @@ class OnlineProviderTests(unittest.TestCase):
         with patch.object(online_provider.httpx, "post", post):
             online_provider.generate(CONFIG, "s", {}, 512)
         self.assertNotIn("thinking", calls[0])
+        self.assertNotIn("reasoning_effort", calls[0])
+
+    def testCacheUsageReachesContentFreeDiagnostics(self):
+        response = Response(200, {"choices": [{"message": {"content": "unchanged"}, "finish_reason": "stop"}],
+                                  "usage": {"completion_tokens": 7, "prompt_cache_hit_tokens": 128, "prompt_cache_miss_tokens": 32}})
+        with patch.object(online_provider.httpx, "post", return_value=response), patch.object(online_provider, "record") as record:
+            self.assertEqual(online_provider.generate(CONFIG, "private prompt", {"private": "source"}, 512), ("unchanged", "stop"))
+        generation = [call for call in record.call_args_list if call.args == ("api_generation",)][0].kwargs
+        self.assertEqual(generation["prompt_cache_hit_tokens"], 128)
+        self.assertEqual(generation["prompt_cache_miss_tokens"], 32)
+        self.assertNotIn("private", str(generation))
+        self.assertNotIn(CONFIG["api_key"], str(generation))
 
     def testErrorsAreReadableAndNeverEchoTheKey(self):
         for status, body in [(401, {}), (404, {}), (429, {}), (500, {}), (302, {}), (200, {"unexpected": True})]:
@@ -79,7 +93,7 @@ class OnlineProviderTests(unittest.TestCase):
         class Local:
             def __init__(self): self.calls = []
             def load_asr(self, path): self.calls.append("load_asr")
-            def transcribe(self, audio, language): self.calls.append("transcribe"); return "本地"
+            def transcribe(self, audio, language, context): self.calls.append("transcribe"); return {"text": "本地识别"}
             def load_llm(self, path): self.calls.append("load_llm")
             def generate(self, system, payload, tokens): self.calls.append("generate"); return "本地", "stop"
             def unload(self): pass
@@ -91,11 +105,15 @@ class OnlineProviderTests(unittest.TestCase):
             audio = Path(directory, "a.wav"); audio.write_bytes(b"RIFF")
             asr_only = {"asr": CONFIG}
             self.assertEqual(engine.handle({"command": "transcribe", "audio": str(audio), "online": asr_only})["text"], "在线识别")
-            self.assertEqual(engine.handle({"command": "translate", "text": "你好", "target_language": "en", "online": asr_only})["text"], "本地")
-            self.assertEqual(local.calls, ["load_llm", "generate"])
+            with self.assertRaisesRegex(ValueError, "文字处理 API"):
+                engine.handle({"command": "translate", "text": "你好", "target_language": "en", "online": asr_only})
+            with self.assertRaisesRegex(ValueError, "文字处理 API"):
+                engine.handle({"command": "polish", "text": "你好"})
+            self.assertEqual(local.calls, [])
+            self.assertEqual(engine.handle({"command": "transcribe", "audio": str(audio)})["text"], "本地识别")
             result = engine.handle({"command": "translate", "text": "你好", "target_language": "en", "online": {"text": CONFIG}})
             self.assertEqual((result["text"], result["engine"]), ("Online text", "remote-model"))
-            self.assertEqual(local.calls, ["load_llm", "generate"])
+            self.assertEqual(local.calls, ["load_asr", "transcribe"])
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ CASES = [
     ('英文混排', '请帮我 review 这个 pull request但是先不要 merge', ['review', 'pull request', '不要', 'merge'], {}),
     ('小数与编号', '版本 v2.3.1 的问题是延迟超过1.5秒不是15秒问题编号是1234', ['v2.3.1', '1.5秒', '不是15秒', '1234'], {}),
 ]
-engine = Engine()
+engine = Engine(allow_local_text=True)
 rows = []
 for name, body, required, extra in CASES:
     started = time.monotonic()

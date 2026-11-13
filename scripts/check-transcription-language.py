@@ -43,8 +43,8 @@ def main():
         {"id": "voice_translation_en_to_ja", "text": "The meeting starts tomorrow at 3 PM.", "language": "English", "target": "ja", "contains": ["会議", "3"], "script": KANA},
         {"id": "selection_translation_ja_to_zh", "text": JA, "target": "zh-Hans", "selection": True, "contains": ["天气", "散步"], "forbid": KANA},
     ]
-    report = {"date": datetime.now(timezone.utc).isoformat(), "method": "Synthetic source texts, actual cached offline Qwen3-4B; evaluate language preservation and exact model-body delivery offline. Optional audio uses the full pipeline with synthetic Japanese speech.", "prompt_sha256": hashlib.sha256((ROOT / "engine/prompt.txt").read_bytes()).hexdigest(), "worker_sha256": hashlib.sha256((ROOT / "engine/worker.py").read_bytes()).hexdigest(), "cases": []}
-    engine, raw = Engine(), {}
+    report = {"date": datetime.now(timezone.utc).isoformat(), "method": "Synthetic source texts, actual cached offline Qwen3-4B; evaluate language preservation and exact model-body delivery offline. Optional audio uses the full pipeline with synthetic Japanese speech.", "prompt_sha256": hashlib.sha256((ROOT / "engine/prompt.txt").read_bytes()).hexdigest(), "polish_prompt_sha256": hashlib.sha256((ROOT / "engine/polish.txt").read_bytes()).hexdigest(), "worker_sha256": hashlib.sha256((ROOT / "engine/worker.py").read_bytes()).hexdigest(), "cases": []}
+    engine, raw = Engine(allow_local_text=True), {}
     generate = engine.generate_text
 
     def trace(*values, **options):
@@ -61,7 +61,7 @@ def main():
 
     try:
         for case in cases:
-            request = {"text": case["text"], "before": case.get("before", ""), "task": case.get("task", "polish"), "instruction": "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。"}
+            request = {"text": case["text"], "before": case.get("before", ""), "task": case.get("task", "polish"), "instruction": ""}
             if not case.get("selection"):
                 request["asr_results"] = [{"transcript": case.get("history", case["text"]), **({"language": case["language"], "language_source": "detected"} if case.get("language") else {})}]
             if case.get("user_text"):

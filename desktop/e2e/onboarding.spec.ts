@@ -15,6 +15,12 @@ test('首次使用引导依次介绍四项功能，完成后可在设置中重�
     const page = await application.firstWindow();
     const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
     const rail = page.getByRole('navigation', { name: '引导步骤' });
+    await expect(page.getByRole('heading', { name: '先备好笔墨。' })).toBeVisible();
+    await expect(rail).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '启用文字处理 API' })).toBeDisabled();
+    await page.getByRole('textbox', { name: '服务地址（Base URL）' }).fill('http://127.0.0.1:9/v1');
+    await page.getByRole('textbox', { name: '模型 ID' }).fill('fixture');
+    await page.getByRole('button', { name: '启用文字处理 API' }).click();
     await expect(rail).toBeVisible();
     await expect(page.locator('.sidebar')).toHaveAttribute('inert', '');
     // The guide asks for Accessibility exactly when FN cannot be captured yet.
@@ -39,12 +45,6 @@ test('首次使用引导依次介绍四项功能，完成后可在设置中重�
     await rail.getByRole('button', { name: /划词翻译/ }).click();
     await expect(field).toBeFocused();
     expect(await field.evaluate((element: HTMLTextAreaElement) => element.value.slice(element.selectionStart, element.selectionEnd))).toBe('Please bring the draft notes');
-    // Native capture skips 言墨 itself, so the shortcut reads the selection from the focused page.
-    await application.evaluate(({ app, BrowserWindow }) => { app.focus({ steal: true }); BrowserWindow.getAllWindows().find(window => window.getTitle() === '言墨')!.focus(); });
-    await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).checking)).toBe(false);
-    await page.evaluate(() => window.yanmo.invoke('record', 'selectionTranslation'));
-    await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).translation.source)).toBe('Please bring the draft notes');
-    await page.evaluate(() => window.yanmo.invoke('translationClose'));
     await rail.getByRole('button', { name: /口述翻译/ }).click();
     await expect(field).toHaveValue('试写一句');
     // Shortcuts shown are the user's own, not hard-coded.

@@ -13,7 +13,7 @@ cases = [
     ('en', '## 部署说明\n\n**先检查配置**，不要修改 `user_id`。\n\n- 启动服务\n  - 检查状态\n- 阅读[文档](https://example.com/guide)\n\n```json\n{"port": 8080, "message": "你好"}\n```', ['```json\n{"port": 8080, "message": "你好"}\n```', '`user_id`', 'https://example.com/guide', '**']),
     ('zh-Hans', code, [code]),
 ]
-engine = Engine()
+engine = Engine(allow_local_text=True)
 results = []
 try:
     for target, source, required in cases:

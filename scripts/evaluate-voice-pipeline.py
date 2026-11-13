@@ -34,7 +34,7 @@ def main():
     ]
     report = {'date': datetime.now(timezone.utc).isoformat(), 'method': 'macOS say synthetic audio; real cached offline Qwen3-ASR + SenseVoice + Qwen3-4B; integration checks, not an accuracy benchmark',
               'prompt_sha256': hashlib.sha256((ROOT / 'engine/prompt.txt').read_bytes()).hexdigest(), 'fixtures': fixtures, 'cases': []}
-    engine = Engine()
+    engine = Engine(allow_local_text=True)
     try:
         for case_id, locale, context, polish, operation in cases:
             audio = args.audio_dir / f'yanmo-dual-{locale}.wav'

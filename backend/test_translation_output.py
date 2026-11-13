@@ -10,7 +10,7 @@ from engine.worker import Engine
 
 class TranslationOutputTests(unittest.TestCase):
     def testNaturalArticleTranslationReachesDeliverableResult(self):
-        engine, events = Engine(), []
+        engine, events = Engine(allow_local_text=True), []
         source = "我想做一个新的动画效果。"
         output = "I want to create a new animation effect."
         request = {"operation": "voiceTranslation", "target_language": "en", "polish": True,
@@ -25,7 +25,7 @@ class TranslationOutputTests(unittest.TestCase):
         self.assertTrue(events[-1]["processed"])
 
     def testModelBodyIsDeliveredWhenCandidatesDisagree(self):
-        engine, events = Engine(), []
+        engine, events = Engine(allow_local_text=True), []
         output = "The budget is 101 yuan."
         request = {"operation": "voiceTranslation", "target_language": "en", "polish": True,
                    "style": "自然整理", "models": {}, "context": {}}

@@ -7,11 +7,14 @@ import { defaultSettings } from '../shared';
 
 test('日语音频在转录模式下保留日语，中文翻译目标不影响正文', async () => {
   test.skip(!process.env.YANMO_QA_JAPANESE_AUDIO, '显式提供合成日语音频后运行实际模型检查');
+  test.skip(!process.env.YANMO_QA_TEXT_URL || !process.env.YANMO_QA_TEXT_MODEL, '提供文字 API 地址与模型后检查真实模型的语言保留');
   test.setTimeout(180000);
   const directory = await mkdtemp(join(tmpdir(), 'yanmo-japanese-qa-'));
   let application: ElectronApplication | undefined;
   try {
-    await writeFile(join(directory, 'settings.json'), JSON.stringify({ ...defaultSettings(), showDock: false, voiceTarget: 'zh-Hans' }));
+    const settings = { ...defaultSettings(), showDock: false, voiceTarget: 'zh-Hans' };
+    settings.online.text = { enabled: true, baseURL: process.env.YANMO_QA_TEXT_URL!, model: process.env.YANMO_QA_TEXT_MODEL! };
+    await writeFile(join(directory, 'settings.json'), JSON.stringify(settings));
     const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')), YANMO_DATA_DIR: directory, YANMO_QA: '1' };
     delete env.ELECTRON_RUN_AS_NODE;
     application = await electron.launch({ args: [...(process.env.YANMO_QA_APP ? [] : [resolve('.')]), '--import-audio', process.env.YANMO_QA_JAPANESE_AUDIO!], env, executablePath: process.env.YANMO_QA_APP, cwd: tmpdir() });

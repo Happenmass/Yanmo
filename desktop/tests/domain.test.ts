@@ -41,8 +41,12 @@ test('首次使用引导只在全新安装时出现，完成后不再出现', ()
     // Settings saved before the guide existed lack the field: an existing user.
     const upgraded = join(directory, 'upgraded'); mkdirSync(upgraded);
     const { onboarded: _onboarded, ...older } = defaultSettings();
-    writeFileSync(join(upgraded, 'settings.json'), JSON.stringify(older));
-    assert.equal(new LibraryStore(upgraded, defaultSettings()).settings.onboarded, true);
+    older.online.text = { enabled: true, baseURL: 'https://api.example.test/v1', model: 'existing' };
+    writeFileSync(join(upgraded, 'settings.json'), JSON.stringify({ ...older, llmModel: 'old-local-model' }));
+    const migrated = new LibraryStore(upgraded, defaultSettings());
+    assert.equal(migrated.settings.onboarded, true);
+    assert.deepEqual(migrated.settings.online.text, older.online.text);
+    assert.ok(!('llmModel' in migrated.settings));
     const legacy = join(directory, 'library.json'); writeFileSync(legacy, JSON.stringify({ manuscripts: [], lexicon: [] }));
     assert.equal(new LibraryStore(join(directory, 'migrated'), defaultSettings(), legacy).settings.onboarded, true);
   } finally { rmSync(directory, { recursive: true, force: true }); }

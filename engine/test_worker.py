@@ -35,31 +35,15 @@ class WorkerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             require_text('  ')
 
-    def testWarmupLoadsOnlyNeededModelsAndDoesNotGenerate(self):
+    def testWarmupAndStatusOnlyUseSpeechModels(self):
         engine = Engine()
-        with TemporaryDirectory() as directory:
-            path = Path(directory)
-            (path / "weights.safetensors").write_bytes(b"small")
-            with patch.object(engine, "load_asr") as asr, patch.object(engine, "load_llm") as llm, patch("worker.resolve_model", return_value=path), patch.object(engine, "generate_text") as generate:
-                engine.handle({"command": "warmup", "include_llm": False})
-                asr.assert_called_once()
-                llm.assert_not_called()
-                engine.handle({"command": "warmup", "include_llm": True})
-                llm.assert_called_once()
-                generate.assert_not_called()
-
-    def testWarmupDoesNotEvictASRForLargeCustomLLM(self):
-        engine = Engine()
-        with TemporaryDirectory() as directory:
-            path = Path(directory)
-            # Sparse file: exercise the real size guard without allocating 6 GB.
-            with (path / "weights.safetensors").open("wb") as weights:
-                weights.truncate(6_000_000_001)
-            with patch.object(engine, "load_asr") as asr, patch.object(engine, "load_llm") as llm, patch("worker.resolve_model", return_value=path):
-                engine.handle({"command": "warmup", "include_llm": True})
-                asr.assert_called_once()
-                llm.assert_not_called()
-
+        with patch.object(engine, "load_asr") as asr, patch.object(engine, "load_llm") as llm, patch("worker.resolve_model", return_value=Path("fixture")) as resolve:
+            engine.handle({"command": "warmup", "include_llm": True})
+            asr.assert_called_once()
+            llm.assert_not_called()
+            status = engine.handle({"command": "check", "llm_model": "old-text-model"})
+            self.assertEqual(set(status["models"]), {"asr", "sensevoice"})
+            self.assertEqual(resolve.call_count, 2)
 
     def testTranslationLanguageAndSelectionBoundaries(self):
         for language in ["en", "zh-Hans", "ja", "de"]:
@@ -71,7 +55,7 @@ class WorkerTests(unittest.TestCase):
                 translation_payload(request)
 
     def testTranslationRoutesToDedicatedPromptNotPolishing(self):
-        engine = Engine()
+        engine = Engine(allow_local_text=True)
         with patch.object(engine, "load_llm", return_value=Path("local-model")), patch.object(engine, "generate_text", return_value="The budget is 3500 yuan.") as generate:
             result = engine.handle({"command": "translate", "text": "预算3500元。", "target_language": "en"})
             self.assertEqual(result["text"], "The budget is 3500 yuan.")

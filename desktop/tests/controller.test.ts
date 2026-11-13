@@ -18,7 +18,7 @@ class Native extends EventEmitter {
 class Backend {
   mode = 'failure'; done?: () => void;
   requests: any[] = [];
-  setActive(_value: boolean) {} async stop() {} async status() { return {}; } async warmup() {}
+  setActive(_value: boolean) {} async stop() {} async status() { return { metal: true, models: { asr: { ready: true }, sensevoice: { ready: true } } }; } async warmup() {}
   async run(request: any, _audio: unknown, emit: (event: TaskEvent) => void) {
     this.requests.push(request);
     const event = (value: Partial<TaskEvent>) => emit({ task_id: request.task_id, event: 'stage', ...value });
@@ -46,11 +46,26 @@ class Backend {
   }
   async cancel() { this.done?.(); }
 }
-function fixture() {
+function fixture(textEnabled = true) {
   const directory = mkdtempSync(join(tmpdir(), 'yanmo-controller-')); const native = new Native(); const backend = new Backend();
-  const controller = new Controller(new LibraryStore(directory, defaultSettings()), native as unknown as NativeBridge, backend as unknown as BackendClient);
-  return { controller, native, backend, async close() { await controller.shutdown(); rmSync(directory, { recursive: true, force: true }); } };
+  const settings = defaultSettings();
+  if (textEnabled) settings.online.text = { enabled: true, baseURL: 'http://127.0.0.1:9/v1', model: 'fixture' };
+  const controller = new Controller(new LibraryStore(directory, settings), native as unknown as NativeBridge, backend as unknown as BackendClient);
+  controller.environment = { environment: 'ready', issues: [] };
+  controller.state.models = { asr: true, sensevoice: true, metal: true };
+  controller.state.runtime.capabilities.asr = 'local';
+  return { controller, native, backend, directory, async close() { await controller.shutdown(); rmSync(directory, { recursive: true, force: true }); } };
 }
+test('文字 API 未启用时，在本机语音模型已就绪的情况下也不会开始录音', async () => {
+  const value = fixture(false);
+  try {
+    await value.controller.perform('dictation', {});
+    assert.equal(value.controller.state.page, 'settings');
+    assert.match(value.controller.state.notice, /文字处理 API/);
+    assert.ok(!value.native.calls.includes('record.start'));
+    assert.equal(value.backend.requests.length, 0);
+  } finally { await value.close(); }
+});
 test('输入框上下文不可读仍开始录音，不要求预先提供写入目标', async () => {
   const value = fixture(); value.backend.mode = 'dual';
   try {
@@ -139,7 +154,7 @@ test('两路识别的原文和语言随文稿保存，重启后可重新对照',
     const item = value.controller.state.library.manuscripts[0];
     assert.equal(item.original, '预算3500元，不是周四。');
     assert.deepEqual(item.asrResults?.map(result => result.engine_name), ['Qwen3-ASR', 'SenseVoice Small']);
-    const store = new LibraryStore(value.controller.store.directory, defaultSettings());
+    const store = new LibraryStore(value.directory, defaultSettings());
     assert.equal(store.error, '');
     assert.deepEqual(store.library.manuscripts[0].asrResults, item.asrResults);
     value.controller.state.library = store.library;
@@ -176,7 +191,7 @@ test('录音保留输入框上下文快照且受开关约束，后端失败保�
     assert.equal(value.backend.requests[0].context.before, before.slice(-300));
     assert.equal(value.backend.requests[0].context.after, after.slice(0, 300));
     assert.ok(!value.native.calls.includes('insert'));
-    const store = new LibraryStore(value.controller.store.directory, defaultSettings());
+    const store = new LibraryStore(value.directory, defaultSettings());
     assert.equal(store.library.manuscripts[0].original, '预算3500元，不是周四。');
     await value.controller.updateSettings({ readContext: false });
     await value.controller.perform('dictation', { id: 'synthetic-target', before, after });
@@ -229,24 +244,26 @@ test('语音输入键可结束口述翻译录音', async () => {
 test('在线模型只在启用时随任务发送，地址需 https 或本机', async () => {
   for (const bad of ['http://api.example.com/v1', 'https://user:pw@api.example.com', 'https://api.example.com/v1?key=x', 'ftp://x']) assert.throws(() => checkOnlineURL(bad));
   for (const good of ['https://api.example.com/v1', 'http://127.0.0.1:8000/v1', 'http://localhost:11434/v1']) checkOnlineURL(good);
-  const value = fixture(); const requests: any[] = [];
+  const value = fixture(false); const requests: any[] = [];
   const run = value.backend.run.bind(value.backend);
   value.backend.run = async (request: any, audio: unknown, emit: any) => { requests.push(request); return run(request, audio, emit); };
   try {
     await value.controller.importAudio('/synthetic-input.wav');
-    assert.deepEqual(requests[0].online, {});
+    assert.equal(requests.length, 0);
     await assert.rejects(value.controller.updateSettings({ online: { ...defaultSettings().online, text: { enabled: true, baseURL: '', model: '' } } }));
     value.controller.setOnlineKeys({ text: 'sk-test' });
     assert.deepEqual(value.controller.state.onlineKeys, { asr: false, text: true });
     await value.controller.updateSettings({ online: { ...defaultSettings().online, text: { enabled: true, baseURL: 'https://api.example.com/v1', model: ' remote ' } } });
     await value.controller.importAudio('/synthetic-input.wav');
-    assert.deepEqual(requests[1].online, { text: { base_url: 'https://api.example.com/v1', model: 'remote', api_key: 'sk-test' } });
+    assert.deepEqual(requests[0].online, { text: { base_url: 'https://api.example.com/v1', model: 'remote', api_key: 'sk-test' } });
+    assert.ok(!('llm_model' in requests[0].models));
     assert.ok(!JSON.stringify(value.controller.state).includes('sk-test'));
   } finally { await value.close(); }
 });
 test('Windows 无 CUDA：未配置在线前不录音也不启动后端，配置后按在线处理', async () => {
-  const value = fixture(); value.backend.mode = 'translation';
-  let statusCalls = 0; value.backend.status = async () => { statusCalls++; return {}; };
+  const value = fixture(false); value.backend.mode = 'translation';
+  let statusCalls = 0; const status = value.backend.status.bind(value.backend);
+  value.backend.status = async () => { statusCalls++; return status(); };
   value.controller.windowsPrecheck = async () => ({ environment: 'unsupported', issues: ['未检测到 NVIDIA GPU 或驱动。'] });
   try {
     await value.controller.checkModels();
@@ -256,7 +273,7 @@ test('Windows 无 CUDA：未配置在线前不录音也不启动后端，配置�
     await value.controller.perform('dictation', {});
     assert.equal(value.controller.state.stage, 'idle'); assert.equal(value.controller.state.page, 'settings');
     assert.ok(!value.native.calls.includes('record.start'));
-    assert.match(value.controller.state.notice, /语音识别与文字整理与翻译/);
+    assert.match(value.controller.state.notice, /文字处理 API/);
     const endpoint = { enabled: true, baseURL: 'https://api.example.test/v1', model: 'remote' };
     await value.controller.updateSettings({ online: { asr: endpoint, text: endpoint } });
     assert.equal(value.controller.state.runtime.status, 'online-ready');

@@ -10,14 +10,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", choices=["modelscope", "huggingface"], default=DEFAULT_SOURCE)
     parser.add_argument("--asr", default="mlx-community/Qwen3-ASR-1.7B-8bit")
-    parser.add_argument("--llm", default="mlx-community/Qwen3-4B-Instruct-2507-4bit")
     parser.add_argument("--sensevoice", default="mlx-community/SenseVoiceSmall")
     # The Windows PyTorch path has no SenseVoice review.
     parser.add_argument("--without-sensevoice", action="store_true")
     # Report cache completeness only; never downloads.
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args(argv)
-    models = [args.asr] + ([] if args.without_sensevoice else [args.sensevoice]) + [args.llm]
+    models = [args.asr] + ([] if args.without_sensevoice else [args.sensevoice])
     for model in dict.fromkeys(models):
         if args.check:
             try:

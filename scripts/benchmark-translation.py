@@ -18,7 +18,7 @@ cases = [
     ("en", "请 review 这个 pull request，但先不要 merge。"),
     ("en", "预算三千五百元，不是三百元。"),
 ]
-engine = Engine()
+engine = Engine(allow_local_text=True)
 results = []
 for target, source in cases:
     started = time.monotonic()

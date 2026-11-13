@@ -119,7 +119,7 @@ async function prepareModels() {
   const windows = !!windowsRuntime;
   if (windows && controller.environment?.environment !== 'ready') throw new Error('请先准备运行环境，再下载模型。');
   const settings = structuredClone(controller.state.settings);
-  const modelArgs = ['--source', settings.modelSource, '--asr', settings.asrModel, '--llm', settings.llmModel];
+  const modelArgs = ['--source', settings.modelSource, '--asr', settings.asrModel];
   // Windows has no SenseVoice review.
   const command = windows ? windowsRuntime!.python : runtimePython;
   const args = ['-B', '-u', '-m', 'backend.prepare_models', ...modelArgs, ...(windows ? ['--without-sensevoice'] : ['--sensevoice', settings.senseVoiceModel])];
@@ -142,7 +142,7 @@ async function prepareModels() {
       child.once('error', reject);
       child.once('close', code => { preparation = undefined; if (code === 0) resolve(); else reject(new Error('模型准备未完成，请检查模型 ID、下载来源与网络后重试。已完成的缓存会继续复用。')); });
     });
-    controller.notice('模型已准备，可在本机离线使用。');
+    controller.notice('语音识别模型已准备，可在本机识别。');
   } finally { controller.state.checking = false; controller.changed(); await controller.checkModels(); }
   // First run goes straight from the download to the Accessibility grant, so FN works when the guide asks for it.
   if (!windows && !controller.state.settings.onboarded && !controller.state.native.accessibility) await controller.permissions(true, { app: appBundle() });
@@ -175,7 +175,7 @@ async function saveOnline(value: any) {
   const capability = value.capability as Capability;
   if (value.key?.trim()) { const keys = { ...readOnlineKeys(), [capability]: value.key.trim() }; writeOnlineKeys(keys); controller.setOnlineKeys(keys); }
   await controller.updateSettings({ online: { ...controller.state.settings.online, [capability]: { enabled: value.enabled, baseURL: value.baseURL.trim(), model: value.model.trim() } } });
-  controller.notice(value.enabled ? CAPABILITIES[capability] + '将使用在线服务：' + value.model.trim() + '。' : '在线' + CAPABILITIES[capability] + '设置已保存，当前仍在本机处理。');
+  controller.notice(value.enabled ? CAPABILITIES[capability] + '将使用 API 模型 ' + value.model.trim() + '。' : (capability === 'asr' ? '语音识别使用本机模型。' : '文字处理 API 未启用。'));
 }
 async function invoke(action: string, value: any) {
   if (!controller) throw new Error('言墨正在启动，请稍候。');

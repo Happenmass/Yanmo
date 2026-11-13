@@ -1,10 +1,12 @@
 # 言墨 · Yanmo
 
+> 当前开发源码默认在本机识别语音，整理和翻译需要配置一个文字处理 API。GitHub Releases 的 v0.4.4 安装包仍支持本地文字模型，使用说明见 [v0.4.4 README](https://github.com/Happenmass/Yanmo/blob/3c5df91165f14f838961c5e7ea3994afe267265d/README.md)。
+
 **言语之间，自有笔墨。**
 
-言墨是一款**支持中文、英文和中英混说的语音输入法**，适用于 Apple Silicon Mac。按 **FN** 开始说话，再按一次结束。言墨识别语音、整理口语，然后把文字粘贴到此时光标所在的输入框。语音识别和文字整理默认在本机运行。
+言墨是一款**支持中文、英文和中英混说的语音输入法**，适用于 Apple Silicon Mac。按 **FN** 开始说话，再按一次结束。言墨默认在本机识别语音，通过你配置的文字 API 整理正文，再将结果粘贴到当前输入框。
 
-> Yanmo is a local-first voice input app for Apple Silicon Macs. It supports Chinese, English, and mixed Chinese–English dictation. Press **FN** to start and stop recording. Yanmo transcribes and polishes your speech, then pastes it into the active text field. Speech recognition and text processing run on your Mac by default.
+> Yanmo supports Chinese, English, and mixed Chinese–English dictation on Apple Silicon Macs. Press **FN** to start and stop recording. By default, speech recognition runs on your Mac. Yanmo uses your configured text API for polishing and translation.
 
 [![宣传片](docs/promo-poster.jpg)](https://github.com/Happenmass/Yanmo/releases/latest/download/Yanmo-promo.mp4)
 
@@ -28,11 +30,11 @@
 
 ad-hoc 签名每次构建都会变化，更新版本后若辅助功能显示已授权却无法使用，请在系统设置中移除旧条目后重新添加。
 
-然后在「设置 → 本地模型」点击「准备模型」（默认从 ModelScope 下载约 5 GB 权重到用户全局缓存，仅此一步需要联网），并按提示授予麦克风与辅助功能权限。
+使用当前开发源码时，在「设置 → 本地模型」准备本机语音模型，再到「设置 → API 服务」启用「文字整理与翻译」，填写兼容 OpenAI 的服务地址、模型 ID 和服务要求的 API Key。按提示授予麦克风与辅助功能权限。
 
 ## 主要功能
 
-- **中英文输入**按口述语言输出。中英混说时，目标是保留句中的中英文片段。若要将口述内容转成指定语言，使用口述翻译。当前本地模型在部分混说样本中仍会误译。见[正文生成评测](docs/asr-fusion.md)。
+- **中英文输入**按口述语言输出。中英混说时，目标是保留句中的中英文片段。若要将口述内容转成指定语言，使用口述翻译。见[双路识别与正文评测](docs/asr-fusion.md)。
 - 默认 **FN** 开始或结束语音输入，**FN + Shift** 口述翻译，**FN + 空格**划词翻译，**Esc** 取消。支持自定义多组快捷键和左右纯修饰键。纯修饰键组合全部松开时触发，参与打字或鼠标组合时不触发。更新默认值时保留已保存的自定义配置，设置中可逐项恢复默认。
 - 静音的 200×36 pt 黑墨浮层，显示真实音量、计时、取消和完成；不抢走原输入框焦点。
 - 本机 Qwen3-ASR 先识别语音和语言，检测到中文或英文时由 SenseVoice Small 复核。文字模型结合识别结果、词库和可用上下文生成正文，两路识别结果可在文稿中对照。可选自然整理、保留原话、即时消息或文档风格。
@@ -45,9 +47,9 @@ ad-hoc 签名每次构建都会变化，更新版本后若辅助功能显示已�
 - 正文生成后向当时前台应用的当前焦点粘贴一次，允许途中切换应用、窗口和光标。开启历史记录时保存文稿。导入音频的结果只在文稿页显示。
 - 连续空闲 1 小时退出推理进程；录音开始后后台预加载，连续输入复用已加载模型。
 
-模型下载来源默认 **ModelScope**，准备时先复用完整的全局缓存；日常推理不自动下载或上传输入。SenseVoice Small 共用一份多语言权重，按 Qwen 检测出的中文、英文分别指定 `zh`、`en`；其他语言或未知语言跳过复核。
+语音模型下载来源默认 **ModelScope**，准备时先复用完整的全局缓存。SenseVoice Small 共用一份多语言权重，按 Qwen 检测出的中文、英文分别指定 `zh`、`en`；其他语言或未知语言跳过复核。
 
-Electron、Swift 系统桥接和独立 Python/MLX 运行时均随应用包交付，权重另存用户全局缓存。当前是 ad-hoc 签名的本机开发构建，尚未完成公证及干净机器验收。Mac 可明确启用 OpenAI 兼容的在线接口，默认仍走本机；Windows 本地推理改用原生 PyTorch（CUDA）与 transformers，无可用 CUDA 时推荐在线处理；运行库安装、模型准备与推理适配已实现（[运行时说明](docs/architecture/electron_01_Runtime_运行时与预检查.md)），Windows 系统桥接尚未接入，Windows 版暂不能启动。
+Electron、Swift 系统桥接和独立 Python/MLX 运行时均随应用包交付，权重另存用户全局缓存。当前是 ad-hoc 签名的本机开发构建，尚未完成公证及干净机器验收。语音识别可另行启用 OpenAI 兼容 API。Windows 主线已有 PyTorch（CUDA）语音识别适配和运行时准备，仍缺 Windows 系统桥接。见[运行时说明](docs/architecture/electron_01_Runtime_运行时与预检查.md)。
 
 ## 模块图
 
@@ -65,13 +67,13 @@ npm run build
 npm start
 ```
 
-首次进入「设置 → 本地模型」，点击「准备模型」。默认从 ModelScope 准备；也可以选择 Hugging Face，或填写完整的本地模型目录。已有完整缓存会直接复用。准备阶段需要网络，处理录音时保持离线。
+首次进入「设置 → 本地模型」，点击「准备模型」。默认从 ModelScope 准备，也可选择 Hugging Face 或填写完整的本地模型目录。随后在「API 服务」配置文字接口，整理、保留原话及两种翻译共用此接口。
 
 命令行准备模型：
 
 ```bash
 runtime/macos/python/bin/python3.12 scripts/prepare-models.py
-# 可选：--source huggingface --asr 模型ID --sensevoice 模型ID --llm 模型ID
+# 可选：--source huggingface --asr 模型ID --sensevoice 模型ID
 ```
 
 构建包含运行时的应用：
@@ -97,17 +99,17 @@ ad-hoc 开发签名随构建变化。若系统显示已授权但当前版本仍�
 
 ## 隐私、缓存与迁移
 
-- 默认 ASR：`mlx-community/Qwen3-ASR-1.7B-8bit`（运行约占 3.5 GB 内存）；内存紧张时可在「设置 → 本地模型 → 语音识别规格」改选低内存的 `mlx-community/Qwen3-ASR-0.6B-8bit`（约 1.8 GB），嘈杂环境与外语准确率明显较低；中英复核：`mlx-community/SenseVoiceSmall`；文字模型：`mlx-community/Qwen3-4B-Instruct-2507-4bit`。SenseVoice 权重约 936 MB，首次准备时从 ModelScope 下载到全局缓存。
+- 默认 ASR 为 `mlx-community/Qwen3-ASR-1.7B-8bit`（运行约占 3.5 GB 内存）。内存紧张时可改选 `mlx-community/Qwen3-ASR-0.6B-8bit`（约 1.8 GB）。中英复核使用 `mlx-community/SenseVoiceSmall`，权重约 936 MB。
 - ModelScope 缓存：`~/.cache/codex/models/modelscope/`，可通过 `MODELSCOPE_CACHE` 指定其他用户全局位置；同时复用 SDK 既有缓存与 `~/.cache/huggingface/`。不在项目和安装包中复制权重。
 - Python 后端仅监听 `127.0.0.1` 动态端口，以每次启动的随机密钥认证；主进程通过私有管道取得端口。Renderer 不持有密钥或音频路径。
 - 运行时设置 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`，模型定位只使用本地缓存；显式准备模型在单独进程中执行。
-- 录音、正文、词库和上下文默认留在本机；光标上下文默认关闭，启用后在录音开始时读取输入框光标前后各最多 300 字，同一快照用于 Qwen ASR 和纠错 LLM，不截图或 OCR。SenseVoice 独立识别，不接收文本提示；输入框不支持辅助功能读取时上下文为空。
+- 只有显式启用在线语音识别时才会发送音频。文字 API 接收转写或选中的文字，整理任务可同时带上词库与光标上下文。光标上下文默认关闭，启用后可读取前后各最多 300 字。SenseVoice 独立识别，不接收文本提示。
 - Electron 数据在 `~/Library/Application Support/Yanmo/electron/`；文件权限为 600，目录为 700，原子保存。
 - 首次启动复制旧版 `library.json`、保存迁移备份，并导入 macOS UserDefaults 中的快捷键、语言及隐私设置；保留旧数据源。损坏文件暂停覆盖保存。
 - 测试可用 `YANMO_DATA_DIR` 指定隔离数据目录，此时不导入个人数据。
 - 临时音频在正常结束、取消或受控退出后删除；系统强制终止时仍可能残留在系统临时目录。
 
-程序原样采用模型生成的正文。遇到空输出、生成截断、取消或运行失败时，已取得的识别原文可用于重试。手动修改文稿后，后续整理以用户修订为准。见[双路识别与正文生成](docs/asr-fusion.md)。
+自然整理使用 [polish.txt](engine/polish.txt)，程序原样采用 API 返回的正文。遇到空输出、截断、取消或运行失败时，已取得的识别原文可用于重试。手动修改文稿后，后续整理以用户修订为准。见[双路识别与正文生成](docs/asr-fusion.md)。
 
 ## 开发与验证
 
@@ -134,11 +136,11 @@ node --import tsx scripts/check-opaque-input.mts
 
 只检查某个已运行应用能否保留录音目标（不读正文、不粘贴）：`node --import tsx scripts/check-input-capture.mts <bundle-id>`。`YANMO_QA_BRIDGE` 可指定打包后的 helper 路径。
 
-真实模型界面检查使用合成音频及隔离文稿，不读取个人口述历史：
+下面的界面检查使用合成音频、真实本机 ASR 和模拟文字 API，文稿保存在隔离目录：
 
 ```bash
 say -v Tingting -o /tmp/yanmo-synthetic.aiff '今天测试语音输入。预算三千五百元，周五交付，不是周四。'
-YANMO_QA_AUDIO=/tmp/yanmo-synthetic.aiff npm run test:desktop
+YANMO_QA_AUDIO=/tmp/yanmo-synthetic.aiff npm run test:desktop -- desktop/e2e/mac.spec.ts --grep '首页使用真实统计'
 ```
 
 设置 `YANMO_QA_APP=/完整路径/言墨.app/Contents/MacOS/言墨` 可检查打包应用。`swift run YanmoShortcutChecks`直接检查监听函数，不向系统发送输入。可选的旧版 `YANMO_QA_NATIVE=1` TextEdit 组合脚本使用 AppleScript，本轮未执行；当前原生交互经 CUA 检查。自动化不代替实体 FN 口述验收。

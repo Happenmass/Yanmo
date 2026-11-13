@@ -22,13 +22,13 @@ class PrepareModelsTests(unittest.TestCase):
                 raise ValueError("未找到")
         def prepare(*_):
             raise AssertionError("--check must not download")
-        events = run(["--check", "--without-sensevoice", "--asr", "present", "--llm", "missing"], resolve, prepare)
+        events = run(["--check", "--asr", "present", "--sensevoice", "missing"], resolve, prepare)
         self.assertEqual(events, [{"event": "checked", "model": "present", "ready": True}, {"event": "checked", "model": "missing", "ready": False}])
 
     def testWindowsPreparationSkipsSenseVoice(self):
-        events = run(["--without-sensevoice", "--asr", "a", "--llm", "b"])
-        self.assertEqual([event["model"] for event in events if event["event"] == "prepared"], ["a", "b"])
-        self.assertIn("mlx-community/SenseVoiceSmall", [event["model"] for event in run(["--asr", "a", "--llm", "b"]) if event["event"] == "prepared"])
+        events = run(["--without-sensevoice", "--asr", "a"])
+        self.assertEqual([event["model"] for event in events if event["event"] == "prepared"], ["a"])
+        self.assertIn("mlx-community/SenseVoiceSmall", [event["model"] for event in run(["--asr", "a"]) if event["event"] == "prepared"])
 
 
 if __name__ == "__main__":

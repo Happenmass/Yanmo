@@ -60,9 +60,9 @@ export async function prepareWindowsRuntime(paths: RuntimePaths, gatewayPython: 
   } finally { running = false; }
 }
 
-export async function checkWindowsModels(paths: RuntimePaths, root: string, settings: { modelSource: string; asrModel: string; llmModel: string }, stream: Stream = streamCommand) {
-  const ready = new Set<string>();
-  await stream(paths.python, ['-B', '-m', 'backend.prepare_models', '--check', '--without-sensevoice', '--source', settings.modelSource, '--asr', settings.asrModel, '--llm', settings.llmModel],
-    line => { try { const value = JSON.parse(line); if (value.event === 'checked' && value.ready === true) ready.add(value.model); } catch { /* Not a protocol line. */ } }, root);
-  return { asr: ready.has(settings.asrModel), llm: ready.has(settings.llmModel) };
+export async function checkWindowsModels(paths: RuntimePaths, root: string, settings: { modelSource: string; asrModel: string }, stream: Stream = streamCommand) {
+  let ready = false;
+  const completed = await stream(paths.python, ['-B', '-m', 'backend.prepare_models', '--check', '--without-sensevoice', '--source', settings.modelSource, '--asr', settings.asrModel],
+    line => { try { const value = JSON.parse(line); if (value.event === 'checked' && value.model === settings.asrModel) ready = value.ready === true; } catch { /* Not a protocol line. */ } }, root);
+  return completed && ready;
 }

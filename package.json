@@ -1,6 +1,6 @@
 {
   "name": "yanmo",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "private": true,
   "description": "言墨 · 本地语音输入",
   "author": "Yanmo contributors",
@@ -53,7 +53,7 @@
         "to": "engine",
         "filter": [
           "*.py",
-          "prompt.txt",
+          "*.txt",
           "!test_*.py"
         ]
       }
@@ -75,7 +75,7 @@
       "entitlements": "runtime/macos/entitlements.plist",
       "entitlementsInherit": "runtime/macos/entitlements.plist",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "言墨需要录音，将声音在本机转换为文字。音频不会上传，处理结束后删除临时录音。"
+        "NSMicrophoneUsageDescription": "言墨需要录音以识别语音。默认在本机识别；只有启用语音识别 API 时才会发送音频。处理结束后删除临时录音。"
       }
     }
   },

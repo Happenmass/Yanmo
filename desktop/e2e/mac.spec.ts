@@ -3,16 +3,39 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createServer, type Server } from 'node:http';
+import { once } from 'node:events';
 import { defaultSettings } from '../shared';
 
 let application: ElectronApplication;
 let page: Page;
 let directory: string;
+let textAPI: Server | undefined;
+const textRequests: string[] = [];
 const errors: string[] = [];
 test.describe.configure({ mode: 'serial' });
 test.beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), 'yanmo-electron-qa-'));
-  await writeFile(join(directory, 'settings.json'), JSON.stringify({ ...defaultSettings(), showDock: false }));
+  const settings = { ...defaultSettings(), showDock: false };
+  if (process.env.YANMO_QA_AUDIO || process.env.YANMO_QA_NATIVE === '1') {
+    textAPI = createServer((request, response) => {
+      textRequests.push(request.url || '');
+      let body = '';
+      request.setEncoding('utf8').on('data', chunk => { body += chunk; });
+      request.on('end', () => {
+        const { messages } = JSON.parse(body);
+        const data = JSON.parse(messages.at(-1).content);
+        const content = data.SOURCE_TEXT ? 'The budget is 3500 yuan. Deliver on Friday.' : '预算3500元，周五交付，不是周四。';
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }] }));
+      });
+    }).listen(0, '127.0.0.1');
+    await once(textAPI, 'listening');
+    const address = textAPI.address();
+    if (!address || typeof address === 'string') throw new Error('测试 API 未监听。');
+    settings.online.text = { enabled: true, baseURL: `http://127.0.0.1:${address.port}/v1`, model: 'fixture' };
+  }
+  await writeFile(join(directory, 'settings.json'), JSON.stringify(settings));
   const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')), YANMO_DATA_DIR: directory, YANMO_QA: '1' };
   delete env.ELECTRON_RUN_AS_NODE;
   const args = process.env.YANMO_QA_APP ? [] : [resolve('.')];
@@ -26,7 +49,7 @@ test.beforeAll(async () => {
   await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).modelsChecked)).toBe(true);
   await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).checking)).toBe(false);
 });
-test.afterAll(async () => { if (application) await application.close(); if (directory) await rm(directory, { recursive: true, force: true }); });
+test.afterAll(async () => { if (application) await application.close(); textAPI?.close(); if (directory) await rm(directory, { recursive: true, force: true }); });
 
 test('首页使用真实统计，保留已确认的书案布局', async () => {
   if (process.env.YANMO_QA_AUDIO) {
@@ -35,6 +58,7 @@ test('首页使用真实统计，保留已确认的书案布局', async () => {
     expect(state.draft).toMatch(/周五/); expect(state.draft).toContain('3500'); expect(state.draft).not.toContain('三千五百'); expect(state.draft).toMatch(/不是周四/);
     expect(state.asrResults.map(result => result.engine_name)).toEqual(['Qwen3-ASR', 'SenseVoice Small']);
     expect(state.asrResults[0].language).toBe('Chinese');
+    expect(textRequests).toEqual(['/v1/chat/completions']);
     expect(state.library.manuscripts[0].asrResults).toEqual(state.asrResults);
     await page.locator('.original summary').click();
     await expect(page.locator('.original')).toContainText('SenseVoice Small');
@@ -68,7 +92,7 @@ test('设置、两个翻译目标和模型环境状态', async () => {
   await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).settings.voiceTarget)).toBe('ja');
   const state = await page.evaluate(() => window.yanmo.state());
   expect(state.settings.selectionTarget).toBe('zh-Hans'); expect(state.settings.style).toBe('即时消息');
-  expect(state.models.asr).toBe(true); expect(state.models.sensevoice).toBe(true); expect(state.models.llm).toBe(true); expect(state.models.metal).toBe(true);
+  expect(state.models.asr).toBe(true); expect(state.models.sensevoice).toBe(true); expect(state.models.metal).toBe(true);
   expect(state.settings.modelSource).toBe('modelscope');
   const contextSetting = page.getByRole('checkbox', { name: '读取输入框光标前后各最多 300 字，辅助识别与纠错', exact: true });
   await contextSetting.click();

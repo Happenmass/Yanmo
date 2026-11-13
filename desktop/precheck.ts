@@ -42,14 +42,15 @@ export async function probeWindows(runtime: { python: string; current: boolean }
   return { environment: 'ready', issues: [], gpu: label };
 }
 
-export function decideRuntime(online: Record<Capability, OnlineEndpoint>, models: Record<Capability, boolean>, local?: LocalEnvironment): RuntimeState {
-  const capability = (name: Capability) => online[name].enabled ? 'online' as const : local?.environment === 'ready' && models[name] ? 'local' as const : 'unavailable' as const;
-  const capabilities = { asr: capability('asr'), text: capability('text') };
-  const values = Object.values(capabilities);
+export function decideRuntime(online: Record<Capability, OnlineEndpoint>, asrCached: boolean, local?: LocalEnvironment): RuntimeState {
+  const capabilities: RuntimeState['capabilities'] = {
+    asr: online.asr.enabled ? 'online' : local?.environment === 'ready' && asrCached ? 'local' : 'unavailable',
+    text: online.text.enabled ? 'online' : 'unavailable',
+  };
   const base = { issues: local?.issues ?? [], gpu: local?.gpu, capabilities };
-  if (!values.includes('unavailable')) return { ...base, status: values.includes('online') ? 'online-ready' : 'local-ready' };
+  if (capabilities.asr !== 'unavailable') return { ...base, status: online.text.enabled ? 'online-ready' : 'api-pending' };
   if (!local) return { ...base, status: 'checking' };
   if (local.environment === 'repair') return { ...base, status: 'local-repair' };
   if (local.environment === 'ready') return { ...base, status: 'models-pending' };
-  return { ...base, status: values.includes('online') ? 'api-pending' : 'recommend-online' };
+  return { ...base, status: online.text.enabled ? 'api-pending' : 'recommend-online' };
 }

@@ -64,11 +64,11 @@ def run_pipeline(engine, request, audio, cancelled: Event, emit):
         else:
             stage("polishing")
             task = "verbatim" if operation != "polish" and (not request["polish"] or request["style"] == "保留原话") else "polish"
-            instruction = "忠实保留原意与语气，仅删除无意义的填充和重复并规范标点。"
+            instruction = ""
             if request["style"] == "即时消息":
-                instruction += "输出适合即时通讯的自然短句，不添加问候。"
+                instruction = "整理为即时消息。"
             if request["style"] == "文档段落":
-                instruction += "按语义分段，不增加标题或信息。"
+                instruction = "整理为文档段落。"
             response = invoke("polish", text=original, instruction=instruction, asr_results=candidates, task=task)
             processed = task != "verbatim"
         result = response.get("text")

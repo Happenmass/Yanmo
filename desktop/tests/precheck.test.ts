@@ -49,7 +49,7 @@ test('多块 GPU 取符合算力要求中显存最大者', async () => {
 });
 
 test('状态判定：无 CUDA 推荐在线，配置一项为 API 待配置，两项为在线可用', () => {
-  const online = defaultSettings().online; const none = { asr: false, text: false };
+  const online = defaultSettings().online; const none = false;
   const unsupported = { environment: 'unsupported' as const, issues: ['未检测到 NVIDIA GPU 或驱动。'] };
   assert.equal(decideRuntime(online, none).status, 'checking');
   assert.equal(decideRuntime(online, none, unsupported).status, 'recommend-online');
@@ -62,12 +62,12 @@ test('状态判定：无 CUDA 推荐在线，配置一项为 API 待配置，两
   assert.equal(decideRuntime(both, none).status, 'online-ready');
 });
 
-test('状态判定：本地环境待修复、模型待准备与本地可用', () => {
+test('状态判定：本地环境待修复、语音模型待准备与文字 API 待配置', () => {
   const online = defaultSettings().online;
-  assert.equal(decideRuntime(online, { asr: true, text: true }, { environment: 'repair', issues: ['x'] }).status, 'local-repair');
-  assert.equal(decideRuntime(online, { asr: false, text: true }, { environment: 'ready', issues: [] }).status, 'models-pending');
-  const local = decideRuntime(online, { asr: true, text: true }, { environment: 'ready', issues: [] });
-  assert.equal(local.status, 'local-ready'); assert.deepEqual(local.capabilities, { asr: 'local', text: 'local' });
-  const mixed = decideRuntime({ ...online, text: { enabled: true, baseURL: 'https://api.example.test/v1', model: 'm' } }, { asr: true, text: false }, { environment: 'ready', issues: [] });
+  assert.equal(decideRuntime(online, true, { environment: 'repair', issues: ['x'] }).status, 'local-repair');
+  assert.equal(decideRuntime(online, false, { environment: 'ready', issues: [] }).status, 'models-pending');
+  const local = decideRuntime(online, true, { environment: 'ready', issues: [] });
+  assert.equal(local.status, 'api-pending'); assert.deepEqual(local.capabilities, { asr: 'local', text: 'unavailable' });
+  const mixed = decideRuntime({ ...online, text: { enabled: true, baseURL: 'https://api.example.test/v1', model: 'm' } }, true, { environment: 'ready', issues: [] });
   assert.equal(mixed.status, 'online-ready'); assert.deepEqual(mixed.capabilities, { asr: 'local', text: 'online' });
 });
