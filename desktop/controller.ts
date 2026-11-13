@@ -4,6 +4,7 @@ import { ACTIONS, Action, AppState, ASRResult, Capability, CAPABILITIES, busy, c
 import { BackendClient, NativeBridge } from './processes';
 import { LibraryStore } from './store';
 import { decideRuntime } from './precheck';
+import { correctedTerms } from './correction-learning';
 
 interface Task {
   id: string; action: Action; settings: Settings; destination: Destination; lexicon: Term[];
@@ -14,6 +15,9 @@ interface Task {
 export class Controller extends EventEmitter {
   readonly state: AppState;
   private task?: Task;
+  private observationID?: string;
+  private learned: Term[] = [];
+  private learningDismiss?: NodeJS.Timeout;
   private userEdited = false;
   private clock?: NodeJS.Timeout;
   private dismiss?: NodeJS.Timeout;
@@ -40,6 +44,7 @@ export class Controller extends EventEmitter {
     native.on('shortcut', ({ action, destination }: { action: Action; destination: Destination }) => {
       if (action in ACTIONS) void this.perform(action, destination);
     });
+    native.on('correction', value => this.learnCorrections(value));
     native.on('cancel', () => void this.cancel());
     native.on('permissions', () => void this.permissions());
     native.on('meter', ({ taskId, level }: { taskId: string; level: number }) => {
@@ -163,6 +168,9 @@ export class Controller extends EventEmitter {
     if (this.windowsPrecheck && missing.length) {
       this.state.page = 'settings'; this.notice('请先在设置中启用在线' + missing.map(name => CAPABILITIES[name]).join('与') + '；配置前不会上传任何内容。'); this.emit('reveal'); return;
     }
+    this.observationID = undefined;
+    this.clearLearningNotice();
+    if (this.state.platform === 'mac') void this.native.call('correction.stop').catch(() => {});
     clearTimeout(this.dismiss);
     const task: Task = { id: randomUUID(), action, settings: structuredClone(this.state.settings), destination: {}, lexicon: structuredClone(this.state.library.lexicon), started: Date.now(), manuscriptID: randomUUID(), original: '', asrResults: [] };
     this.task = task; this.state.action = action; this.state.stage = 'preparing'; this.state.notice = ''; this.state.level = 0; this.state.seconds = 0; this.state.overlayVisible = showOverlay && action !== 'selectionTranslation';
@@ -263,7 +271,9 @@ export class Controller extends EventEmitter {
     if (task.writeToFocus) {
       this.state.stage = 'inserting'; this.changed();
       try {
-        const response = await this.native.call<{ delivery: string; message?: string; name?: string }>('insert', { text: result.text });
+        const observationId = task.action === 'dictation' && this.state.platform === 'mac' ? task.id : undefined;
+        this.observationID = observationId;
+        const response = await this.native.call<{ delivery: string; message?: string; name?: string }>('insert', { text: result.text, ...(observationId ? { observationId } : {}) });
         if (!this.valid(task)) return;
         if (response.name) {
           this.state.destinationName = response.name;
@@ -398,5 +408,33 @@ export class Controller extends EventEmitter {
     this.persist(); this.changed();
   }
   removeTerm(id: string) { if (busy(this.state.stage)) return; this.state.library.lexicon = this.state.library.lexicon.filter(item => item.id !== id); this.persist(); this.changed(); }
-  async shutdown() { clearTimeout(this.dismiss); clearInterval(this.clock); await this.cancel(); this.native.stop(); await this.backend.stop(); }
+  private clearLearningNotice() {
+    clearTimeout(this.learningDismiss); this.state.learnedTerms = undefined; this.learned = [];
+  }
+  private learnCorrections(value: { observationId: string; original: string; text: string }) {
+    if (!this.observationID || value.observationId !== this.observationID) return;
+    this.observationID = undefined;
+    if (typeof value.original !== 'string' || typeof value.text !== 'string') return;
+    const terms = correctedTerms(value.original, value.text).filter(term => !this.state.library.lexicon.some(item => item.term.toLocaleLowerCase() === term.toLocaleLowerCase()));
+    if (!terms.length) return;
+    const added = terms.map(term => ({ id: randomUUID(), term, hint: '', aliases: [] }));
+    const previous = this.state.library.lexicon;
+    this.state.library.lexicon = [...previous, ...added]; this.store.library = this.state.library;
+    try { this.store.persist(); }
+    catch { this.state.library.lexicon = previous; this.notice('词库保存失败，本次纠词未收录。'); return; }
+    this.learned = added; this.state.learnedTerms = terms;
+    clearTimeout(this.learningDismiss);
+    this.learningDismiss = setTimeout(() => { this.clearLearningNotice(); this.changed(); }, 6000);
+    this.changed();
+  }
+  undoLearnedTerms() {
+    const added = new Map(this.learned.map(item => [item.id, JSON.stringify(item)]));
+    const previous = this.state.library.lexicon;
+    this.state.library.lexicon = previous.filter(item => added.get(item.id) !== JSON.stringify(item));
+    this.store.library = this.state.library;
+    try { this.store.persist(); }
+    catch { this.state.library.lexicon = previous; this.notice('撤销未保存，请重试。'); return; }
+    this.clearLearningNotice(); this.changed();
+  }
+  async shutdown() { this.observationID = undefined; this.clearLearningNotice(); clearTimeout(this.dismiss); clearInterval(this.clock); await this.cancel(); this.native.stop(); await this.backend.stop(); }
 }

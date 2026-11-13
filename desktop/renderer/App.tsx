@@ -54,7 +54,7 @@ export default function App() {
     if (view !== 'overlay') document.addEventListener('pointerdown', blot);
     return () => { alive = false; off(); document.removeEventListener('visibilitychange', visibility); document.removeEventListener('pointerdown', blot); };
   }, []);
-  if (view === 'overlay') { document.body.classList.add('overlay-body'); return state ? <Overlay state={state} /> : null; }
+  if (view === 'overlay') { document.body.classList.add('overlay-body'); return state ? (state.learnedTerms?.length ? <div className="overlay-shell"><div className="learning-toast" role="status"><span className="learning-check"><BrushCheck/></span><span className="learning-words" title={state.learnedTerms.join('、')}>已加入词库：{state.learnedTerms.join('、')}</span><button onClick={() => void api('undoLearnedTerms')}>撤销</button></div></div> : <Overlay state={state} />) : null; }
   if (!state) return <div className="starting"><BrandMark /><p>言墨正在准备<InkDrop/></p></div>;
   if (view === 'translation') return <Translation state={state} />;
   const guiding = !state.settings.onboarded;

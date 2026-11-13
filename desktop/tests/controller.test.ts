@@ -267,3 +267,40 @@ test('Windows 无 CUDA：未配置在线前不录音也不启动后端，配置�
     assert.deepEqual(Object.keys(value.backend.requests[0].online), ['asr', 'text']);
   } finally { await value.close(); }
 });
+
+test('限时纠词事件入库、去重并可撤销；不影响已有词', async () => {
+  const value = fixture();
+  try {
+    value.backend.mode = 'dual';
+    value.controller.saveTerm({ term: '已有词', hint: '', aliases: [] });
+    await value.controller.perform('dictation', {});
+    await new Promise(resolve => setTimeout(resolve, 380)); await value.controller.finishRecording();
+    const id = value.native.arguments.find(x => x.command === 'insert')!.args.observationId;
+    value.native.emit('correction', { observationId: 'stale', original: '联系沈言。', text: '联系沈砚。' });
+    assert.equal(value.controller.state.library.lexicon.length, 1);
+    value.native.emit('correction', { observationId: id, original: '联系沈言。', text: '联系沈砚。' });
+    assert.deepEqual(value.controller.state.learnedTerms, ['沈砚']);
+    assert.equal(value.controller.state.library.lexicon.length, 2);
+    assert.deepEqual(value.controller.state.library.lexicon[1].aliases, []);
+    const disk = new LibraryStore(value.directory, defaultSettings());
+    assert.equal(disk.library.lexicon.length, 2);
+    value.native.emit('correction', { observationId: id, original: '联系沈言。', text: '联系沈砚。' });
+    assert.equal(value.controller.state.library.lexicon.length, 2);
+    value.controller.undoLearnedTerms();
+    assert.equal(value.controller.state.learnedTerms, undefined);
+    assert.deepEqual(value.controller.state.library.lexicon.map(x => x.term), ['已有词']);
+  } finally { await value.close(); }
+});
+test('开始新录音会使旧纠词事件失效', async () => {
+  const value = fixture();
+  try {
+    value.backend.mode = 'dual';
+    await value.controller.perform('dictation', {});
+    await new Promise(resolve => setTimeout(resolve, 380)); await value.controller.finishRecording();
+    const id = value.native.arguments.find(x => x.command === 'insert')!.args.observationId;
+    await value.controller.perform('dictation', {});
+    value.native.emit('correction', { observationId: id, original: '联系沈言。', text: '联系沈砚。' });
+    assert.equal(value.controller.state.library.lexicon.length, 0);
+    assert.ok(value.native.calls.includes('correction.stop'));
+  } finally { await value.close(); }
+});

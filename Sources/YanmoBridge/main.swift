@@ -13,6 +13,7 @@ final class Bridge {
     private let recorder = AudioRecorder()
     private var destinations: [String: InputDestination] = [:]
     private var audioFiles = Set<URL>()
+    private var correction: CorrectionObservation?
     private var meter: Timer?
     private var active = false
     private var readContext = false
@@ -201,13 +202,28 @@ final class Bridge {
                 let reading = Task { try await target.selectedText() }; selectionTask = reading
                 defer { selectionTask = nil }
                 result = ["text": try await reading.value]
+            case "correction.stop":
+                correction?.stop(); correction = nil
             case "insert":
                 guard let text = args["text"] as? String else { throw EngineError(message: "没有可写入的正文。") }
-                let writing = Task { try await InputDestination.pasteAtCurrentFocus(text) }; deliveryTask = writing
+                correction?.stop(); correction = nil
+                let observationID = args["observationId"] as? String
+                let writing = Task {
+                    try await InputDestination.pasteAtCurrentFocus(text) { target in
+                        guard let observationID else { return }
+                        self.correction = CorrectionObservation(target: target, text: text) { [weak self] original, final in
+                            self?.send(["event": "correction", "observationId": observationID, "original": original, "text": final])
+                        }
+                    }
+                }; deliveryTask = writing
                 defer { deliveryTask = nil }
-                let name = try await writing.value
+                let name: String
+                do { name = try await writing.value }
+                catch { correction?.stop(); correction = nil; throw error }
+                correction?.start()
                 result = ["delivery": "attempted_unverified", "name": name, "message": "已向写入时的前台输入位置发送一次粘贴。"]
             case "record.start":
+                correction?.stop(); correction = nil
                 let generation = UUID(); recordingGeneration = generation
                 recorder.cancel()
                 try await recorder.start(deviceUID: args["device"] as? String ?? "")
@@ -235,6 +251,7 @@ final class Bridge {
     }
 
     func shutdown() {
+        correction?.stop(); correction = nil
         recordingGeneration = UUID(); meter?.invalidate(); recorder.cancel(); trustWatch?.invalidate()
         deliveryTask?.cancel(); selectionTask?.cancel()
         for url in audioFiles { try? FileManager.default.removeItem(at: url) }

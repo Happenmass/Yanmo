@@ -72,9 +72,12 @@ let overlayHide: NodeJS.Timeout | undefined;
 function showOverlay() {
   if (quitting || overlay.isDestroyed()) return;
   clearTimeout(overlayHide); overlayHide = undefined;
-  if (!overlay.isVisible()) {
+  const width = controller.state.learnedTerms?.length ? 440 : overlaySize.width;
+  const resized = overlay.getSize()[0] !== width;
+  if (resized) overlay.setSize(width, overlaySize.height);
+  if (!overlay.isVisible() || resized) {
     const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-    overlay.setPosition(Math.round(workArea.x + (workArea.width - overlaySize.width) / 2), workArea.y + workArea.height - overlaySize.height - overlaySize.bottom);
+    overlay.setPosition(Math.round(workArea.x + (workArea.width - width) / 2), workArea.y + workArea.height - overlaySize.height - overlaySize.bottom);
     overlay.showInactive();
   }
 }
@@ -86,7 +89,7 @@ function hideOverlay() {
 function broadcast(state: AppState) {
   if (quitting) return;
   for (const window of [mainWindow, overlay, translation]) if (window && !window.isDestroyed()) window.webContents.send('yanmo:state', state);
-  if (overlay && !overlay.isDestroyed()) { if (state.overlayVisible && state.stage !== 'idle') showOverlay(); else hideOverlay(); }
+  if (overlay && !overlay.isDestroyed()) { if (state.learnedTerms?.length || (state.overlayVisible && state.stage !== 'idle')) showOverlay(); else hideOverlay(); }
   if (initialized) updateTray();
 }
 function updateTray() {
@@ -212,6 +215,7 @@ async function invoke(action: string, value: any) {
       if (choice.response === 1) controller.deleteManuscript(value); break;
     }
     case 'termSave': if (value && typeof value.term === 'string' && typeof value.hint === 'string' && Array.isArray(value.aliases) && value.aliases.every((alias: unknown) => typeof alias === 'string')) controller.saveTerm(value); else throw new Error('词条格式无效。'); break;
+    case 'undoLearnedTerms': controller.undoLearnedTerms(); break;
     case 'termRemove': if (typeof value === 'string') controller.removeTerm(value); break;
     case 'polish': await controller.polishDraft(); break;
     case 'copyDraft': clipboard.writeText(controller.state.draft); controller.notice('正文已复制。'); break;

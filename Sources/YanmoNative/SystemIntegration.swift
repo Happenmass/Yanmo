@@ -15,8 +15,9 @@ public struct InputDestination {
     public var name: String { application.localizedName ?? "当前应用" }
     public var category: String { ApplicationCategory.detect(bundleID: application.bundleIdentifier ?? "") }
 
-    private static func focusedElement(in app: NSRunningApplication) -> AXUIElement? {
+    private static func focusedElement(in app: NSRunningApplication, timeout: Float = 0) -> AXUIElement? {
         func focused(_ root: AXUIElement) -> AXUIElement? {
+            if timeout > 0 { AXUIElementSetMessagingTimeout(root, timeout) }
             var focus: CFTypeRef?
             guard AXIsProcessTrusted(), AXUIElementCopyAttributeValue(root, kAXFocusedUIElementAttribute as CFString, &focus) == .success,
                   let focus, CFGetTypeID(focus) == AXUIElementGetTypeID() else { return nil }
@@ -77,6 +78,27 @@ public struct InputDestination {
         // Custom views without a text role or selection use window validation.
         let textInput = range != nil || ["AXTextArea", "AXTextField", "AXComboBox", "AXSecureTextField"].contains(role as? String ?? "")
         return InputDestination(application: app, element: textInput ? element : nil, selection: range, before: before, after: after, secure: secure)
+    }
+
+    /// Same-element check is deliberately independent from recording-time context.
+    public func observedValue() -> String? {
+        guard !secure, !application.isTerminated, let element,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == application.processIdentifier,
+              let focused = Self.focusedElement(in: application, timeout: 0.15), CFEqual(element, focused) else { return nil }
+        AXUIElementSetMessagingTimeout(element, 0.15)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value) == .success,
+              let text = value as? String, text.utf16.count <= 32000 else { return nil }
+        return text
+    }
+
+    public func hasMarkedText() -> Bool {
+        guard let element else { return true }
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, "AXMarkedTextRange" as CFString, &value) == .success,
+              let value, CFGetTypeID(value) == AXValueGetTypeID() else { return false }
+        var range = CFRange()
+        return AXValueGetValue(value as! AXValue, .cfRange, &range) && range.length > 0
     }
 
     /// Read only the explicit selection. Never substitute the whole field or an
@@ -160,7 +182,7 @@ public struct InputDestination {
     /// Deliver a normal paste to the application that owns focus now. The
     /// recording-time AX snapshot is context only, never an insertion lock.
     @MainActor
-    public static func pasteAtCurrentFocus(_ text: String) async throws -> String {
+    public static func pasteAtCurrentFocus(_ text: String, willPaste: ((InputDestination?) -> Void)? = nil) async throws -> String {
         guard AXIsProcessTrusted() else { throw EngineError(message: "写入其他应用需要辅助功能权限。可先在文稿中复制文字。") }
         guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: true),
               let up = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: false) else {
@@ -189,6 +211,7 @@ public struct InputDestination {
         guard let application = NSWorkspace.shared.frontmostApplication else {
             throw EngineError(message: "没有前台应用，正文已保留，请手动复制。")
         }
+        willPaste?(Self.capture(readContext: false, in: application))
         down.flags = .maskCommand; up.flags = .maskCommand
         down.postToPid(application.processIdentifier); up.postToPid(application.processIdentifier)
         try await Task.sleep(nanoseconds: 650_000_000)
