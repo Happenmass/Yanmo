@@ -4,8 +4,14 @@ export type Stage = 'idle' | 'preparing' | 'recording' | 'transcribing' | 'revie
 export type Page = 'desk' | 'manuscripts' | 'dictionary' | 'settings';
 export interface Shortcut { keyCode: number; modifiers: number; keyLabel: string; modifierKeys?: number[] }
 export interface ASRResult { engine_name: string; transcript: string; language?: string | null; language_source?: 'detected' | 'forced' | 'unknown' }
-export interface Manuscript { id: string; date: number; original: string; text: string; seconds: number; application: string; polished: boolean; deliveryNote?: string; asrResults?: ASRResult[]; userEdited?: boolean }
-export interface Term { id: string; term: string; hint: string; aliases?: string[] }
+export interface Manuscript { id: string; date: number; original: string; text: string; seconds: number; application: string; polished: boolean; deliveryNote?: string; asrResults?: ASRResult[]; userEdited?: boolean; hasAudio?: boolean; audioWarning?: string }
+export const TERM_GROUPS = { global: '全局', ai_tools: 'AI 工具', code_editor: '代码编辑器', messaging: '聊天', email: '邮件', document: '文档' } as const;
+export type TermGroup = keyof typeof TERM_GROUPS;
+export const isTermGroup = (value: unknown): value is TermGroup => typeof value === 'string' && Object.hasOwn(TERM_GROUPS, value);
+export interface Term {
+  id: string; term: string; hint: string; aliases?: string[];
+  group?: TermGroup; matchCount?: number; lastMatchedAt?: number; createdAt?: number;
+}
 export interface Library { manuscripts: Manuscript[]; lexicon: Term[] }
 export type Capability = 'asr' | 'text';
 export interface OnlineEndpoint { enabled: boolean; baseURL: string; model: string }
@@ -37,7 +43,7 @@ export interface AppState {
   translation: Translation; captureAction: Action | null; shortcutNotice: string; launchAtLogin: boolean;
   onlineKeys: Record<Capability, boolean>; runtime: RuntimeState; platform: 'mac' | 'windows';
 }
-export type TaskEvent = { event: 'stage' | 'transcript' | 'result' | 'error' | 'cancelled'; task_id: string; stage?: Stage; text?: string; original?: string; processed?: boolean; message?: string; asr_results?: ASRResult[] };
+export type TaskEvent = { event: 'stage' | 'transcript' | 'audio' | 'result' | 'error' | 'cancelled'; task_id: string; stage?: Stage; text?: string; original?: string; processed?: boolean; message?: string; asr_results?: ASRResult[]; audio_opus?: string; audio_warning?: string };
 export const LANGUAGES: Record<Language, string> = { en: '英语', 'zh-Hans': '简体中文', ja: '日语', de: '德语' };
 export const ACTIONS: Record<Action, string> = { dictation: '语音输入', voiceTranslation: '口述翻译', selectionTranslation: '划词翻译' };
 export const STYLES = ['自然整理', '保留原话', '即时消息', '文档段落'];

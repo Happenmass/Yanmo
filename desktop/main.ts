@@ -256,7 +256,7 @@ async function invoke(action: string, value: any) {
     case 'draft': if (value && typeof value.text === 'string') controller.updateDraft(value.id, value.text); break;
     case 'deleteManuscript': {
       if (typeof value !== 'string' || busy(controller.state.stage)) return;
-      const choice = await dialog.showMessageBox(mainWindow, { type: 'warning', message: '删除这份文稿？此操作无法撤销。', buttons: ['取消', '删除文稿'], defaultId: 0, cancelId: 0 });
+      const choice = await dialog.showMessageBox(mainWindow, { type: 'warning', message: '删除这份文稿及其录音？此操作无法撤销。', buttons: ['取消', '删除文稿'], defaultId: 0, cancelId: 0 });
       if (choice.response === 1) controller.deleteManuscript(value); break;
     }
     case 'termSave': if (value && typeof value.term === 'string' && typeof value.hint === 'string' && Array.isArray(value.aliases) && value.aliases.every((alias: unknown) => typeof alias === 'string')) controller.saveTerm(value); else throw new Error('词条格式无效。'); break;

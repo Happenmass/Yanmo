@@ -1,7 +1,7 @@
 import { version as appVersion } from '../../package.json';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Cloud, Copy, Pencil, Trash2, X } from 'lucide-react';
-import { ACTIONS, Action, AppState, busy, Capability, CAPABILITIES, defaultSettings, Language, LANGUAGES, manuscriptDate, MODIFIER_NAMES, Page, Settings, Shortcut, shortcutID, shortcutLabel, shortcutNeedsEventTap, STYLES, Term } from '../shared';
+import { ACTIONS, Action, AppState, busy, Capability, CAPABILITIES, defaultSettings, Language, LANGUAGES, manuscriptDate, MODIFIER_NAMES, Page, Settings, Shortcut, shortcutID, shortcutLabel, shortcutNeedsEventTap, STYLES, Term, TermGroup, TERM_GROUPS } from '../shared';
 import { renderMarkdown } from './markdown';
 
 const api = (action: string, args?: unknown) => window.yanmo.invoke(action, args) as Promise<{ ok: boolean; error?: string }>;
@@ -162,15 +162,93 @@ function Manuscripts({ state }: { state: AppState }) {
   const [search, setSearch] = useState('');
   const disabled = busy(state.stage);
   const items = state.library.manuscripts.filter(item => item.text.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
-  const note = state.library.manuscripts.find(item => item.id === state.selectedID)?.deliveryNote;
-  return <section className="manuscripts"><div className="section-heading"><h2>每一笔，都在这里。</h2><button className="button primary" disabled={disabled} onClick={() => void api('import')}>导入音频</button></div><div className="manuscript-columns"><aside className="manuscript-list"><input aria-label="搜索文稿" placeholder="搜索文稿" value={search} onChange={event => setSearch(event.target.value)}/><div className="list-scroll">{items.map(item => <div className={'manuscript-item ' + (item.id === state.selectedID ? 'selected' : '')} key={item.id}><button className="manuscript-select" disabled={disabled} onClick={() => void api('select', item.id)}><span>{item.text}</span><footer><time>{dateLabel(item.date)}</time><span>{count(item.text)} 字</span></footer></button><button className="item-delete icon-button" aria-label="删除文稿" disabled={disabled} onClick={() => void api('deleteManuscript', item.id)}><Trash2 size={12}/></button></div>)}{!items.length && <p className="list-empty">{search ? '没有找到匹配的文稿' : '暂无保存的文稿'}</p>}</div></aside><div className="manuscript-editor"><header><h3>{state.selectedID ? '文稿正文' : '当前文稿'}</h3><span>{count(state.draft)} 字</span></header>{note && <p className={'delivery-note ' + (note.startsWith('未') ? 'red' : '')}>{note}</p>}{state.draft ? <><textarea className="ink-in" key={state.selectedID} aria-label="文稿正文" value={state.draft} disabled={disabled} onChange={event => void api('draft', { id: state.selectedID, text: event.target.value })}/><details className="original"><summary>识别原文{state.asrResults.length > 1 ? ' · 两路对照' : ''}</summary>{state.asrResults.length > 1 ? state.asrResults.map((result, index) => <article key={index}><h4>{result.engine_name} · {result.language === 'Chinese' ? '中文' : result.language === 'English' ? '英语' : result.language}</h4><p>{result.transcript}</p></article>) : <p>{state.original}</p>}</details><div className="editor-actions"><button className="button primary" onClick={() => void api('copyDraft')}>复制正文</button><button className="button" disabled={disabled} onClick={() => void api('polish')}>{state.stage === 'polishing' ? '正在整理…' : '整理正文'}</button><button className="text-button export" disabled={disabled} aria-label="导出为文本" onClick={() => void api('export')}>导出</button></div></> : <div className="empty-state"><p>把刚才的想法，写下来。</p></div>}</div></div></section>;
+  const selected = state.library.manuscripts.find(item => item.id === state.selectedID);
+  const note = selected?.deliveryNote;
+  return <section className="manuscripts"><div className="section-heading"><h2>每一笔，都在这里。</h2><button className="button primary" disabled={disabled} onClick={() => void api('import')}>导入音频</button></div><div className="manuscript-columns"><aside className="manuscript-list"><input aria-label="搜索文稿" placeholder="搜索文稿" value={search} onChange={event => setSearch(event.target.value)}/><div className="list-scroll">{items.map(item => <div className={'manuscript-item ' + (item.id === state.selectedID ? 'selected' : '')} key={item.id}><button className="manuscript-select" disabled={disabled} onClick={() => void api('select', item.id)}><span>{item.text}</span><footer><time>{dateLabel(item.date)}</time><span>{count(item.text)} 字</span></footer></button><button className="item-delete icon-button" aria-label="删除文稿" disabled={disabled} onClick={() => void api('deleteManuscript', item.id)}><Trash2 size={12}/></button></div>)}{!items.length && <p className="list-empty">{search ? '没有找到匹配的文稿' : '暂无保存的文稿'}</p>}</div></aside><div className="manuscript-editor"><header><h3>{state.selectedID ? '文稿正文' : '当前文稿'}</h3><span>{count(state.draft)} 字</span></header>{note && <p className={'delivery-note ' + (note.startsWith('未') ? 'red' : '')}>{note}</p>}{selected?.audioWarning && <p className="delivery-note red">{selected.audioWarning}</p>}{state.draft ? <><textarea className="ink-in" key={state.selectedID} aria-label="文稿正文" value={state.draft} disabled={disabled} onChange={event => void api('draft', { id: state.selectedID, text: event.target.value })}/><details className="original"><summary>识别原文{state.asrResults.length > 1 ? ' · 两路对照' : ''}</summary>{state.asrResults.length > 1 ? state.asrResults.map((result, index) => <article key={index}><h4>{result.engine_name} · {result.language === 'Chinese' ? '中文' : result.language === 'English' ? '英语' : result.language}</h4><p>{result.transcript}</p></article>) : <p>{state.original}</p>}</details><div className="editor-actions"><button className="button primary" onClick={() => void api('copyDraft')}>复制正文</button><button className="button" disabled={disabled} onClick={() => void api('polish')}>{state.stage === 'polishing' ? '正在整理…' : '整理正文'}</button><button className="text-button export" disabled={disabled} aria-label="导出为文本" onClick={() => void api('export')}>导出</button></div></> : <div className="empty-state"><p>把刚才的想法，写下来。</p></div>}</div></div></section>;
 }
 
+const DICTIONARY_TABS = ['all', ...Object.keys(TERM_GROUPS) as TermGroup[]] as const;
+
 function Dictionary({ state }: { state: AppState }) {
-  const [term, setTerm] = useState(''), [hint, setHint] = useState(''), [aliases, setAliases] = useState(''), [search, setSearch] = useState(''), [editing, setEditing] = useState<string>();
-  const reset = () => { setTerm(''); setHint(''); setAliases(''); setEditing(undefined); };
-  const edit = (item: Term) => { setTerm(item.term); setHint(item.hint); setAliases((item.aliases || []).join('，')); setEditing(item.id); };
-  return <section className="dictionary"><h2>名字，值得写对。</h2><p className="intro">把常用的人名、产品名和专业词交给言墨，在整理时辅助校对。</p><fieldset disabled={busy(state.stage)}><form onSubmit={event => { event.preventDefault(); void api('termSave', { id: editing, term, hint, aliases: aliases.split(/[,，、]/) }).then(result => { if (result.ok) reset(); }); }}><div className="term-form"><input aria-label="词语" placeholder="词语，例如：言墨" value={term} onChange={event => setTerm(event.target.value)}/><input aria-label="备注" placeholder="备注（可选）" value={hint} onChange={event => setHint(event.target.value)}/><button className="button primary" disabled={!term.trim()}>{editing ? '保存词条' : '加入词库'}</button></div><div className="alias-form"><input aria-label="常见误识别" placeholder="常见误识别（可选，多个用逗号分隔）" value={aliases} onChange={event => setAliases(event.target.value)}/>{editing && <button type="button" className="text-button" onClick={reset}>取消编辑</button>}</div></form><hr/><header className="dictionary-header"><h3>全部词语 · {state.library.lexicon.length}</h3><input aria-label="搜索词语" placeholder="搜索词语" value={search} onChange={event => setSearch(event.target.value)}/></header><div className="term-list">{state.library.lexicon.filter(item => item.term.toLocaleLowerCase().includes(search.toLocaleLowerCase())).map(item => <article className="term-card" key={item.id}><div><h3>{item.term}</h3>{item.hint && <p>{item.hint}</p>}{!!item.aliases?.length && <p className="red">纠正：{item.aliases.join('、')}</p>}</div><button className="icon-button" aria-label={'编辑' + item.term} onClick={() => edit(item)}><Pencil size={13}/></button><button className="icon-button" aria-label={'移除' + item.term} onClick={() => void api('termRemove', item.id)}><X size={13}/></button></article>)}</div>{!state.library.lexicon.length && <div className="empty-state"><p>从一个熟悉的名字开始。</p></div>}</fieldset><p className="dictionary-note">词语与备注辅助消歧；你明确填写的常见误识别会按原文匹配纠正。识别原文始终保留。</p></section>;
+  const [term, setTerm] = useState('');
+  const [hint, setHint] = useState('');
+  const [aliases, setAliases] = useState('');
+  const [group, setGroup] = useState<TermGroup>('global');
+  const [tab, setTab] = useState<(typeof DICTIONARY_TABS)[number]>('all');
+  const [search, setSearch] = useState('');
+  const [editing, setEditing] = useState<string>();
+  const reset = () => { setTerm(''); setHint(''); setAliases(''); setGroup('global'); setEditing(undefined); };
+  const edit = (item: Term) => {
+    setTerm(item.term); setHint(item.hint); setAliases((item.aliases || []).join('，'));
+    setGroup(item.group ?? 'global'); setEditing(item.id);
+  };
+  const query = search.trim().toLocaleLowerCase();
+  const entries = state.library.lexicon.filter(item => (tab === 'all' || (item.group ?? 'global') === tab)
+    && item.term.toLocaleLowerCase().includes(query));
+  return <section className="dictionary">
+    <h2>名字，值得写对。</h2>
+    <p className="intro">把常用的人名、产品名和专业词交给言墨，辅助识别和整理。</p>
+    <fieldset disabled={busy(state.stage)}>
+      <form onSubmit={event => {
+        event.preventDefault();
+        void api('termSave', { id: editing, term, hint, aliases: aliases.split(/[,，、]/), group })
+          .then(result => { if (result.ok) reset(); });
+      }}>
+        <div className="term-form">
+          <input aria-label="词语" placeholder="词语，例如：言墨" value={term} onChange={event => setTerm(event.target.value)}/>
+          <input aria-label="备注" placeholder="备注（可选）" value={hint} onChange={event => setHint(event.target.value)}/>
+          <button className="button primary" disabled={!term.trim()}>{editing ? '保存词条' : '加入词库'}</button>
+        </div>
+        <div className="alias-form">
+          <input aria-label="常见误识别" placeholder="常见误识别（可选，多个用逗号分隔）" value={aliases} onChange={event => setAliases(event.target.value)}/>
+          <select aria-label="词条范围" value={group} onChange={event => setGroup(event.target.value as TermGroup)}>
+            {Object.entries(TERM_GROUPS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+          {editing && <button type="button" className="text-button" onClick={reset}>取消编辑</button>}
+        </div>
+      </form>
+      <hr/>
+      <header className="dictionary-header">
+        <div className="dictionary-tabs" role="tablist" aria-label="词库类别">
+          {DICTIONARY_TABS.map((value, index) => <button key={value} type="button" role="tab" id={'dictionary-tab-' + value}
+            aria-selected={value === tab} aria-controls="dictionary-entries" tabIndex={value === tab ? 0 : -1}
+            onClick={() => setTab(value)} onKeyDown={event => {
+              const length = DICTIONARY_TABS.length;
+              let next: number;
+              switch (event.key) {
+                case 'ArrowLeft': next = (index + length - 1) % length; break;
+                case 'ArrowRight': next = (index + 1) % length; break;
+                case 'Home': next = 0; break;
+                case 'End': next = length - 1; break;
+                default: return;
+              }
+              event.preventDefault();
+              setTab(DICTIONARY_TABS[next]);
+              event.currentTarget.parentElement?.querySelectorAll('button')[next]?.focus();
+            }}>
+            {value === 'all' ? '全部' : TERM_GROUPS[value]}
+            {value === tab && <span className="dictionary-tab-count" aria-hidden="true">{entries.length}</span>}
+          </button>)}
+        </div>
+        <input aria-label="搜索词语" placeholder="搜索词语" value={search} onChange={event => setSearch(event.target.value)}/>
+      </header>
+      <div id="dictionary-entries" className="dictionary-panel" role="tabpanel" aria-labelledby={'dictionary-tab-' + tab}>
+        {entries.length ? <div className="term-list" key={tab}>
+          {entries.map(item => <article className="term-card" key={item.id}>
+            <div>
+              <h3>{item.term}</h3>
+              <p>{TERM_GROUPS[item.group ?? 'global']}</p>
+              {item.hint && <p>{item.hint}</p>}
+              {!!item.aliases?.length && <p className="red">纠正提示：{item.aliases.join('、')}</p>}
+            </div>
+            <button className="icon-button" aria-label={'编辑' + item.term} onClick={() => edit(item)}><Pencil size={13}/></button>
+            <button className="icon-button" aria-label={'移除' + item.term} onClick={() => void api('termRemove', item.id)}><X size={13}/></button>
+          </article>)}
+        </div> : <div className="empty-state"><p>{query ? '没有找到匹配的词语。' : tab !== 'all' ? '此类别还没有词条。' : '从一个熟悉的名字开始。'}</p></div>}
+      </div>
+    </fieldset>
+    <p className="dictionary-note">全局词可用于所有应用。应用组词会在对应场景生效。备注和常见误识别用于整理时消歧。</p>
+  </section>;
 }
 
 const ASR_PRESETS = [
@@ -214,7 +292,7 @@ function Preferences({ state }: { state: AppState }) {
     <PreferenceSection title="麦克风"><label className="inline-setting"><span>输入设备</span><select aria-label="输入设备" value={settings.microphone} onChange={event => patch({ microphone: event.target.value })}><option value="">跟随系统</option>{state.native.devices.map(device => <option key={device.id} value={device.id}>{device.name}</option>)}</select></label><p className="fine-print">仅选择言墨使用的输入设备，不更改系统默认麦克风。录音无提示音，不回放麦克风声音。</p></PreferenceSection>
     <PreferenceSection title="本地模型"><label className="inline-setting"><span>模型下载来源</span><select aria-label="模型下载来源" value={settings.modelSource} onChange={event => patch({ modelSource: event.target.value as Settings['modelSource'] })}><option value="modelscope">ModelScope（默认）</option><option value="huggingface">Hugging Face</option></select></label><AsrPreset state={state}/><Field title="语音识别模型" name="asrModel" value={settings.asrModel}/><Field title="中英复核模型" name="senseVoiceModel" value={settings.senseVoiceModel}/><p className="fine-print">自动识别为中文或英文后，使用 SenseVoice Small 再识别一次；同一模型按语言调用，两路原文用于整理对照。</p><p className="fine-print">语音模型保存在用户全局缓存。空闲 1 小时后释放模型，下次录音时后台准备。</p><button className="button compact prepare-models" disabled={state.checking} onClick={() => void api('prepareModels')}>准备模型</button><div className="model-check"><Dot ready={state.models.asr}>ASR 缓存{state.models.asr ? '完整' : '待准备'}</Dot><Dot ready={state.models.sensevoice}>中英复核缓存{state.models.sensevoice ? '完整' : '待准备'}</Dot><button className="button compact" disabled={state.checking} onClick={() => void api('check')}>{state.checking ? '正在检查…' : '检查本地环境'}</button></div></PreferenceSection>
     <PreferenceSection title="API 服务"><p className="fine-print">整理和翻译共用一个 OpenAI 兼容文字 API。文字请求可包含转写、词库和已启用的光标上下文。{state.platform === 'mac' && '语音写入后 10 秒内按 Enter，当前输入框的可读正文可能与上一段口述一起交给同一 API 提取词条。'}只有启用在线语音识别时才会发送音频。API Key 加密保存。</p>{(Object.keys(CAPABILITIES) as Capability[]).map(capability => <OnlineSetting key={capability} capability={capability} state={state}/>)}</PreferenceSection>
-    <PreferenceSection title="文字与隐私"><CheckSetting title="识别后整理语气与标点（纠错仍启用）" checked={settings.polishEnabled} onChange={value => patch({ polishEnabled: value })}/><label className="inline-setting"><span>整理风格</span><select aria-label="整理风格" value={settings.style} onChange={event => patch({ style: event.target.value })}>{STYLES.map(style => <option key={style}>{style}</option>)}</select></label><CheckSetting title="读取输入框光标前后各最多 300 字，辅助识别与纠错" checked={settings.readContext} onChange={value => patch({ readContext: value })}/><CheckSetting title="在本机保存新文稿" checked={settings.keepHistory} onChange={value => patch({ keepHistory: value })}/><label className="inline-setting"><span>文稿保留时间</span><select aria-label="文稿保留时间" value={settings.retention} onChange={event => patch({ retention: Number(event.target.value) })}>{[[0, '一直保留'], [1, '24 小时'], [7, '7 天'], [30, '30 天'], [365, '1 年']].map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label><p className="fine-print">录音处理结束后删除临时音频。关闭保存不删除已有文稿；已有内容可在文稿页逐条删除。词库和设置始终仅保存在本机。</p></PreferenceSection>
+    <PreferenceSection title="文字与隐私"><CheckSetting title="识别后整理语气与标点（纠错仍启用）" checked={settings.polishEnabled} onChange={value => patch({ polishEnabled: value })}/><label className="inline-setting"><span>整理风格</span><select aria-label="整理风格" value={settings.style} onChange={event => patch({ style: event.target.value })}>{STYLES.map(style => <option key={style}>{style}</option>)}</select></label><CheckSetting title="读取输入框光标前后各最多 300 字，辅助识别与纠错" checked={settings.readContext} onChange={value => patch({ readContext: value })}/><CheckSetting title="在本机保存新文稿" checked={settings.keepHistory} onChange={value => patch({ keepHistory: value })}/><label className="inline-setting"><span>文稿保留时间</span><select aria-label="文稿保留时间" value={settings.retention} onChange={event => patch({ retention: Number(event.target.value) })}>{[[0, '一直保留'], [1, '24 小时'], [7, '7 天'], [30, '30 天'], [365, '1 年']].map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label><p className="fine-print">开启保存后，文稿与压缩录音一同保存在本机，按文稿保留时间清理。临时音频处理后删除。关闭保存不删除已有文稿与录音；删除文稿会同时删除其录音。词库和设置始终仅保存在本机。</p></PreferenceSection>
     <PreferenceSection title="启动"><CheckSetting title="登录时启动言墨" checked={state.launchAtLogin} onChange={value => void api('login', value)}/><CheckSetting title="主窗口打开时在程序坞中显示言墨" checked={settings.showDock} onChange={value => patch({ showDock: value })}/><p className="fine-print">关闭主窗口后只保留顶部菜单栏，快捷键继续可用；从菜单栏可以重新打开或退出言墨。</p><button className="text-button" onClick={() => patch({ onboarded: false })}>重新查看引导 →</button></PreferenceSection>
     {state.update && <PreferenceSection title="软件更新">
       <div className="inline-setting"><span>当前版本 {state.update.version}</span><button className="button" disabled={state.update.busy} onClick={() => void api('checkUpdates')}>检查更新</button></div>

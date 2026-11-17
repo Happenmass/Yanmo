@@ -1,12 +1,17 @@
+import io
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import numpy as np
+import soundfile as sf
+
+from engine.audio import encode_opus
 from engine.mlx_provider import MLXProvider, parse_qwen_output
-from engine.worker import Engine
-from engine.worker import build_asr_context
+from engine.worker import Engine, build_asr_context, build_asr_prompt, build_engine_context
 
 
 class FakeQwen:
@@ -104,6 +109,47 @@ class ASRTests(unittest.TestCase):
                 self.assertEqual(resolve.call_args.args[0], "mlx-community/SenseVoiceSmall")
             with self.assertRaises(ValueError):
                 engine.handle({"command": "transcribe_secondary", "audio": "synthetic.wav", "language": "Japanese"})
+
+    def testUnifiedEngineContextExposesApplicationAndLexiconToASR(self):
+        request = {
+            "application": "微信",
+            "category": "messaging",
+            "lexicon": [{"term": "言墨", "hint": "输入法", "aliases": ["研墨"]}],
+            "before": "上文",
+        }
+        ctx = build_engine_context(request)
+        self.assertEqual(ctx["application"], "微信")
+        self.assertEqual(ctx["lexicon"], [{"term": "言墨", "hint": "输入法", "aliases": ["研墨"]}])
+
+        asr_context = build_asr_context(request)
+        self.assertIn("微信", asr_context)
+        self.assertIn("言墨", asr_context)
+        self.assertIn("研墨", asr_context)
+
+        asr_prompt = build_asr_prompt(request)
+        self.assertIn("言墨", asr_prompt)
+        self.assertIn("上文", asr_prompt)
+        self.assertIsNone(build_asr_prompt({"application": "微信"}))
+
+        self.assertIsNone(build_asr_context({"application": "微信"}))
+
+    def testOpusCompressionRoundTripsSpeechAndReportsErrors(self):
+        with self.assertRaises(Exception):
+            encode_opus("nonexistent.wav")
+        with TemporaryDirectory() as directory:
+            wav_path = Path(directory, "speech.wav")
+            t = np.arange(48000) / 48000.0
+            samples = np.stack([0.25 * np.sin(2 * np.pi * 220 * t), 0.25 * np.sin(2 * np.pi * 220 * t)], axis=1).astype("float32")
+            sf.write(wav_path, samples, 48000)
+            with patch("soundfile.write", side_effect=RuntimeError("codec failure")):
+                with self.assertRaisesRegex(RuntimeError, "codec failure"):
+                    encode_opus(wav_path)
+            opus = encode_opus(wav_path)
+            self.assertTrue(opus.startswith(b"OggS"))
+            self.assertLess(len(opus), wav_path.stat().st_size // 5)
+            decoded, sr = sf.read(io.BytesIO(opus))
+            self.assertGreater(len(decoded), 0)
+            self.assertIn(sr, (16000, 48000))
 
 
 if __name__ == "__main__":

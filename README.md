@@ -37,7 +37,7 @@ ad-hoc 签名每次构建都会变化，更新版本后若辅助功能显示已�
 - 口述翻译直接执行识别→翻译→写入；划词翻译在可拖动的独立宣纸窗口显示，按普通窗口层级切换，不替换选区、不保存历史。
 - 两种翻译分别保存目标语言和快捷键，支持英语、简体中文、日语、德语。
 - Markdown 译文排版／源码、代码着色和代码复制；围栏代码与行内代码由程序保护，不执行 HTML 或加载远程图片。
-- 统计首页、20 周落笔日历、文稿搜索／编辑／复制／导出、个人词库及误识别纠正。
+- 统计首页、20 周落笔日历、文稿搜索／编辑／复制／导出、个人词库及误识别纠正。ASR 优先使用当前应用组和全局高频词，每次最多 64 词。[评测与分组规则](docs/qwen-hotword-capacity-2026-11-17.md)
 - 导入 5 分钟以内的音频、麦克风选择、历史保留周期和登录启动。关闭主窗口后隐藏程序坞图标，仅保留菜单栏及快捷键；菜单栏图标左键打开主窗口，右键打开菜单，重新打开窗口时按偏好恢复程序坞图标。
 - 录音与输入框可读性分离；可读正文只作上下文，读取失败仍正常录音。
 - 正文生成后向当时前台应用的当前焦点粘贴一次，允许途中切换应用、窗口和光标。开启历史记录时保存文稿。导入音频的结果只在文稿页显示。
@@ -49,7 +49,68 @@ Electron、Swift 系统桥接和独立 Python/MLX 运行时均随应用包交付
 
 ## 模块图
 
-桌面端采用 Electron + React，通过 Swift 系统桥接处理快捷键、录音、选区和跨应用写入。独立 Python 后端负责语音识别、整理与翻译。[查看当前完整模块图与源码入口](docs/architecture/current-modules.md) · [Mac 实现与验证](docs/electron-mac-2026-10-21.md)
+桌面端采用 Electron + React，通过 Swift 系统桥接处理快捷键、录音、选区和跨应用写入。独立 Python 后端负责语音识别、整理与翻译。[查看当前完整模块图与源码入口](docs/architecture/current-modules.md) · [架构梳理与分层评审](docs/architecture/architecture-review-2026-11-17.md) · [Mac 实现与验证](docs/electron-mac-2026-10-21.md)
+
+```mermaid
+flowchart TB
+    subgraph UI["① 界面层 · Electron Renderer（React）"]
+        Views["主窗口 · 录音浮层 · 划词翻译窗"]
+    end
+
+    subgraph APP["② 应用层 · Electron 主进程"]
+        IPC["IPC 网关 · main.ts · 窗口 / 菜单栏 / 更新"]
+        Ctl["任务控制器 · controller.ts · 状态机 / 取消 / 交付 / 纠词学习"]
+        Store[("LibraryStore · 设置 / 文稿 / 词库")]
+        Keys[("API Key · safeStorage 加密")]
+        Clients["进程客户端 · processes.ts · NativeBridge / BackendClient"]
+    end
+
+    subgraph OS["③ 系统桥接 · Swift YanmoBridge"]
+        Hot["快捷键 · 权限 · 设备"]
+        Rec["录音 / 导入 · 临时 WAV"]
+        AX["辅助功能 · 上下文 / 选区 / 粘贴 / 纠词观察"]
+    end
+
+    subgraph SVC["④ 推理服务 · Python backend/"]
+        API["FastAPI · 127.0.0.1 + 随机令牌 · 校验 / 单任务队列 / SSE"]
+        Pipe["任务流水线 · pipeline.py · 识别 → 复核 → 整理或翻译"]
+    end
+
+    subgraph ENG["⑤ 推理引擎 · engine/"]
+        Engine["Engine 门面 · worker.py · 本地/在线路由 · 长度与空正文检查"]
+        Prompt["提示词与载荷 · polish.txt / prompt.txt / fusion.py"]
+        MLX["MLXProvider · Qwen3-ASR + SenseVoice（Mac）"]
+        Torch["TorchProvider · Qwen3-ASR（Windows CUDA）"]
+        Online["online_provider · OpenAI 兼容接口"]
+        Cache["model_cache · 只解析本地缓存"]
+    end
+
+    Models[("用户级模型缓存")]
+    Prep["模型准备进程 · prepare_models.py"]
+    TextAPI["文字 API · 整理 / 保留原话 / 翻译 / 纠词"]
+    ASRAPI["语音识别 API（可选）"]
+
+    Views <-->|"preload · yanmo:action / yanmo:state"| IPC
+    IPC --> Ctl
+    Ctl <--> Store
+    Keys -.->|"请求时注入"| Ctl
+    Ctl --> Clients
+    Clients <-->|"stdin / stdout 逐行 JSON"| OS
+    Clients -->|"认证 HTTP · 任务参数 + WAV / 文本"| API
+    API -->|"SSE · 阶段 / 转写 / 结果"| Clients
+    API --> Pipe --> Engine
+    Engine --> Prompt
+    Engine -->|"默认本机"| MLX
+    Engine --> Torch
+    Engine --> Online
+    Engine --> Cache
+    Cache --> Models
+    Online -->|"必需"| TextAPI
+    Online -. "显式启用时发送音频" .-> ASRAPI
+    IPC -->|"手动准备模型"| Prep --> Models
+```
+
+界面只经 preload 调用主进程；应用层分别调用系统桥接和推理服务，不直接执行模型。后端返回阶段、转录、可选压缩录音或归档警告，以及最终正文；文稿与音频由主进程统一提交 SQLite，跨应用写入由系统桥接完成。
 
 ## 构建与启动
 
@@ -101,9 +162,9 @@ ad-hoc 开发签名随构建变化。若系统显示已授权但当前版本仍�
 - 运行时设置 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`，模型定位只使用本地缓存；显式准备模型在单独进程中执行。
 - 只有显式启用在线语音识别时才会发送音频。文字 API 接收转写或选中的文字，整理任务可同时带上词库与光标上下文。光标上下文默认关闭，启用后可读取前后各最多 300 字。Mac 上在语音写入后 10 秒内按 Enter，当前输入框的可读正文可能与上一段口述一起发送给同一文字 API。模型判断两段对应时才提取纠词词条。SenseVoice 独立识别。
 - Electron 数据在 `~/Library/Application Support/Yanmo/electron/`；文件权限为 600，目录为 700，原子保存。
-- 首次启动复制旧版 `library.json`、保存迁移备份，并导入 macOS UserDefaults 中的快捷键、语言及隐私设置；保留旧数据源。损坏文件暂停覆盖保存。
+- SQLite `yanmo.db` 是文稿、压缩录音、词库和设置的唯一来源。首次迁移旧 JSON 与 v0.3 数据，成功后旧 JSON 仅留作备份；损坏的待迁移源暂停保存，已迁移数据库不再读取旧 JSON。文稿与音频同一事务提交。
 - 测试可用 `YANMO_DATA_DIR` 指定隔离数据目录，此时不导入个人数据。
-- 临时音频在正常结束、取消或受控退出后删除；系统强制终止时仍可能残留在系统临时目录。
+- 开启“在本机保存新文稿”时，识别后的录音压缩为 Opus，随文稿保留；删除文稿或保留期清理同时删除其录音。压缩失败会提示“录音未保存”，正文处理继续；关闭保存不归档新录音，也不删除已有历史。临时音频在正常结束、取消或受控退出后删除；系统强制终止时仍可能残留在系统临时目录。
 
 自然整理使用 [polish.txt](engine/polish.txt)，程序原样采用 API 返回的正文。遇到空输出、截断、取消或运行失败时，已取得的识别原文可用于重试。手动修改文稿后，后续整理以用户修订为准。见[双路识别与正文生成](docs/asr-fusion.md)。
 

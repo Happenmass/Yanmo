@@ -1,5 +1,9 @@
+import base64
+import io
 import unittest
+import wave
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from threading import Event
 from unittest.mock import patch
 from backend.pipeline import run_pipeline
@@ -7,6 +11,39 @@ from engine.worker import Engine
 
 
 class PipelineTests(unittest.TestCase):
+    def testArchiveFailureWarnsWithoutLosingTextAndTranscriptPrecedesEncoding(self):
+        events = []
+        class StubEngine:
+            def handle(self, request):
+                return {"text": "合成原文" if request["command"] == "transcribe" else "合成正文"}
+        def broken_encoder(_audio):
+            self.assertTrue(any(e["event"] == "transcript" for e in events))
+            raise RuntimeError("synthetic codec error")
+        request = self.request("dictation")
+        request["archive_audio"] = True
+        with patch("backend.pipeline.encode_opus", side_effect=broken_encoder):
+            run_pipeline(StubEngine(), request, "fixture.wav", Event(), events.append)
+        self.assertEqual(events[-1]["event"], "result")
+        self.assertEqual(events[-1]["text"], "合成正文")
+        warning = next(e for e in events if e["event"] == "audio")
+        self.assertIn("录音未保存", warning["audio_warning"])
+        self.assertNotIn("synthetic", warning["audio_warning"])
+
+    def testDisabledHistoryAndCancellationDoNotEncodeAudio(self):
+        class StubEngine:
+            def handle(self, request): return {"text": "合成正文"}
+        for enabled in (False, True):
+            cancelled, events = Event(), []
+            request = self.request("dictation")
+            request["archive_audio"] = enabled
+            def emit(event):
+                events.append(event)
+                if enabled and event["event"] == "transcript": cancelled.set()
+            with patch("backend.pipeline.encode_opus") as encode:
+                run_pipeline(StubEngine(), request, "fixture.wav", cancelled, emit)
+                encode.assert_not_called()
+            self.assertEqual(events[-1]["event"], "cancelled" if enabled else "result")
+
     def request(self, operation="voiceTranslation"):
         return {"operation": operation, "text": "合成文本", "target_language": "en", "polish": True, "style": "自然整理", "models": {}, "context": {}}
 
@@ -168,3 +205,46 @@ class PipelineTests(unittest.TestCase):
                 run_pipeline(engine, request, None, Event(), events.append)
                 self.assertEqual(events[-1]["event"], "result")
                 self.assertEqual(generate.call_args.args[1]["INSTRUCTION"], instruction)
+
+    def testDictationForwardsApplicationLexiconAndOpusAudio(self):
+        calls, events = [], []
+        class StubEngine:
+            def handle(self, request):
+                calls.append(request)
+                if request["command"] == "transcribe":
+                    return {"text": "言墨识别", "engine": "Qwen3-ASR", "secondary": False, "language": "Chinese", "language_source": "detected"}
+                return {"text": "言墨正文"}
+        request = self.request("dictation")
+        request["archive_audio"] = True
+        request["asr_hotwords"] = ["言墨"]
+        request["context"] = {"application": "微信", "category": "messaging", "lexicon": [{"term": "言墨", "hint": "输入法", "aliases": ["研墨"]}, {"term": "只给整理"}]}
+        with TemporaryDirectory() as directory:
+            wav_path = Path(directory, "speech.wav")
+            with wave.open(str(wav_path), "wb") as audio:
+                audio.setparams((1, 2, 16000, 16000, "NONE", ""))
+                audio.writeframes(b"\x01\x00" * 16000)
+            run_pipeline(StubEngine(), request, wav_path, Event(), events.append)
+        self.assertEqual(calls[0]["application"], "微信")
+        self.assertEqual(calls[0]["lexicon"], ["言墨"])
+        self.assertEqual(calls[1]["lexicon"], request["context"]["lexicon"])
+        audio_event = next(event for event in events if event["event"] == "audio")
+        self.assertTrue(base64.b64decode(audio_event["audio_opus"]).startswith(b"OggS"))
+
+    def testEmptyASRSelectionAndLegacyScopeStaySeparateFromTextGlossary(self):
+        lexicon = [{"term": f"词条{i}", "hint": "备注", "aliases": [f"误识别{i}"]} for i in range(80)]
+        for selection, expected in ((None, [f"词条{i}" for i in range(64)]), ([], [])):
+            with self.subTest(selection=selection):
+                calls, events = [], []
+
+                class StubEngine:
+                    def handle(self, request):
+                        calls.append(request)
+                        return {"text": "正文"}
+
+                request = self.request("dictation")
+                request["context"]["lexicon"] = lexicon
+                request["asr_hotwords"] = selection
+                run_pipeline(StubEngine(), request, Path("fixture.wav"), Event(), events.append)
+                self.assertEqual(calls[0]["lexicon"], expected)
+                self.assertEqual(calls[-1]["lexicon"], lexicon)
+                self.assertEqual(events[-1]["event"], "result")

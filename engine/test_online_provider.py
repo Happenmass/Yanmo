@@ -115,6 +115,26 @@ class OnlineProviderTests(unittest.TestCase):
             self.assertEqual((result["text"], result["engine"]), ("Online text", "remote-model"))
             self.assertEqual(local.calls, ["load_asr", "transcribe"])
 
+    def testOnlineASRReceivesFlattenedLexiconPrompt(self):
+        calls = []
+        def post(url, **kwargs):
+            calls.append((url, kwargs))
+            return Response(200, {"text": "言墨测试"})
+        with TemporaryDirectory() as directory, patch.object(online_provider.httpx, "post", post):
+            audio = Path(directory, "a.wav")
+            audio.write_bytes(b"RIFF")
+            result = Engine().handle({
+                "command": "transcribe",
+                "audio": str(audio),
+                "application": "微信",
+                "lexicon": [{"term": "言墨", "hint": "输入法", "aliases": ["研墨"]}],
+                "before": "测试前缀",
+                "online": {"asr": CONFIG},
+            })
+            self.assertEqual(result["text"], "言墨测试")
+        self.assertIn("言墨", calls[0][1]["data"]["prompt"])
+        self.assertIn("测试前缀", calls[0][1]["data"]["prompt"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -105,13 +105,42 @@ public enum WritingStyle: String, CaseIterable, Codable {
 }
 
 public enum ApplicationCategory {
-    public static func detect(bundleID: String) -> String {
-        let id = bundleID.lowercased()
-        if ["mail", "outlook"].contains(where: id.contains) { return "email" }
-        if ["wechat", "xinwechat", "dingtalk", "slack", "lark", "feishu", "telegram"].contains(where: id.contains) { return "messaging" }
-        if ["xcode", "vscode", "vs.code", "cursor", "zed", "jetbrains"].contains(where: id.contains) { return "code_editor" }
-        if ["word", "notion", "obsidian", "pages", "textedit"].contains(where: id.contains) { return "document" }
-        // A browser can contain a document, email or chat. Do not assume search.
+    // Prefer full app identifiers. A store category such as developer-tools
+    // covers AI apps, editors, terminals and many tools outside these groups.
+    private static let byBundleID: [String: String] = {
+        let groups = [
+            "ai_tools": ["com.openai.chat", "com.openai.codex", "com.anthropic.claudefordesktop", "com.claude-code-haha.desktop",
+                         "com.google.antigravity", "ai.opencode.desktop", "com.kangfenmao.cherrystudio", "ai.elementlabs.lmstudio"],
+            "code_editor": ["com.apple.dt.xcode", "com.microsoft.vscode", "com.microsoft.vscodeinsiders", "com.vscodium",
+                            "com.todesktop.230313mzl4w4u92", "dev.zed.zed", "dev.zed.zed-preview", "com.sublimetext.4",
+                            "com.jetbrains.intellij", "com.jetbrains.intellij.ce", "com.jetbrains.pycharm", "com.jetbrains.pycharm.ce",
+                            "com.jetbrains.webstorm", "com.jetbrains.goland", "com.jetbrains.rider", "com.jetbrains.clion",
+                            "com.jetbrains.phpstorm", "com.jetbrains.rubymine", "com.google.android.studio"],
+            "messaging": ["com.tencent.xinwechat", "com.tencent.weworkmac", "com.tencent.qq", "com.tinyspeck.slackmacgap",
+                          "com.electron.lark", "com.electron.feishu", "com.alibaba.dingtalkmac", "com.dingtalk.mac",
+                          "5zsl2cju2t.com.dingtalk.mac", "ru.keepcoder.telegram", "com.tdesktop.telegram", "com.hnc.discord",
+                          "com.microsoft.teams", "com.microsoft.teams2", "net.whatsapp.whatsapp", "org.whispersystems.signal-desktop"],
+            "email": ["com.apple.mail", "com.microsoft.outlook", "org.mozilla.thunderbird", "com.readdle.smartemail-macos",
+                      "com.readdle.sparkdesktop", "com.mimestream.mimestream", "com.tencent.foxmail"],
+            "document": ["com.apple.iwork.pages", "com.apple.textedit", "com.apple.notes", "com.microsoft.word", "com.microsoft.onenote.mac",
+                         "notion.id", "md.obsidian", "com.kingsoft.wpsoffice.mac", "abnerworks.typora", "com.electron.logseq"],
+        ]
+        return Dictionary(uniqueKeysWithValues: groups.flatMap { group, ids in ids.map { ($0, group) } })
+    }()
+
+    private static let terminals: Set<String> = [
+        "com.apple.terminal", "com.googlecode.iterm2", "com.mitchellh.ghostty", "dev.warp.warp-stable", "com.github.wez.wezterm",
+    ]
+
+    public static func isTerminal(bundleID: String) -> Bool { terminals.contains(bundleID.lowercased()) }
+
+    public static func detect(bundleID: String, terminalTitle: String? = nil) -> String {
+        if let category = byBundleID[bundleID.lowercased()] { return category }
+        if isTerminal(bundleID: bundleID), let terminalTitle,
+           terminalTitle.range(of: #"(?:^|[—–|]\s*)\s*[✳✻*]?\s*(?:Claude Code|Codex CLI|OpenCode|Gemini CLI)\s*(?=$|[—–|:])"#,
+                               options: [.regularExpression, .caseInsensitive]) != nil {
+            return "ai_tools"
+        }
         return "general"
     }
 }

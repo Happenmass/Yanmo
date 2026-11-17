@@ -13,7 +13,25 @@ public struct InputDestination {
     public let secure: Bool
 
     public var name: String { application.localizedName ?? "当前应用" }
-    public var category: String { ApplicationCategory.detect(bundleID: application.bundleIdentifier ?? "") }
+    public func category(readContext: Bool) -> String {
+        let bundleID = application.bundleIdentifier ?? ""
+        var terminalTitle: String?
+        if readContext, !secure, ApplicationCategory.isTerminal(bundleID: bundleID), AXIsProcessTrusted() {
+            let root = AXUIElementCreateApplication(application.processIdentifier)
+            AXUIElementSetMessagingTimeout(root, 0.025)
+            var value: CFTypeRef?
+            if AXUIElementCopyAttributeValue(root, kAXFocusedWindowAttribute as CFString, &value) == .success,
+               let value, CFGetTypeID(value) == AXUIElementGetTypeID() {
+                let window = value as! AXUIElement
+                AXUIElementSetMessagingTimeout(window, 0.025)
+                var title: CFTypeRef?
+                if AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &title) == .success {
+                    terminalTitle = title as? String
+                }
+            }
+        }
+        return ApplicationCategory.detect(bundleID: bundleID, terminalTitle: terminalTitle)
+    }
 
     private static func focusedElement(in app: NSRunningApplication, timeout: Float = 0) -> AXUIElement? {
         func focused(_ root: AXUIElement) -> AXUIElement? {

@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { Controller } from '../controller';
 import { LibraryStore } from '../store';
 import { checkOnlineURL, defaultSettings, TaskEvent } from '../shared';
@@ -35,6 +36,7 @@ class Backend {
         { engine_name: 'Qwen3-ASR', transcript: '预算3500元，不是周四。', language: 'Chinese', language_source: 'detected' },
         { engine_name: 'SenseVoice Small', transcript: '预算三千五百元，不是周四。', language: 'Chinese', language_source: 'forced' },
       ] });
+      if (request.archive_audio) event({ event: 'audio', audio_opus: Buffer.from('OggS\x00\x02dual-opus').toString('base64') });
       event({ event: 'result', text: '预算3500元，不是周四。', processed: true });
     } else if (this.mode === 'translation') {
       event({ event: 'result', text: 'I want to create a new animation effect.', processed: true });
@@ -130,9 +132,13 @@ test('并发设置修改串行提交，不互相覆盖', async () => {
 test('整理失败保留原文，绝不自动写入降级内容', async () => {
   const value = fixture();
   try {
-    await value.controller.importAudio('/synthetic-input.wav');
+    value.controller.saveTerm({ term: '预算', hint: '', aliases: [] });
+    await value.controller.perform('dictation', {});
+    await new Promise(resolve => setTimeout(resolve, 380));
+    await value.controller.finishRecording();
     assert.equal(value.controller.state.library.manuscripts.length, 1);
     assert.equal(value.controller.state.draft, '预算3500元，不是周四。');
+    assert.equal(value.controller.state.library.lexicon[0].matchCount, undefined);
     assert.equal(value.controller.state.stage, 'failure'); assert.ok(!value.native.calls.includes('insert'));
     assert.ok(value.native.calls.includes('audio.delete'));
   } finally { await value.close(); }
@@ -140,11 +146,15 @@ test('整理失败保留原文，绝不自动写入降级内容', async () => {
 test('取消后丢弃迟到的完成结果，原文只保存一次', async () => {
   const value = fixture(); value.backend.mode = 'cancel';
   try {
-    const processing = value.controller.importAudio('/synthetic-input.wav');
+    value.controller.saveTerm({ term: '迟到的结果', hint: '', aliases: [] });
+    await value.controller.perform('dictation', {});
+    await new Promise(resolve => setTimeout(resolve, 380));
+    const processing = value.controller.finishRecording();
     while (!value.backend.done) await new Promise(resolve => setTimeout(resolve, 1));
     await value.controller.cancel(); await processing;
     assert.equal(value.controller.state.draft, '预算3500元，不是周四。');
     assert.equal(value.controller.state.library.manuscripts.length, 1);
+    assert.equal(value.controller.state.library.lexicon[0].matchCount, undefined);
     assert.ok(!value.native.calls.includes('insert')); assert.equal(value.controller.state.stage, 'idle');
   } finally { await value.close(); }
 });
@@ -295,7 +305,7 @@ test('限时纠词事件入库、去重并可撤销；不影响已有词', async
   try {
     value.backend.mode = 'dual';
     value.controller.saveTerm({ term: '已有词', hint: '', aliases: [] });
-    await value.controller.perform('dictation', {});
+    await value.controller.perform('dictation', { name: 'Claude', category: 'ai_tools' });
     await new Promise(resolve => setTimeout(resolve, 380)); await value.controller.finishRecording();
     const id = value.native.arguments.find(x => x.command === 'insert')!.args.observationId;
     value.native.emit('correction', { observationId: 'stale', original: '联系沈言。', text: '联系沈砚。' });
@@ -307,7 +317,10 @@ test('限时纠词事件入库、去重并可撤销；不影响已有词', async
     assert.equal(value.controller.state.library.lexicon.length, 2);
     assert.deepEqual(value.controller.state.library.lexicon[1].aliases, []);
     const disk = new LibraryStore(value.directory, defaultSettings());
-    assert.equal(disk.library.lexicon.length, 2);
+    try {
+      assert.equal(disk.library.lexicon.length, 2);
+      assert.equal(disk.library.lexicon[1].group, 'ai_tools');
+    } finally { disk.close(); }
     value.native.emit('correction', { observationId: id, original: '联系沈言。', text: '联系沈砚。' });
     assert.equal(value.backend.correctionRequests.length, 1);
     assert.equal(value.controller.state.library.lexicon.length, 2);
@@ -329,4 +342,185 @@ test('开始新录音会使旧纠词事件失效', async () => {
     assert.equal(value.backend.correctionRequests.length, 0);
     assert.ok(value.native.calls.includes('correction.stop'));
   } finally { await value.close(); }
+});
+test('控制器发送统一 lexicon 字段并把 Opus 音频随文稿存入数据库', async () => {
+  const value = fixture(); value.backend.mode = 'dual';
+  try {
+    value.controller.saveTerm({ term: '言墨', hint: '本地语音输入法', aliases: ['研墨'] });
+    await value.controller.perform('dictation', { id: 'wx', name: '微信', category: 'messaging' });
+    await new Promise(resolve => setTimeout(resolve, 380));
+    await value.controller.finishRecording();
+
+    const context = value.backend.requests[0].context;
+    assert.equal(context.application, '微信');
+    assert.deepEqual(value.backend.requests[0].asr_hotwords, ['言墨']);
+    assert.deepEqual(context.lexicon, [{ term: '言墨', hint: '本地语音输入法', aliases: ['研墨'] }]);
+    assert.equal('key_terms' in context, false);
+    assert.equal('term_notes' in context, false);
+
+    const item = value.controller.state.library.manuscripts[0];
+    assert.equal(item.hasAudio, true);
+    assert.deepEqual(value.controller.store.getAudio(item.id), Buffer.from('OggS\x00\x02dual-opus'));
+
+    // Updating draft and deleting manuscript keeps/cleans audio consistently.
+    value.controller.updateDraft(item.id, '用户修改后的正文');
+    assert.deepEqual(value.controller.store.getAudio(item.id), Buffer.from('OggS\x00\x02dual-opus'));
+    value.controller.deleteManuscript(item.id);
+    assert.equal(value.controller.store.getAudio(item.id), undefined);
+  } finally { await value.close(); }
+});
+
+test('实际任务只发本组与全局热词，成功口述给未入选的规范词计一次，关闭历史仍保存词频', async () => {
+  const value = fixture();
+  try {
+    await value.controller.updateSettings({ keepHistory: false });
+    const dictionary = value.controller.state.library.lexicon;
+    dictionary.push(...Array.from({ length: 48 }, (_, index) => ({
+      id: `ranked${index}`, term: `工具${index}`, hint: '', group: 'ai_tools' as const, matchCount: 10,
+    })));
+    dictionary.push(
+      { id: 'scoped', term: 'Claude Code', hint: '工具说明', aliases: ['克劳德'], group: 'ai_tools' },
+      { id: 'global-duplicate', term: 'Claude Code', hint: '全局说明' },
+      { id: 'hidden', term: 'Claude Code', hint: '', group: 'document' },
+      ...Array.from({ length: 16 }, (_, index) => ({ id: `global${index}`, term: `全局${index}`, hint: '' })),
+    );
+    value.controller.store.persist();
+    value.backend.run = async (request, _audio, emit) => {
+      value.backend.requests.push(request);
+      emit({ event: 'result', task_id: request.task_id, text: '打开 Claude Code，再回到 Claude Code。', processed: true });
+    };
+    await value.controller.perform('dictation', { name: 'Claude', category: 'ai_tools' });
+    await new Promise(resolve => setTimeout(resolve, 380));
+    await value.controller.finishRecording();
+    const request = value.backend.requests[0];
+    assert.equal(request.asr_hotwords.length, 64);
+    assert.equal(request.asr_hotwords.includes('Claude Code'), false);
+    assert.deepEqual(request.context.lexicon.filter((item: { term: string }) => item.term === 'Claude Code'), [
+      { term: 'Claude Code', hint: '工具说明', aliases: ['克劳德'] },
+    ]);
+    const disk = new LibraryStore(value.directory, defaultSettings());
+    try {
+      assert.equal(disk.library.manuscripts.length, 0);
+      assert.equal(disk.library.lexicon.find(x => x.id === 'scoped')?.matchCount, 1);
+      assert.ok(disk.library.lexicon.find(x => x.id === 'scoped')?.lastMatchedAt);
+      for (const id of ['global-duplicate', 'hidden']) assert.equal(disk.library.lexicon.find(x => x.id === id)?.matchCount, undefined);
+    } finally { disk.close(); }
+
+    await value.controller.perform('voiceTranslation', { name: 'Claude', category: 'ai_tools' });
+    await new Promise(resolve => setTimeout(resolve, 380));
+    await value.controller.finishRecording();
+    assert.equal(value.controller.state.library.lexicon.find(x => x.id === 'scoped')?.matchCount, 1);
+  } finally { await value.close(); }
+});
+
+
+test('音频编码失败仍交付正文，并在文稿中持久保留警告', async () => {
+  const value = fixture();
+  value.backend.run = async (request, _audio, emit) => {
+    assert.equal(request.archive_audio, true);
+    const task_id = request.task_id;
+    emit({ event: 'transcript', task_id, text: '合成原文' });
+    emit({ event: 'audio', task_id, audio_warning: '录音未保存：音频压缩失败，文字处理继续。' });
+    emit({ event: 'result', task_id, text: '合成正文', processed: true });
+  };
+  try {
+    await value.controller.importAudio('/synthetic.wav');
+    const item = value.controller.state.library.manuscripts[0];
+    assert.equal(item.text, '合成正文'); assert.equal(item.hasAudio, undefined);
+    assert.match(item.audioWarning!, /录音未保存/);
+    value.controller.store.close();
+    const reopened = new LibraryStore(value.directory, defaultSettings());
+    try { assert.equal(reopened.library.manuscripts[0].audioWarning, item.audioWarning); } finally { reopened.close(); }
+  } finally { await value.close(); }
+});
+
+test('数据库拒绝音频文稿时保留可复制正文，不显示已保存历史', async () => {
+  const value = fixture(); value.backend.mode = 'dual';
+  const db = new DatabaseSync(value.controller.store.dbPath);
+  db.exec("CREATE TRIGGER reject_audio BEFORE INSERT ON manuscripts WHEN new.audio_opus IS NOT NULL BEGIN SELECT RAISE(ABORT, 'synthetic disk failure'); END");
+  try {
+    value.controller.saveTerm({ term: '预算', hint: '', aliases: [] });
+    await value.controller.perform('dictation', {});
+    await new Promise(resolve => setTimeout(resolve, 380));
+    await value.controller.finishRecording();
+    assert.match(value.controller.state.draft, /3500/);
+    assert.equal(value.controller.state.selectedID, null);
+    assert.equal(value.controller.state.library.manuscripts.length, 0);
+    assert.match(value.controller.state.notice, /未保存/);
+    assert.equal(db.prepare('SELECT count(*) AS n FROM manuscripts').get()!.n, 0);
+    assert.equal(db.prepare('SELECT match_count FROM lexicon').get()?.match_count, 0);
+    assert.equal(value.controller.state.library.lexicon[0].matchCount, undefined);
+  } finally { db.close(); await value.close(); }
+});
+
+test('关闭历史保存时请求不归档音频，正文仍正常返回', async () => {
+  const value = fixture(); value.backend.mode = 'dual';
+  try {
+    await value.controller.updateSettings({ keepHistory: false });
+    await value.controller.importAudio('/synthetic.wav');
+    assert.equal(value.backend.requests[0].archive_audio, false);
+    assert.equal(value.controller.state.library.manuscripts.length, 0);
+    assert.match(value.controller.state.draft, /3500/);
+  } finally { await value.close(); }
+});
+
+
+for (const outcome of ['failure', 'cancel'] as const) test(`音频文稿保存失败时${outcome}不覆盖未保存提示`, async () => {
+  const value = fixture();
+  const db = new DatabaseSync(value.controller.store.dbPath);
+  db.exec("CREATE TRIGGER reject_audio BEFORE INSERT ON manuscripts WHEN new.audio_opus IS NOT NULL BEGIN SELECT RAISE(ABORT, 'synthetic disk failure'); END");
+  let started!: () => void;
+  const entered = new Promise<void>(resolve => { started = resolve; });
+  value.backend.run = async (request, _audio, emit) => {
+    const task_id = request.task_id;
+    emit({ event: 'transcript', task_id, text: '合成原文' });
+    emit({ event: 'audio', task_id, audio_opus: Buffer.from('OggS-fixture').toString('base64') });
+    started();
+    if (outcome === 'cancel') await new Promise<void>(resolve => { value.backend.done = resolve; });
+    else emit({ event: 'error', task_id, message: '模拟整理失败' });
+  };
+  try {
+    const processing = value.controller.importAudio('/synthetic.wav');
+    await entered;
+    if (outcome === 'cancel') await value.controller.cancel();
+    await processing;
+    assert.match(value.controller.state.notice, /未保存/);
+    assert.equal(value.controller.state.selectedID, null);
+    assert.equal(value.controller.state.draft, '合成原文');
+    assert.equal(db.prepare('SELECT count(*) AS n FROM manuscripts').get()!.n, 0);
+  } finally { db.close(); await value.close(); }
+});
+
+test('跨应用写入失败后再次保存识别原文仍保留失败说明和音频', async () => {
+  const value = fixture(); value.backend.mode = 'dual';
+  const call = value.native.call.bind(value.native);
+  value.native.call = async (command, args = {}) => {
+    if (command === 'insert') throw new Error('模拟写入失败');
+    return call(command, args);
+  };
+  try {
+    await value.controller.perform('dictation', {});
+    await new Promise(resolve => setTimeout(resolve, 380));
+    await value.controller.finishRecording();
+    const item = value.controller.state.library.manuscripts[0];
+    assert.match(item.deliveryNote!, /模拟写入失败/);
+    assert.equal(item.hasAudio, true);
+    assert.ok(value.controller.store.getAudio(item.id)?.length);
+  } finally { await value.close(); }
+});
+
+test('手动整理已有文稿保存失败时保留结果和未保存提示', async () => {
+  const value = fixture(); value.backend.mode = 'dual';
+  const db = new DatabaseSync(value.controller.store.dbPath);
+  try {
+    await value.controller.importAudio('/synthetic.wav');
+    const id = value.controller.state.selectedID!;
+    const saved = value.controller.state.draft;
+    value.backend.run = async (request, _audio, emit) => emit({ event: 'result', task_id: request.task_id, text: '合成整理结果', processed: true });
+    db.exec("CREATE TRIGGER reject_edit BEFORE INSERT ON manuscripts BEGIN SELECT RAISE(ABORT, 'synthetic disk failure'); END");
+    await value.controller.polishDraft();
+    assert.equal(value.controller.state.draft, '合成整理结果');
+    assert.match(value.controller.state.notice, /未保存/);
+    assert.equal(db.prepare('SELECT text FROM manuscripts WHERE id=?').get(id)!.text, saved);
+  } finally { db.close(); await value.close(); }
 });

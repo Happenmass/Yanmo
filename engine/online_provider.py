@@ -39,10 +39,14 @@ def _post(config: dict, path: str, **kwargs) -> dict:
         raise ValueError("在线服务返回了无法识别的结果。") from None
 
 
-def transcribe(config: dict, audio: Path, language=None) -> str:
+def transcribe(config: dict, audio: Path, language=None, prompt: str | None = None) -> str:
+    # OpenAI 兼容 /audio/transcriptions (如 Whisper / GPT-4o-transcribe) 仅支持 language 与纯文本 prompt 热词偏置；
+    # 不支持结构化传入当前应用 (application/category) 或词条别名映射 (aliases)，因此仅将词库热词与上下文扁平化写入 prompt。
     data = {"model": config["model"], "response_format": "json"}
     if language:
         data["language"] = language
+    if prompt:
+        data["prompt"] = prompt
     with audio.open("rb") as file:
         result = _post(config, "/audio/transcriptions", data=data, files={"file": (audio.name, file, "audio/wav")})
     return str(result.get("text") or "").strip()

@@ -32,6 +32,7 @@ def parse_asr_output(raw: str):
 
 
 class TorchProvider:
+    # PyTorch/transformers 路径当前未接入 SenseVoice 复核模型（SenseVoiceSmall 仅在 MLX 路径运行）。
     def __init__(self):
         self.asr = self.processor = self.llm = self.tokenizer = None
         self.asr_path = self.llm_path = None
@@ -71,6 +72,8 @@ class TorchProvider:
         self.asr_path = str(path)
 
     def transcribe(self, audio: Path, language=None, context=None):
+        # Qwen/Qwen3-ASR-* (transformers) 支持通过 apply_transcription_request(..., prompt=context)
+        # 注入统一上下文（当前应用 application、历史热词 lexicon 及光标前后文 before/after）。
         import torch
         inputs = self.processor.apply_transcription_request(audio=load_audio(audio), language=language, **({"prompt": context} if context else {}))
         inputs = inputs.to(self.asr.device, self.asr.dtype)

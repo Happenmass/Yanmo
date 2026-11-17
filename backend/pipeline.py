@@ -1,7 +1,13 @@
 """Application-independent inference flow. Providers never own cursor insertion."""
+import base64
 from threading import Event
 from time import monotonic
+from engine.audio import encode_opus
 from engine.diagnostics import record, task_id
+from engine.fusion import normalize_lexicon
+
+
+ASR_HOTWORD_LIMIT = 64
 
 
 class TaskCancelled(Exception):
@@ -21,7 +27,13 @@ def run_pipeline(engine, request, audio, cancelled: Event, emit):
 
     def invoke(command, **values):
         check()
-        payload = {**request["context"], **request["models"], "online": request.get("online") or {}, "command": command, **values}
+        context = request["context"]
+        if command == "transcribe":
+            hotwords = request.get("asr_hotwords")
+            if hotwords is None:
+                hotwords = [entry["term"] for entry in normalize_lexicon(context)]
+            context = {**context, "lexicon": hotwords[:ASR_HOTWORD_LIMIT]}
+        payload = {**context, **request["models"], "online": request.get("online") or {}, "command": command, **values}
         begin = monotonic()
         record("model_start", command=command)
         response = engine.handle(payload)
@@ -49,6 +61,14 @@ def run_pipeline(engine, request, audio, cancelled: Event, emit):
                         "language": value.get("language"), "language_source": value.get("language_source", "unknown")}
             candidates.append(candidate(primary))
             emit({"event": "transcript", "text": original, "asr_results": list(candidates)})
+            check()
+            if request.get("archive_audio", False):
+                try:
+                    encoded = encode_opus(audio)
+                    emit({"event": "audio", "audio_opus": base64.b64encode(encoded).decode("ascii")})
+                except Exception as exc:
+                    record("audio_archive_failed", error_type=type(exc).__name__)
+                    emit({"event": "audio", "audio_warning": "录音未保存：音频压缩失败，文字处理继续。"})
             if primary.get("secondary") and primary.get("language_source") == "detected" and language in ("Chinese", "English"):
                 stage("reviewing")
                 secondary = invoke("transcribe_secondary", audio=str(audio), language=language)

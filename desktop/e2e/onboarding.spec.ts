@@ -1,10 +1,16 @@
 import { test, expect, _electron as electron } from '@playwright/test';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { defaultSettings, shortcutLabel } from '../shared';
 
-// A fresh install has no settings.json (covered by the store unit test); here the guide is forced on with the Dock hidden.
+function savedSettings(directory: string) {
+  const db = new DatabaseSync(join(directory, 'yanmo.db'), { readOnly: true });
+  try { return Object.fromEntries(db.prepare('SELECT key, value FROM settings').all().map(row => [String(row.key), JSON.parse(String(row.value))])); }
+  finally { db.close(); }
+}
+// JSON is only a migration fixture; assertions read the authoritative database.
 test('首次使用引导依次介绍四项功能，完成后可在设置中重新查看', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'yanmo-guide-qa-'));
   await writeFile(join(directory, 'settings.json'), JSON.stringify({ ...defaultSettings(), showDock: false, onboarded: false }));
@@ -53,7 +59,7 @@ test('首次使用引导依次介绍四项功能，完成后可在设置中重�
     await rail.getByRole('button', { name: /翻译弹窗/ }).click();
     await page.getByRole('button', { name: '开始落笔' }).click();
     await expect(page.getByText('言语之间，自有笔墨。')).toBeVisible();
-    await expect.poll(async () => JSON.parse(await readFile(join(directory, 'settings.json'), 'utf8')).onboarded).toBe(true);
+    await expect.poll(async () => savedSettings(directory).onboarded).toBe(true);
     await page.getByRole('button', { name: '设置', exact: true }).click();
     await expect(page.locator('.shortcut-row kbd')).toHaveText(['FN', 'FN + Shift', 'FN + 空格']);
     await page.evaluate(() => window.yanmo.invoke('settings', { shortcuts: {
@@ -64,17 +70,17 @@ test('首次使用引导依次介绍四项功能，完成后可在设置中重�
     await expect(page.locator('.shortcut-row kbd')).toHaveText(['右 Control', '右 Shift + 右 Control', 'Control + 空格']);
     for (let index = 0; index < 3; index++) await page.locator('.shortcut-editor').nth(index).getByRole('button', { name: '恢复默认' }).click();
     await expect(page.locator('.shortcut-row kbd')).toHaveText(['FN', 'FN + Shift', 'FN + 空格']);
-    await expect.poll(async () => JSON.parse(await readFile(join(directory, 'settings.json'), 'utf8')).shortcuts).toEqual(defaultSettings().shortcuts);
+    await expect.poll(async () => savedSettings(directory).shortcuts).toEqual(defaultSettings().shortcuts);
     // The low-memory ASR preset only swaps the model ID; the default stays 1.7B.
     const preset = page.getByRole('combobox', { name: '语音识别规格' });
     await expect(preset).toHaveValue('mlx-community/Qwen3-ASR-1.7B-8bit');
     await preset.selectOption({ label: '低内存 · Qwen3-ASR 0.6B' });
-    await expect.poll(async () => JSON.parse(await readFile(join(directory, 'settings.json'), 'utf8')).asrModel).toBe('mlx-community/Qwen3-ASR-0.6B-8bit');
+    await expect.poll(async () => savedSettings(directory).asrModel).toBe('mlx-community/Qwen3-ASR-0.6B-8bit');
     if (process.env.YANMO_QA_SHOTS) await page.locator('.preference-section', { hasText: '本地模型' }).screenshot({ path: join(process.env.YANMO_QA_SHOTS, 'asr-preset.png'), animations: 'disabled' });
     await expect(page.getByRole('textbox', { name: '语音识别模型' })).toHaveValue('mlx-community/Qwen3-ASR-0.6B-8bit');
     await expect(preset).toBeEnabled();
     await preset.selectOption('mlx-community/Qwen3-ASR-1.7B-8bit');
-    await expect.poll(async () => JSON.parse(await readFile(join(directory, 'settings.json'), 'utf8')).asrModel).toBe(defaultSettings().asrModel);
+    await expect.poll(async () => savedSettings(directory).asrModel).toBe(defaultSettings().asrModel);
     await page.getByRole('button', { name: '重新查看引导 →' }).click();
     await expect(rail).toBeVisible();
     await page.getByRole('button', { name: '跳过引导' }).click();
@@ -97,7 +103,7 @@ test('首次使用时模型未就绪，先停在模型准备页而非快捷键�
     await expect(page.getByRole('navigation', { name: '引导步骤' })).toHaveCount(0);
     if (process.env.YANMO_QA_SHOTS) await page.screenshot({ path: join(process.env.YANMO_QA_SHOTS, 'model-setup.png'), animations: 'disabled' });
     await page.getByRole('button', { name: '跳过引导' }).click();
-    await expect.poll(async () => JSON.parse(await readFile(join(directory, 'settings.json'), 'utf8')).onboarded).toBe(true);
+    await expect.poll(async () => savedSettings(directory).onboarded).toBe(true);
     expect(errors).toEqual([]);
   } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
 });

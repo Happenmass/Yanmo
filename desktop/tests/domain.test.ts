@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { defaultSettings, FN_MODIFIER, migrateSettings, shortcutID, shortcutLabel, shortcutNeedsEventTap, validateSettings } from '../shared';
+import { DatabaseSync } from 'node:sqlite';
+import { cocoaNow, defaultSettings, FN_MODIFIER, migrateSettings, shortcutID, shortcutLabel, shortcutNeedsEventTap, validateSettings } from '../shared';
 import { LibraryStore } from '../store';
 import { decodeSSE } from '../processes';
 import { renderMarkdown } from '../renderer/markdown';
@@ -60,10 +61,12 @@ test('文稿迁移备份原数据并保留 Swift 日期，损坏文件不覆盖'
     const target = join(directory, 'electron'); const store = new LibraryStore(target, defaultSettings(), source);
     assert.equal(store.library.manuscripts[0].date, 800000000);
     assert.equal(readFileSync(source, 'utf8'), readFileSync(join(target, 'library-v0.3-backup.json'), 'utf8'));
-    writeFileSync(join(target, 'library.json'), 'broken');
-    const broken = new LibraryStore(target, defaultSettings());
+    store.close();
+    const badTarget = join(directory, 'broken'); mkdirSync(badTarget);
+    writeFileSync(join(badTarget, 'library.json'), 'broken');
+    const broken = new LibraryStore(badTarget, defaultSettings());
     assert.ok(broken.error); assert.throws(() => broken.persist());
-    assert.equal(readFileSync(join(target, 'library.json'), 'utf8'), 'broken');
+    assert.equal(readFileSync(join(badTarget, 'library.json'), 'utf8'), 'broken');
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 test('SSE 分片和 CRLF 不丢失或提前提交结果', () => {
@@ -78,4 +81,55 @@ test('Markdown 保留表格和原始代码，HTML 与图片保持惰性', () => 
   assert.ok(value.html.includes('<table>')); assert.deepEqual(value.codes, [code]);
   assert.ok(!value.html.includes('<img')); assert.ok(!value.html.includes('<script>'));
   assert.ok(value.html.includes('data-copy-code="0"'));
+});
+test('统一 SQLite 数据库保存发生时间、Opus 音频、多路转写与润色文本并支持清理', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'yanmo-sqlite-'));
+  try {
+    const store = new LibraryStore(directory, defaultSettings());
+    const now = cocoaNow();
+    const expired = now - 5 * 86400;
+    const opus = Buffer.from('OggS\x00\x02synthetic-opus');
+    store.settings.retention = 1;
+    store.settings.onboarded = true;
+    store.library.lexicon.push({ id: 't1', term: '言墨', hint: '语音输入法', aliases: ['研墨'] });
+    store.library.manuscripts.push(
+      {
+        id: 'recent', date: now, original: '原始转写', text: '润色正文', seconds: 3.2,
+        application: '微信', polished: true,
+        asrResults: [
+          { engine_name: 'Qwen3-ASR', transcript: '原始转写', language: 'Chinese', language_source: 'detected' },
+          { engine_name: 'SenseVoice Small', transcript: '第二路转写', language: 'Chinese', language_source: 'forced' },
+        ],
+      },
+      { id: 'old', date: expired, original: '过期原文', text: '过期正文', seconds: 1, application: '备忘录', polished: true },
+    );
+    store.persist();
+    store.persist({ id: 'recent', data: opus });
+    store.persist({ id: 'old', data: opus });
+    store.close();
+
+    const db = new DatabaseSync(join(directory, 'yanmo.db'));
+    const row = db.prepare('SELECT date, occurred_at, audio_opus, asr_results, text FROM manuscripts WHERE id = ?').get('recent') as {
+      date: number; occurred_at: string; audio_opus: Uint8Array; asr_results: string; text: string;
+    };
+    assert.equal(row.date, now);
+    assert.ok(row.occurred_at.endsWith('Z'));
+    assert.deepEqual(Buffer.from(row.audio_opus), opus);
+    assert.equal(JSON.parse(row.asr_results).length, 2);
+    assert.equal(row.text, '润色正文');
+    db.close();
+
+    // SQLite alone restores state, lexicon, and the derived hasAudio flag.
+    const reopened = new LibraryStore(directory, defaultSettings());
+    assert.equal(reopened.settings.onboarded, true);
+    assert.equal(reopened.library.lexicon[0].aliases?.[0], '研墨');
+    assert.equal(reopened.library.manuscripts.find(item => item.id === 'recent')?.hasAudio, true);
+    assert.deepEqual(reopened.getAudio('recent'), opus);
+
+    reopened.prune();
+    reopened.persist();
+    assert.equal(reopened.library.manuscripts.length, 1);
+    assert.equal(reopened.getAudio('old'), undefined);
+    reopened.close();
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

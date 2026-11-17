@@ -1,20 +1,21 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { ACTIONS, Action, AppState, ASRResult, Capability, busy, cocoaNow, defaultSettings, Destination, Language, LANGUAGES, LocalEnvironment, Manuscript, NativeStatus, Page, Settings, Shortcut, shortcutID, TaskEvent, Term, validateSettings } from './shared';
+import { ACTIONS, Action, AppState, ASRResult, Capability, busy, cocoaNow, defaultSettings, Destination, isTermGroup, Language, LANGUAGES, LocalEnvironment, Manuscript, NativeStatus, Page, Settings, Shortcut, shortcutID, TaskEvent, Term, TermGroup, validateSettings } from './shared';
 import { BackendClient, NativeBridge } from './processes';
-import { LibraryStore } from './store';
+import { LibraryStore, ManuscriptAudio } from './store';
 import { decideRuntime } from './precheck';
+import { matchedTermIDs, scopedTerms, selectASRHotwords, termGroup, termKey } from './hotwords';
 
 interface Task {
   id: string; action: Action; settings: Settings; destination: Destination; lexicon: Term[];
   started: number; manuscriptID: string; original: string; asrResults: ASRResult[]; audio?: string;
-  userText?: string; manual?: boolean; writeToFocus?: boolean;
+  audioOpus?: Buffer; audioWarning?: string; userText?: string; manual?: boolean; writeToFocus?: boolean;
 }
 
 export class Controller extends EventEmitter {
   readonly state: AppState;
   private task?: Task;
-  private observationID?: string;
+  private observation?: { id: string; group: TermGroup };
   private shuttingDown = false;
   private learned: Term[] = [];
   private learningDismiss?: NodeJS.Timeout;
@@ -72,9 +73,9 @@ export class Controller extends EventEmitter {
     this.state.runtime = decideRuntime(this.state.settings.online, models.asr && (models.sensevoice || !!this.windowsPrecheck), this.environment);
   }
   notice(message: string) { this.state.notice = message; this.changed(); }
-  private persist() {
+  private persist(audio?: ManuscriptAudio) {
     this.store.library = this.state.library; this.store.settings = this.state.settings;
-    try { this.store.persist(); } catch (error) { this.state.notice = (error as Error).message; }
+    try { this.store.persist(audio); return true; } catch { this.state.notice = '文稿或设置未保存，请检查存储空间后重试；当前正文仍可复制。'; return false; }
   }
   private bindings(settings = this.state.settings) {
     return (Object.keys(ACTIONS) as Action[]).flatMap(action => settings.shortcuts[action].map(shortcut => ({ action, shortcut })));
@@ -183,7 +184,7 @@ export class Controller extends EventEmitter {
       this.notice(missingText ? '请先在设置中配置并启用文字处理 API。' : '请先准备本机语音识别模型，或启用在线语音识别。');
       this.emit('reveal'); return;
     }
-    this.observationID = undefined;
+    this.observation = undefined;
     this.clearLearningNotice();
     if (this.state.platform === 'mac') void this.native.call('correction.stop').catch(() => {});
     clearTimeout(this.dismiss);
@@ -229,7 +230,7 @@ export class Controller extends EventEmitter {
       const { path } = await this.native.call<{ path: string }>('record.finish'); task.audio = path;
       if (!this.valid(task)) return;
       if (this.state.seconds < 0.35) throw new Error('录音太短，请再说一句。');
-      await this.process(task, 'dictation');
+      await this.process(task);
     } catch (error) { if (this.valid(task)) await this.fail(task, (error as Error).message); }
     finally { await this.deleteAudio(task); }
   }
@@ -240,20 +241,30 @@ export class Controller extends EventEmitter {
       const audio = await this.native.call<{ path: string; seconds: number }>('audio.import', { path }); task.audio = audio.path;
       if (!this.valid(task)) return;
       this.state.seconds = audio.seconds;
-      await this.process(task, 'dictation');
+      await this.process(task);
     } catch (error) { if (this.valid(task)) await this.fail(task, (error as Error).message); }
     finally { await this.deleteAudio(task); }
   }
   private payload(task: Task, operation: string, text = '', language?: Language) {
+    const scope = scopedTerms(task.lexicon, task.destination.category);
+    const voice = operation === 'dictation' || operation === 'voiceTranslation';
     return {
       task_id: task.id, operation, text, target_language: language ?? task.settings.voiceTarget,
       asr_results: operation === 'polish' ? task.asrResults : [],
       polish: task.settings.polishEnabled, style: task.settings.style,
+      archive_audio: task.settings.keepHistory && voice,
+      ...(voice ? { asr_hotwords: selectASRHotwords(scope) } : {}),
       models: { asr_model: task.settings.asrModel, sensevoice_model: task.settings.senseVoiceModel, model_source: task.settings.modelSource },
       online: Object.fromEntries((Object.keys(task.settings.online) as Capability[]).filter(capability => task.settings.online[capability].enabled)
         .map(capability => [capability, { base_url: task.settings.online[capability].baseURL, model: task.settings.online[capability].model.trim(), api_key: this.keys[capability] || '' }])),
-      context: { application: task.destination.name || '言墨', category: task.destination.category || 'general', before: task.settings.readContext ? (task.destination.before || '').slice(-300) : '', after: task.settings.readContext ? (task.destination.after || '').slice(0, 300) : '',
-        key_terms: task.lexicon.map(item => item.term), term_notes: task.lexicon.map(({ term, hint }) => ({ term, hint })), lexicon: task.lexicon.map(({ term, aliases }) => ({ term, aliases: aliases || [] })), ...(task.userText ? { user_text: task.userText } : {}) },
+      context: {
+        application: task.destination.name || '言墨',
+        category: task.destination.category || 'general',
+        lexicon: [...scope.application, ...scope.global].map(({ term, hint, aliases }) => ({ term, hint: hint || '', aliases: aliases || [] })),
+        before: task.settings.readContext ? (task.destination.before || '').slice(-300) : '',
+        after: task.settings.readContext ? (task.destination.after || '').slice(0, 300) : '',
+        ...(task.userText ? { user_text: task.userText } : {}),
+      },
     };
   }
   private async collect(task: Task, operation: string, text = '', language?: Language) {
@@ -261,33 +272,67 @@ export class Controller extends EventEmitter {
     await this.backend.run(this.payload(task, operation, text, language), task.audio, event => {
       if (!this.valid(task)) return;
       if (event.event === 'stage' && ['transcribing', 'reviewing', 'polishing', 'translating'].includes(event.stage || '')) { this.state.stage = event.stage!; this.changed(); }
-      if (event.event === 'transcript') { task.original = event.text || ''; task.asrResults = structuredClone(event.asr_results || []); this.state.original = task.original; this.state.asrResults = task.asrResults; this.changed(); }
+      if (event.event === 'transcript') {
+        task.original = event.text || '';
+        task.asrResults = structuredClone(event.asr_results || []);
+        this.state.original = task.original; this.state.asrResults = task.asrResults; this.changed();
+      }
+      if (event.event === 'audio') {
+        if (event.audio_opus) task.audioOpus = Buffer.from(event.audio_opus, 'base64');
+        if (event.audio_warning) { task.audioWarning = event.audio_warning; this.notice(event.audio_warning); }
+      }
       if (['result', 'error', 'cancelled'].includes(event.event)) result = event;
     });
     if (!this.valid(task)) return;
     if (!result || result.event !== 'result' || !result.text) throw new Error(result?.message || '处理未完成，已保留原文。');
     return result;
   }
-  private saveTask(task: Task, text: string, processed: boolean) {
+  private saveTask(task: Task, text: string, processed: boolean, matches?: Set<string>) {
     this.state.draft = text; this.state.original = task.original; this.state.asrResults = task.asrResults; this.state.selectedID = task.manuscriptID;
     this.userEdited = !!task.userText;
-    if (task.settings.keepHistory) {
-      const item: Manuscript = { id: task.manuscriptID, date: cocoaNow(), original: task.original, text, seconds: this.state.seconds, application: task.destination.name || '言墨文稿', polished: processed, asrResults: structuredClone(task.asrResults), userEdited: this.userEdited };
-      const previous = this.state.library.manuscripts.find(value => value.id === item.id);
-      if (previous) Object.assign(previous, item); else this.state.library.manuscripts.unshift(item);
-      this.store.library = this.state.library; this.store.prune(); this.state.library = this.store.library; this.persist();
+    const previous = this.state.library;
+    let lexicon = previous.lexicon;
+    if (matches?.size) {
+      const now = Date.now();
+      lexicon = lexicon.map(entry => matches.has(entry.id)
+        ? { ...entry, matchCount: (entry.matchCount ?? 0) + 1, lastMatchedAt: now }
+        : entry);
     }
+    if (task.settings.keepHistory) {
+      const existing = previous.manuscripts.find(value => value.id === task.manuscriptID);
+      const item: Manuscript = { ...existing, id: task.manuscriptID, date: cocoaNow(), original: task.original, text, seconds: this.state.seconds, application: task.destination.name || '言墨文稿', polished: processed, asrResults: structuredClone(task.asrResults), userEdited: this.userEdited, ...(task.audioWarning ? { audioWarning: task.audioWarning } : {}) };
+      this.state.library = { lexicon, manuscripts: [item, ...previous.manuscripts.filter(value => value.id !== item.id)] };
+      this.store.library = this.state.library; this.store.prune(); this.state.library = this.store.library;
+      const audio = task.audioOpus?.length ? { id: task.manuscriptID, data: task.audioOpus } : undefined;
+      if (!this.persist(audio)) {
+        this.state.library = this.store.library = previous;
+        this.state.selectedID = null;
+        return false;
+      }
+    } else if (lexicon !== previous.lexicon) {
+      this.state.library = { ...previous, lexicon };
+      if (!this.persist()) {
+        this.state.library = this.store.library = previous;
+        this.state.notice = '本次词库命中记录未保存。';
+      }
+    }
+    return true;
   }
   private delivery(message: string) { const item = this.state.library.manuscripts.find(value => value.id === this.state.selectedID); if (item) { item.deliveryNote = message; this.persist(); } }
-  private async process(task: Task, _operation: string) {
+  private async process(task: Task) {
     const result = await this.collect(task, task.action === 'voiceTranslation' ? 'voiceTranslation' : 'dictation');
     if (!result || !this.valid(task)) return;
-    this.saveTask(task, result.text!, result.processed === true);
+    // Only successful live dictation counts. Rank against every in-scope term,
+    // including those that did not fit in this recording's ASR prompt.
+    const scope = scopedTerms(task.lexicon, task.destination.category);
+    const matches = task.writeToFocus && task.action === 'dictation'
+      ? matchedTermIDs([...scope.application, ...scope.global], result.text!) : undefined;
+    this.saveTask(task, result.text!, result.processed === true, matches);
     if (task.writeToFocus) {
       this.state.stage = 'inserting'; this.changed();
       try {
         const observationId = task.action === 'dictation' && this.state.platform === 'mac' ? task.id : undefined;
-        this.observationID = observationId;
+        this.observation = observationId ? { id: observationId, group: termGroup(task.destination.category) } : undefined;
         const transcript = task.original !== result.text && task.original.length <= 2000 ? task.original : undefined;
         const response = await this.native.call<{ delivery: string; message?: string; name?: string }>('insert', { text: result.text, ...(observationId ? { observationId, transcript } : {}) });
         if (!this.valid(task)) return;
@@ -359,14 +404,18 @@ export class Controller extends EventEmitter {
       if (!result || !this.valid(task)) return;
       this.state.draft = result.text!; this.state.selectedID = selected;
       const item = this.state.library.manuscripts.find(value => value.id === selected);
-      if (item) { item.text = result.text!; item.polished = true; this.persist(); }
-      this.state.stage = 'idle'; this.state.notice = '文字已整理完成，请核对正文。'; await this.finishTask(task); this.changed();
+      let saved = true;
+      if (item) { item.text = result.text!; item.polished = true; saved = this.persist(); }
+      this.state.stage = 'idle';
+      if (saved) this.state.notice = '文字已整理完成，请核对正文。';
+      await this.finishTask(task); this.changed();
     } catch (error) { if (this.valid(task)) { this.state.stage = 'idle'; await this.finishTask(task); this.notice((error as Error).message); } }
   }
   private async fail(task: Task, message: string) {
     if (!this.valid(task)) return;
-    if (task.original) this.saveTask(task, task.original, false);
-    this.state.stage = 'failure'; this.state.notice = message; this.state.level = 0;
+    const saved = !task.original || this.saveTask(task, task.original, false);
+    const notice = saved ? message : message + ' ' + this.state.notice;
+    this.state.stage = 'failure'; this.state.notice = notice; this.state.level = 0;
     await this.finishTask(task); this.scheduleDismiss(3500); this.changed();
   }
   private scheduleDismiss(ms: number) {
@@ -386,7 +435,7 @@ export class Controller extends EventEmitter {
     this.task = undefined; clearInterval(this.clock); this.state.level = 0; this.state.stage = 'idle'; this.state.overlayVisible = false;
     if (task.action === 'selectionTranslation') { this.state.translation.loading = false; this.state.translation.error = '已取消翻译。'; }
     else if (task.manual) this.state.notice = '已停止整理，当前文稿已保留。';
-    else if (task.original) { this.saveTask(task, task.original, false); this.state.notice = '已停止整理，识别原文已保留。'; }
+    else if (task.original) { const saved = this.saveTask(task, task.original, false); this.state.notice = saved ? '已停止整理，识别原文已保留。' : '已停止整理。' + this.state.notice; }
     else this.state.notice = '已取消，本次临时录音已删除。';
     this.backend.setActive(false);
     this.cancelling = Promise.all([this.native.call('record.cancel').catch(() => {}), this.native.call('active', { value: false }).catch(() => {}), this.backend.cancel(task.id)]);
@@ -411,25 +460,37 @@ export class Controller extends EventEmitter {
     if (this.state.selectedID === id) { this.state.selectedID = null; this.state.draft = ''; this.state.original = ''; this.state.asrResults = []; this.userEdited = false; }
     this.persist(); this.changed();
   }
-  saveTerm(value: { id?: string; term: string; hint: string; aliases: string[] }) {
+  saveTerm(value: { id?: string; term: string; hint: string; aliases: string[]; group?: TermGroup }) {
     if (busy(this.state.stage)) return;
     const term = value.term.trim(); if (!term) throw new Error('请填写词语。');
-    const aliases = [...new Set(value.aliases.map(alias => alias.trim()).filter(alias => alias && alias !== term))];
-    const others = this.state.library.lexicon.filter(item => item.id !== value.id);
-    if (others.some(item => item.term.toLocaleLowerCase() === term.toLocaleLowerCase())) throw new Error('词库中已有这个词。');
-    if (aliases.some(alias => others.some(item => item.term === alias || item.aliases?.includes(alias)))) throw new Error('这条误识别已属于另一个词条，请避免冲突。');
-    const entry: Term = { id: value.id || randomUUID(), term, hint: value.hint.trim(), aliases };
-    const index = this.state.library.lexicon.findIndex(item => item.id === entry.id);
-    if (index < 0) this.state.library.lexicon.push(entry); else this.state.library.lexicon[index] = entry;
-    this.persist(); this.changed();
+    if (value.group !== undefined && !isTermGroup(value.group)) throw new Error('词条范围无效。');
+    const previous = this.state.library.lexicon;
+    const existing = previous.find(item => item.id === value.id);
+    const group = value.group ?? existing?.group ?? 'global';
+    const key = termKey(term);
+    const aliases = [...new Map(value.aliases.map(alias => [termKey(alias), alias.trim()])).entries()]
+      .filter(([alias]) => alias && alias !== key).map(([, alias]) => alias);
+    const others = previous.filter(item => item.id !== value.id && termGroup(item.group) === group);
+    if (others.some(item => termKey(item.term) === key)) throw new Error('这个范围已有同名词条。');
+    const aliasKeys = new Set(aliases.map(termKey));
+    if (others.some(item => aliasKeys.has(termKey(item.term)) || item.aliases?.some(alias => termKey(alias) === key || aliasKeys.has(termKey(alias))))) {
+      throw new Error('这条误识别已属于同一范围的另一个词条，请避免冲突。');
+    }
+    const stats = existing && termKey(existing.term) === key && termGroup(existing.group) === group
+      ? existing : { createdAt: Date.now() };
+    const entry: Term = { ...stats, id: existing?.id ?? randomUUID(), term, hint: value.hint.trim(), aliases, group };
+    this.state.library.lexicon = existing ? previous.map(item => item.id === entry.id ? entry : item) : [...previous, entry];
+    if (!this.persist()) { this.state.library.lexicon = previous; this.changed(); throw new Error('词条未保存，请重试。'); }
+    this.changed();
   }
   removeTerm(id: string) { if (busy(this.state.stage)) return; this.state.library.lexicon = this.state.library.lexicon.filter(item => item.id !== id); this.persist(); this.changed(); }
   private clearLearningNotice() {
     clearTimeout(this.learningDismiss); this.state.learnedTerms = undefined; this.learned = [];
   }
   private async learnCorrections(value: { observationId: string; original: string; text: string; transcript?: string }) {
-    if (!this.observationID || value.observationId !== this.observationID) return;
-    this.observationID = undefined;
+    const observation = this.observation;
+    if (!observation || value.observationId !== observation.id) return;
+    this.observation = undefined;
     if (typeof value.original !== 'string' || typeof value.text !== 'string' || value.original === value.text || !value.text.trim()) return;
     const endpoint = this.state.settings.online.text;
     if (!endpoint.enabled || this.shuttingDown) return;
@@ -440,15 +501,16 @@ export class Controller extends EventEmitter {
       }, typeof value.transcript === 'string' && value.transcript ? value.transcript : undefined);
     } catch { return; }
     if (this.shuttingDown || !this.state.settings.online.text.enabled) return;
-    const seen = new Set(this.state.library.lexicon.map(item => item.term.toLocaleLowerCase()));
+    const scope = scopedTerms(this.state.library.lexicon, observation.group);
+    const seen = new Set([...scope.application, ...scope.global].map(item => termKey(item.term)));
     const terms = candidates.filter(term => {
-      const key = term.toLocaleLowerCase();
-      if (seen.has(key)) return false;
+      const key = termKey(term);
+      if (!key || seen.has(key)) return false;
       seen.add(key);
       return true;
     });
     if (!terms.length) return;
-    const added = terms.map(term => ({ id: randomUUID(), term, hint: '', aliases: [] }));
+    const added = terms.map(term => ({ id: randomUUID(), term, hint: '', aliases: [], group: observation.group, createdAt: Date.now() }));
     const previous = this.state.library.lexicon;
     this.state.library.lexicon = [...previous, ...added]; this.store.library = this.state.library;
     try { this.store.persist(); }
@@ -466,5 +528,5 @@ export class Controller extends EventEmitter {
     catch { this.state.library.lexicon = previous; this.notice('撤销未保存，请重试。'); return; }
     this.clearLearningNotice(); this.changed();
   }
-  async shutdown() { this.shuttingDown = true; this.observationID = undefined; this.clearLearningNotice(); clearTimeout(this.dismiss); clearInterval(this.clock); await this.cancel(); this.native.stop(); await this.backend.stop(); }
+  async shutdown() { this.shuttingDown = true; this.observation = undefined; this.clearLearningNotice(); clearTimeout(this.dismiss); clearInterval(this.clock); await this.cancel(); this.native.stop(); await this.backend.stop(); this.store.close(); }
 }

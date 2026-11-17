@@ -81,9 +81,9 @@ flowchart TB
 | 系统桥接 | [YanmoBridge](../../Sources/YanmoBridge/main.swift)调用[快捷键监听](../../Sources/YanmoNative/HotKeys.swift)、[音频设备与录音](../../Sources/YanmoNative/AudioInput.swift)及[系统集成](../../Sources/YanmoNative/SystemIntegration.swift)。光标上下文默认关闭，开启后可读取前后各最多 300 字。录音可在上下文不可读时继续。 |
 | 推理后端 | [FastAPI 服务](../../backend/server.py)在本机回环地址启动，校验请求、管理任务并流式回报阶段和结果。[任务流水线](../../backend/pipeline.py)按操作选择识别、复核、整理或翻译。[推理引擎](../../engine/worker.py)组装任务并使用[自然整理提示词](../../engine/polish.txt)构造整理请求。 |
 | 本机语音识别与 API | [MLX 适配器](../../engine/mlx_provider.py)运行 Mac 本机识别。[在线适配器](../../engine/online_provider.py)负责调用用户配置的 OpenAI 兼容接口。文字 API 可接收识别结果、词库及已开启的上下文。本地 LLM 实现供独立评测使用。 |
-| 数据、纠词和诊断 | [LibraryStore](../../desktop/store.ts)负责本机设置、文稿与词库保存、历史保留和旧版迁移。API 凭证由主进程加密保存。[纠词观察](../../Sources/YanmoNative/CorrectionObservation.swift)在写入后 10 秒内按 Enter 时读取当前焦点输入框，[词库提示词](../../engine/correction-terms.txt)通过现有文字 API 提取可撤销词条。桌面和[推理诊断](../../engine/diagnostics.py)记录阶段、耗时和错误类型等元数据。 |
+| 数据、纠词和诊断 | [LibraryStore](../../desktop/store.ts)以 SQLite 为唯一本机来源，在同一事务内保存文稿及可选 Opus 音频，按变化增量写入；旧 JSON 只作迁移备份，归档失败警告随文稿保留。API 凭证由主进程加密保存。[纠词观察](../../Sources/YanmoNative/CorrectionObservation.swift)在写入后 10 秒内按 Enter 时读取当前焦点输入框，[词库提示词](../../engine/correction-terms.txt)通过现有文字 API 提取可撤销词条。桌面和[推理诊断](../../engine/diagnostics.py)记录阶段、耗时和错误类型等元数据。 |
 | 运行时与模型准备 | [模型准备](../../backend/prepare_models.py)在独立进程中复用或下载全局缓存，[模型缓存](../../engine/model_cache.py)负责查找权重。[Mac 打包](../../package.json)包含 Electron、Swift 桥和 Python 运行时。 |
 
 Windows 主线已有[运行环境预检](../../desktop/precheck.ts)、[运行时安装](../../desktop/windows-runtime.ts)和 [PyTorch/CUDA 适配器](../../engine/torch_provider.py)，仍缺 Win32 系统桥接。独立的 `codex/arti-windows-api` 定制分支已有 Win32 桥接与 API 安装包，原生 Windows 输入仍待实机验收。
 
-[Mac 实现与验收](../electron-mac-2026-10-21.md) · [识别与正文评测](../asr-fusion.md) · [Electron 重构方案](electron_00_Overview_顶层架构.md)
+[架构梳理与分层评审](architecture-review-2026-11-17.md) · [Mac 实现与验收](../electron-mac-2026-10-21.md) · [识别与正文评测](../asr-fusion.md) · [Electron 重构方案](electron_00_Overview_顶层架构.md)

@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from typing import Literal
 
 from engine.worker import DEFAULT_ASR, DEFAULT_SENSEVOICE, Engine
-from backend.pipeline import run_pipeline
+from backend.pipeline import ASR_HOTWORD_LIMIT, run_pipeline
 
 
 class OnlineEndpoint(BaseModel):
@@ -47,6 +47,8 @@ class TaskRequest(BaseModel):
     text: str = Field(default="", max_length=20000)
     target_language: Literal["en", "zh-Hans", "ja", "de"] = "en"
     polish: bool = True
+    archive_audio: bool = False
+    asr_hotwords: list[str] | None = Field(default=None, max_length=ASR_HOTWORD_LIMIT)
     style: Literal["自然整理", "保留原话", "即时消息", "文档段落"] = "自然整理"
     models: dict[str, str] = Field(default_factory=dict)
     online: dict[Literal["asr", "text"], OnlineEndpoint] = Field(default_factory=dict)
@@ -130,7 +132,7 @@ def create_app(engine=None, token=None, announce=None):
             raise HTTPException(status_code=422, detail="模型配置无效。")
         if "text" not in payload["online"]:
             raise HTTPException(status_code=422, detail="请先在设置中配置并启用文字处理 API。")
-        context_keys = {"application", "category", "key_terms", "term_notes", "lexicon", "before", "after", "user_text"}
+        context_keys = {"application", "category", "lexicon", "before", "after", "user_text"}
         if set(payload["context"]) - context_keys:
             raise HTTPException(status_code=422, detail="上下文参数无效。")
         if any(not isinstance(item.get("transcript"), str) or len(item["transcript"]) > 20000 for item in payload["asr_results"]):

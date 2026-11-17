@@ -34,9 +34,22 @@ struct Checks {
         try require(String(contentsOf: file.url) == "{broken", "Corrupt source must be preserved")
         print("PASS: corrupt library is rejected and preserved")
 
-        try require(ApplicationCategory.detect(bundleID: "com.google.Chrome") == "general", "A browser is not necessarily search")
-        try require(ApplicationCategory.detect(bundleID: "com.tencent.xinWeChat") == "messaging", "WeChat categorization")
-        try require(ApplicationCategory.detect(bundleID: "com.microsoft.VSCode") == "code_editor", "VS Code categorization")
+        for (bundleID, expected) in [
+            ("com.openai.codex", "ai_tools"), ("com.anthropic.claudefordesktop", "ai_tools"),
+            ("com.google.antigravity", "ai_tools"), ("com.claude-code-haha.desktop", "ai_tools"),
+            ("com.microsoft.VSCode", "code_editor"), ("com.todesktop.230313mzl4w4u92", "code_editor"),
+            ("com.tencent.xinWeChat", "messaging"), ("5ZSL2CJU2T.com.dingtalk.mac", "messaging"),
+            ("com.apple.mail", "email"), ("com.readdle.SparkDesktop", "email"),
+            ("abnerworks.Typora", "document"), ("md.obsidian", "document"),
+            ("com.google.Chrome", "general"), ("com.example.passwordmanager", "general"),
+            ("com.example.mailflow", "general"), ("com.example.untitledcursor", "general"),
+            ("com.apple.Terminal", "general"), ("com.anthropic.claude-code-url-handler", "general"),
+        ] {
+            try require(ApplicationCategory.detect(bundleID: bundleID) == expected, "Application categorization for \(bundleID)")
+        }
+        try require(ApplicationCategory.detect(bundleID: "com.apple.Terminal", terminalTitle: "project — ✳ Claude Code — 80×24") == "ai_tools", "Explicit terminal session")
+        try require(ApplicationCategory.detect(bundleID: "com.googlecode.iterm2", terminalTitle: "project — Claude Code.md") == "general", "A filename is not an AI session")
+        try require(ApplicationCategory.detect(bundleID: "com.google.Chrome", terminalTitle: "Claude Code") == "general", "Browsers do not use terminal title rules")
         print("PASS: application context classification")
 
         let shortcuts = InputShortcut.defaults + [InputShortcut(keyCode: 2, modifiers: 4096 | 512, keyLabel: "D")]

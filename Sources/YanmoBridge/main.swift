@@ -67,7 +67,7 @@ final class Bridge {
             if destinations.count >= 32 { destinations.removeAll() }
             let id = UUID().uuidString
             destinations[id] = target
-            return ["id": id, "name": target.name, "category": target.category, "before": target.before,
+            return ["id": id, "name": target.name, "category": target.category(readContext: context), "before": target.before,
                     "after": target.after, "secure": target.secure]
         }
         // Pin the app at the trigger; never recover focus from a different app.

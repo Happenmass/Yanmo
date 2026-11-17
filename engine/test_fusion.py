@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from engine.fusion import build_fusion_payload, build_polish_payload
+from engine.fusion import build_fusion_payload, build_polish_payload, normalize_lexicon
 from engine.worker import Engine, POLISH_PROMPT
 
 
@@ -15,10 +15,25 @@ class FusionTests(unittest.TestCase):
         self.assertEqual([item["transcript"] for item in payload["ASR_RESULTS"]], [item["transcript"] for item in request["asr_results"]])
         self.assertEqual(payload["CONTEXT"]["before"], "甲" * 300)
         self.assertEqual(payload["CONTEXT"]["after"], "乙" * 300)
+        self.assertEqual(payload["CONTEXT"]["lexicon"], [])
+        self.assertNotIn("key_terms", payload["CONTEXT"])
+        self.assertNotIn("term_notes", payload["CONTEXT"])
         edited = build_fusion_payload({**request, "user_text": "The budget is 102 yuan."}, "polish")
         self.assertEqual(edited["USER_TEXT"], "The budget is 102 yuan.")
         self.assertEqual(edited["SOURCE_LANGUAGES"], [])
         self.assertEqual(request["asr_results"][0]["transcript"], "预算100元。")
+
+    def testNormalizeLexiconUnifiesFieldsAndLegacyInputs(self):
+        unified = normalize_lexicon({
+            "key_terms": ["言墨", "Qwen3"],
+            "term_notes": [{"term": "言墨", "hint": "语音输入法"}],
+            "lexicon": [{"term": "言墨", "aliases": ["研墨", "研墨", "言墨"]}, {"term": "SwiftUI", "hint": "界面框架", "aliases": ["swift ui"]}],
+        })
+        self.assertEqual(unified, [
+            {"term": "言墨", "hint": "语音输入法", "aliases": ["研墨"]},
+            {"term": "SwiftUI", "hint": "界面框架", "aliases": ["swift ui"]},
+            {"term": "Qwen3", "hint": "", "aliases": []},
+        ])
 
     def testTranscriptionGetsSameLanguagePromptAndNoTranslationTarget(self):
         engine = Engine(allow_local_text=True)
@@ -75,12 +90,14 @@ class FusionTests(unittest.TestCase):
         request = {
             "asr_results": [{"engine_name": "Qwen", "transcript": "言墨"}, {"engine_name": "SenseVoice", "transcript": "研墨"}],
             "application": "微信", "category": "messaging", "before": "甲" * 350, "after": "乙" * 350,
-            "key_terms": ["言墨"], "background_screen_text": ["言墨项目"],
+            "lexicon": [{"term": "言墨", "hint": "本地语音输入法", "aliases": ["研墨"]}],
+            "background_screen_text": ["言墨项目"],
         }
         payload = build_polish_payload(request)
         self.assertEqual(payload["ASR_RESULTS"], request["asr_results"])
         self.assertEqual(payload["AUDIO_CONTEXT"], {
-            "key_terms": ["言墨"], "application": {"categories": ["messaging"], "name": "微信"},
+            "lexicon": [{"term": "言墨", "hint": "本地语音输入法", "aliases": ["研墨"]}],
+            "application": {"categories": ["messaging"], "name": "微信"},
             "background_screen_text": ["言墨项目"],
         })
         self.assertEqual(payload["context"], {"text_before_cursor": "甲" * 300, "text_after_cursor": "乙" * 300})

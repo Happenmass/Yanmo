@@ -1,3 +1,4 @@
+import base64
 import io
 import json
 import sys
@@ -60,14 +61,34 @@ class ServerTests(unittest.TestCase):
             self.assertNotIn("/private/file", response.text)
 
     def testAudioUploadStreamsOriginalAndCompleteResult(self):
-        request = {"task_id": "fixture", "operation": "dictation", "polish": False, "online": {"text": ENDPOINT}}
+        request = {
+            "task_id": "fixture",
+            "operation": "dictation",
+            "polish": False,
+            "archive_audio": True,
+            "online": {"text": ENDPOINT},
+            "context": {
+                "application": "微信",
+                "category": "messaging",
+                "lexicon": [{"term": "言墨", "hint": "输入法", "aliases": ["研墨"]}],
+            },
+        }
         with TestClient(create_app(FakeEngine(), token="test-only")) as client:
             response = client.post("/v1/tasks", data={"request": json.dumps(request)}, files={"audio": ("recording.wav", synthetic_wav(), "audio/wav")}, headers={"Authorization": "Bearer test-only"})
             self.assertEqual(response.status_code, 200)
             events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
-            self.assertEqual([event["event"] for event in events], ["stage", "transcript", "stage", "result"])
+            self.assertEqual([event["event"] for event in events], ["stage", "transcript", "audio", "stage", "result"])
             self.assertTrue(all(event["task_id"] == "fixture" for event in events))
+            self.assertTrue(base64.b64decode(events[2]["audio_opus"]).startswith(b"OggS"))
             self.assertEqual(events[-1]["text"], "合成结果")
+
+            invalid = {**request, "context": {"key_terms": ["言墨"]}}
+            rejected = client.post("/v1/tasks", data={"request": json.dumps(invalid)}, files={"audio": ("recording.wav", synthetic_wav(), "audio/wav")}, headers={"Authorization": "Bearer test-only"})
+            self.assertEqual(rejected.status_code, 422)
+
+            too_many = {**request, "asr_hotwords": [f"词条{i}" for i in range(65)]}
+            rejected = client.post("/v1/tasks", data={"request": json.dumps(too_many)}, files={"audio": ("recording.wav", synthetic_wav(), "audio/wav")}, headers={"Authorization": "Bearer test-only"})
+            self.assertEqual(rejected.status_code, 422)
 
     def testTasksWithoutTextEndpointAreRejectedBeforeInference(self):
         engine = FakeEngine()

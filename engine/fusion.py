@@ -1,6 +1,71 @@
 """Build the text model's inputs from speech candidates and nearby context."""
 
 
+def normalize_lexicon(request: dict | None) -> list[dict]:
+    """Normalize lexicon entries across caller formats into a single unified shape.
+
+    Output items always use fixed key order {"term", "hint", "aliases"} for stable prompt caching.
+    Backward-compatible with legacy key_terms / term_notes inputs.
+    """
+    if not request:
+        return []
+    notes: dict[str, str] = {}
+    for note in request.get("term_notes") or []:
+        if isinstance(note, dict):
+            term = str(note.get("term") or "").strip()
+            hint = str(note.get("hint") or "").strip()
+            if term and hint and term not in notes:
+                notes[term] = hint
+
+    entries: dict[str, dict] = {}
+
+    def merge(term: str, hint: str = "", aliases: list[str] | None = None) -> None:
+        term = term.strip()
+        if not term:
+            return
+        cleaned_aliases = list(dict.fromkeys(
+            alias.strip() for alias in (aliases or [])
+            if isinstance(alias, str) and alias.strip() and alias.strip() != term
+        ))
+        if term not in entries:
+            entries[term] = {
+                "term": term,
+                "hint": hint.strip() or notes.get(term, ""),
+                "aliases": cleaned_aliases,
+            }
+            return
+        existing = entries[term]
+        if not existing["hint"]:
+            existing["hint"] = hint.strip() or notes.get(term, "")
+        if cleaned_aliases:
+            existing["aliases"] = list(dict.fromkeys([*existing["aliases"], *cleaned_aliases]))
+
+    for item in request.get("lexicon") or []:
+        if isinstance(item, str):
+            merge(item)
+        elif isinstance(item, dict):
+            merge(
+                str(item.get("term") or ""),
+                str(item.get("hint") or ""),
+                item.get("aliases") if isinstance(item.get("aliases"), list) else [],
+            )
+
+    for item in request.get("key_terms") or []:
+        if isinstance(item, str):
+            merge(item)
+        elif isinstance(item, dict):
+            merge(
+                str(item.get("term") or ""),
+                str(item.get("hint") or ""),
+                item.get("aliases") if isinstance(item.get("aliases"), list) else [],
+            )
+
+    for term, hint in notes.items():
+        merge(term, hint)
+
+    return list(entries.values())
+
+
 def build_polish_payload(request):
     """Keep all per-request data after the fixed ASR post-processing prompt."""
     if request.get('user_text'):
@@ -10,7 +75,7 @@ def build_polish_payload(request):
     return {
         'INSTRUCTION': request.get('instruction', ''),
         'AUDIO_CONTEXT': {
-            'key_terms': request.get('key_terms', []),
+            'lexicon': normalize_lexicon(request),
             'application': {'categories': [request.get('category', 'general')], 'name': request.get('application', '言墨')},
             'background_screen_text': request.get('background_screen_text', []),
         },
@@ -35,8 +100,7 @@ def build_fusion_payload(request, task, target=None):
         'ASR_RESULTS': candidates,
         'SOURCE_LANGUAGES': list(dict.fromkeys(item['language'] for item in candidates if item.get('language'))) if not request.get('user_text') else [],
         'CONTEXT': {'application': request.get('application', '言墨'), 'category': request.get('category', 'general'),
-                    'key_terms': request.get('key_terms', []), 'term_notes': request.get('term_notes', []),
-                    'lexicon': request.get('lexicon', []), 'before': (request.get('before') or '')[-300:], 'after': (request.get('after') or '')[:300]},
+                    'lexicon': normalize_lexicon(request), 'before': (request.get('before') or '')[-300:], 'after': (request.get('after') or '')[:300]},
     }
     if task == 'verbatim':
         payload['STYLE'] = '保留口头表达、语气、填充词和改口，只纠正有依据的识别差异；数字根据实际语义采用自然写法。'

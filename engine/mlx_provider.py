@@ -42,6 +42,8 @@ class MLXProvider:
             self.asr_path = str(path)
 
     def transcribe(self, audio: Path, language=None, context=None):
+        # mlx-community/Qwen3-ASR-* 支持通过 system_prompt 注入统一上下文
+        # （当前应用 application、历史热词 lexicon 及光标前后文 before/after）。
         detected = []
         parser = getattr(self.asr, "extract_language", None)
         # MLX Audio may expose generate/parser through a forwarding wrapper.
@@ -69,6 +71,8 @@ class MLXProvider:
                 "language_source": "forced" if language else "detected" if value else "unknown"}
 
     def transcribe_secondary(self, audio: Path, path: Path, language: str):
+        # mlx-community/SenseVoiceSmall (FunASR SenseVoice CTC/AED) 仅支持 language (zh/en) 与 use_itn 参数；
+        # 不支持传入当前应用 (application)、历史热词词库 (lexicon) 及光标上下文 (before/after)。
         options = {"Chinese": "zh", "English": "en"}
         if language not in options:
             raise ValueError("SenseVoice 复核仅用于 Qwen 已识别的中文或英文。")
