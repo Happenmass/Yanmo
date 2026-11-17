@@ -58,3 +58,42 @@ body.overlay-body{background:transparent!important;overflow:hidden}.overlay-shel
 .learning-toast{width:400px;height:48px;display:flex;align-items:center;gap:12px;padding:0 18px;background:#292a27;color:#f6f3ec;border-radius:26px;box-shadow:0 4px 12px #0002;font:14px -apple-system,BlinkMacSystemFont,sans-serif;animation:overlay-rise .32s ease-out both}.learning-check{display:flex;align-items:center;justify-content:center;width:25px;height:25px;border-radius:50%;background:#69775f;flex-shrink:0}.learning-check svg{width:16px;height:16px}.learning-words{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.learning-toast button{border:0;border-left:1px solid #f6f3ec55;padding:3px 0 3px 18px;border-radius:0;color:inherit;background:none;font:inherit;cursor:pointer;flex-shrink:0}.learning-toast button:hover{color:#fff}.learning-toast button:focus-visible{outline:1px solid #f6f3ec;outline-offset:3px}@media(prefers-reduced-motion:reduce){.learning-toast{animation:none}}
 
 .overlay-shell{width:100%}.learning-toast{flex-shrink:0}
+
+.calendar-day{padding:0;border-radius:0}
+button.calendar-day:hover{box-shadow:inset 0 0 0 1px var(--red)}
+.daily-detail>.daily-heading{display:flex;align-items:center;gap:14px;padding:0 0 14px;border-bottom:1px solid var(--line)}
+.daily-heading h3{font-size:20px;white-space:nowrap}
+.daily-heading h3 small{font:12px var(--serif);color:var(--muted)}
+.daily-heading nav{display:flex;gap:12px;margin-left:auto;white-space:nowrap}
+.daily-heading nav button,.daily-back{padding:2px 0}
+.daily-back{white-space:nowrap;flex-shrink:0;border-bottom:1px solid currentColor}
+.daily-heading nav button+button{border-left:1px solid var(--line);padding-left:12px}
+.daily-sent,.daily-apps{padding:17px 0;border-bottom:1px solid var(--line)}
+.daily-detail h4{font:18px var(--serif);margin:0}
+.daily-sent>div{display:flex;align-items:baseline;gap:8px;margin-top:5px}
+.daily-sent strong{font:54px/1.1 var(--serif);font-variant-numeric:tabular-nums}
+.daily-sent small{font-size:12px;color:var(--muted);margin-left:14px}
+.daily-sent b{color:var(--red);font-weight:500}
+.daily-detail .fine-print{margin-top:8px}
+.daily-apps table{width:100%;border-collapse:collapse;table-layout:fixed;font-variant-numeric:tabular-nums}
+.daily-app-column{width:26%}
+.daily-bar-column{width:27%}
+.daily-apps th,.daily-apps td{text-align:right;padding:8px 0 8px 6px;font-weight:400}
+.daily-apps thead th{color:var(--muted);font-size:11px;white-space:nowrap;padding-top:2px}
+.daily-apps tbody tr+tr{border-top:1px solid #d9d1c080}
+.daily-apps tbody th{text-align:left;padding-left:0}
+.daily-app-name{display:flex;gap:9px;align-items:center}
+.daily-app-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.daily-app-icon{width:24px;height:24px;object-fit:contain;flex:0 0 auto;color:var(--muted)}
+.daily-bar{height:7px;display:block;margin-right:8px;background:#d9d1c080;border-radius:2px;overflow:hidden}
+.daily-bar i{display:block;height:100%;background:var(--stone);border-radius:2px}
+.daily-llm{padding-top:14px}
+.daily-llm header{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.daily-llm header strong{font:29px var(--serif);font-variant-numeric:tabular-nums}
+.daily-llm header span{color:var(--muted);font-size:11px}
+.daily-llm dl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:11px 0 0}
+.daily-llm dl>div{display:flex;align-items:baseline;gap:7px;white-space:nowrap}
+.daily-llm dl>div+div{border-left:1px solid var(--line);padding-left:9px}
+.daily-llm dt{color:var(--muted);font-size:12px}
+.daily-llm dd{margin:0;font:17px var(--serif);font-variant-numeric:tabular-nums}
+.daily-visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}

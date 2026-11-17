@@ -1,8 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { ACTIONS, Action, AppState, ASRResult, Capability, busy, cocoaNow, defaultSettings, Destination, isTermGroup, Language, LANGUAGES, LocalEnvironment, Manuscript, NativeStatus, Page, Settings, Shortcut, shortcutID, TaskEvent, Term, TermGroup, validateSettings } from './shared';
+import { ACTIONS, Action, AppState, ASRResult, Capability, busy, characterCount, cocoaNow, defaultSettings, Destination, isTermGroup, Language, LANGUAGES, LocalEnvironment, Manuscript, NativeStatus, Page, Settings, Shortcut, shortcutID, TaskEvent, Term, TermGroup, validateSettings } from './shared';
 import { BackendClient, NativeBridge } from './processes';
-import { LibraryStore, ManuscriptAudio } from './store';
+import { AppInputEvent, LibraryStore, ManuscriptAudio } from './store';
 import { decideRuntime } from './precheck';
 import { matchedTermIDs, scopedTerms, selectASRHotwords, termGroup, termKey } from './hotwords';
 
@@ -46,6 +46,7 @@ export class Controller extends EventEmitter {
       if (action in ACTIONS) void this.perform(action, destination);
     });
     native.on('correction', value => void this.learnCorrections(value));
+    native.on('inputDispatched', (event: AppInputEvent) => this.recordAppInput(event));
     native.on('cancel', () => void this.cancel());
     native.on('permissions', () => void this.permissions());
     native.on('meter', ({ taskId, level }: { taskId: string; level: number }) => {
@@ -319,6 +320,12 @@ export class Controller extends EventEmitter {
     return true;
   }
   private delivery(message: string) { const item = this.state.library.manuscripts.find(value => value.id === this.state.selectedID); if (item) { item.deliveryNote = message; this.persist(); } }
+  private recordAppInput(event: AppInputEvent) {
+    if (!event.eventId || !event.appKey || !Number.isSafeInteger(event.occurredAtMs) ||
+        !Number.isSafeInteger(event.characters) || event.characters <= 0) return;
+    try { this.store.recordAppInput(event); }
+    catch { this.notice('本次应用发送字数未能保存。'); }
+  }
   private async process(task: Task) {
     const result = await this.collect(task, task.action === 'voiceTranslation' ? 'voiceTranslation' : 'dictation');
     if (!result || !this.valid(task)) return;
@@ -334,7 +341,15 @@ export class Controller extends EventEmitter {
         const observationId = task.action === 'dictation' && this.state.platform === 'mac' ? task.id : undefined;
         this.observation = observationId ? { id: observationId, group: termGroup(task.destination.category) } : undefined;
         const transcript = task.original !== result.text && task.original.length <= 2000 ? task.original : undefined;
-        const response = await this.native.call<{ delivery: string; message?: string; name?: string }>('insert', { text: result.text, ...(observationId ? { observationId, transcript } : {}) });
+        const characters = characterCount(result.text!);
+        const response = await this.native.call<{ delivery: string; message?: string; name?: string; appKey?: string; dispatchReported?: boolean }>('insert', {
+          text: result.text, inputEventId: task.id, characterCount: characters, ...(observationId ? { observationId, transcript } : {}),
+        });
+        if (response.delivery === 'confirmed' || (response.delivery === 'attempted_unverified' && !response.dispatchReported)) {
+          const appName = response.name || '当前应用';
+          this.recordAppInput({ eventId: task.id, occurredAtMs: Date.now(), appKey: response.appKey || 'name:' + appName,
+            appName, characters, confirmed: response.delivery === 'confirmed' });
+        }
         if (!this.valid(task)) return;
         if (response.name) {
           this.state.destinationName = response.name;

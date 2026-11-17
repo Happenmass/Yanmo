@@ -2,6 +2,37 @@ export type Action = 'dictation' | 'voiceTranslation' | 'selectionTranslation';
 export type Language = 'en' | 'zh-Hans' | 'ja' | 'de';
 export type Stage = 'idle' | 'preparing' | 'recording' | 'transcribing' | 'reviewing' | 'polishing' | 'translating' | 'inserting' | 'success' | 'failure';
 export type Page = 'desk' | 'manuscripts' | 'dictionary' | 'settings';
+export const LLM_PURPOSES = { polish: '文本润色', hotword_extract: '热词提取', translate: '翻译' } as const;
+export type LLMPurpose = keyof typeof LLM_PURPOSES;
+export interface DailyAppUsage { appKey: string; name: string; sent: number; confirmed: number; unverified: number; icon?: string }
+export interface DailyUsage {
+  coverage: 'unrecorded' | 'partial' | 'recorded';
+  sent: number;
+  previousSent: number | null;
+  apps: DailyAppUsage[];
+  llm: { total: number | null; unknown: number; byPurpose: Record<LLMPurpose, number | null> };
+}
+
+const graphemes = new Intl.Segmenter('zh', { granularity: 'grapheme' });
+export function characterCount(text: string) {
+  let count = 0;
+  for (const _ of graphemes.segment(text)) count++;
+  return count;
+}
+export function localDayKey(date: Date) {
+  return [date.getFullYear(), date.getMonth() + 1, date.getDate()].map((value, index) => String(value).padStart(index ? 2 : 4, '0')).join('-');
+}
+export function localDayDate(day: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error('日期格式无效。');
+  const date = new Date(day + 'T00:00:00');
+  if (localDayKey(date) !== day) throw new Error('日期无效。');
+  return date;
+}
+export function shiftLocalDay(day: string, amount: number) {
+  const date = localDayDate(day);
+  date.setDate(date.getDate() + amount);
+  return localDayKey(date);
+}
 export interface Shortcut { keyCode: number; modifiers: number; keyLabel: string; modifierKeys?: number[] }
 export interface ASRResult { engine_name: string; transcript: string; language?: string | null; language_source?: 'detected' | 'forced' | 'unknown' }
 export interface Manuscript { id: string; date: number; original: string; text: string; seconds: number; application: string; polished: boolean; deliveryNote?: string; asrResults?: ASRResult[]; userEdited?: boolean; hasAudio?: boolean; audioWarning?: string }
@@ -137,6 +168,7 @@ export function migrateSettings(legacy: Record<string, unknown>): Settings {
 }
 export interface DesktopAPI {
   state(): Promise<AppState>;
+  dailyUsage(day: string): Promise<DailyUsage>;
   invoke(action: string, args?: unknown): Promise<unknown>;
   subscribe(listener: (state: AppState) => void): () => void;
 }

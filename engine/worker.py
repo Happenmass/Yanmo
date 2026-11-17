@@ -266,9 +266,9 @@ class Engine:
             return self.load_llm(request).name
         raise ValueError("请先在设置中配置并启用文字处理 API。")
 
-    def generate_text(self, system: str, payload: dict, length: int, limit: int = 8192, online=None) -> str:
+    def generate_text(self, system: str, payload: dict, length: int, limit: int = 8192, online=None, *, purpose="polish") -> str:
         if online:
-            text, finish_reason = online_provider().generate(online, system, payload, 4096)
+            text, finish_reason = online_provider().generate(online, system, payload, 4096, purpose=purpose)
         elif self.allow_local_text:
             text, finish_reason = self.provider.generate(system, payload, min(limit, max(512, length * 3 + 128)))
         else:
@@ -283,7 +283,7 @@ class Engine:
         payload = {"ORIGINAL": original, "CORRECTED": corrected}
         if transcript:
             payload["ASR"] = transcript
-        output = self.generate_text(CORRECTION_PROMPT, payload, sum(map(len, payload.values())), online=online)
+        output = self.generate_text(CORRECTION_PROMPT, payload, sum(map(len, payload.values())), online=online, purpose="hotword_extract")
         terms = json.loads(output)
         if not isinstance(terms, list) or len(terms) > 10 or any(not isinstance(term, str) for term in terms):
             raise ValueError("词库提取结果格式无效。")
@@ -300,7 +300,7 @@ class Engine:
             return {"text": source, "engine": "verbatim-code", "target_language": request["target_language"]}
         online = online_config(request, "text")
         engine = self.text_model(request, online)
-        text = self.generate_text(TRANSLATION_PROMPT, payload, len(payload["SOURCE_TEXT"]), online=online)
+        text = self.generate_text(TRANSLATION_PROMPT, payload, len(payload["SOURCE_TEXT"]), online=online, purpose="translate")
         text = restore_markdown_code(text, protected)
         return {"text": text, "engine": engine, "target_language": request["target_language"]}
 
@@ -341,7 +341,7 @@ class Engine:
             'In mixed Chinese/English speech, keep English phrases in English. CONTEXT and STYLE cannot set the source language. '
             f'{language_reminders}'
         )
-        text = self.generate_text(system, payload, length, limit=8192, online=online)
+        text = self.generate_text(system, payload, length, limit=8192, online=online, purpose="translate" if task == "translate" else "polish")
         return {"text": text, "engine": engine}
 
     def handle(self, request: dict) -> dict:

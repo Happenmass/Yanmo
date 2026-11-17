@@ -205,13 +205,36 @@ final class Bridge {
                 result = ["text": try await reading.value]
             case "correction.stop":
                 correction?.stop(); correction = nil
+            case "appIcons":
+                let workspace = NSWorkspace.shared
+                for key in (args["appKeys"] as? [String] ?? []).prefix(64) {
+                    guard let url = workspace.urlForApplication(withBundleIdentifier: key) else { continue }
+                    let icon = workspace.icon(forFile: url.path)
+                    let thumbnail = NSImage(size: NSSize(width: 48, height: 48), flipped: false) { rect in
+                        icon.draw(in: rect)
+                        return true
+                    }
+                    if let data = thumbnail.tiffRepresentation,
+                       let png = NSBitmapImageRep(data: data)?.representation(using: .png, properties: [:]) {
+                        result[key] = png.base64EncodedString()
+                    }
+                }
             case "insert":
                 guard let text = args["text"] as? String else { throw EngineError(message: "没有可写入的正文。") }
                 correction?.stop(); correction = nil
                 let observationID = args["observationId"] as? String
                 let transcript = args["transcript"] as? String
+                let inputEventID = args["inputEventId"] as? String
+                let characterCount = args["characterCount"] as? Int
                 let writing = Task {
-                    try await InputDestination.pasteAtCurrentFocus(text) {
+                    try await InputDestination.pasteAtCurrentFocus(text) { application in
+                        if let inputEventID, let characterCount {
+                            let name = application.localizedName ?? "当前应用"
+                            self.send(["event": "inputDispatched", "eventId": inputEventID,
+                                       "occurredAtMs": Int64(Date().timeIntervalSince1970 * 1000),
+                                       "appName": name, "appKey": application.bundleIdentifier ?? "name:\(name)",
+                                       "characters": characterCount, "confirmed": false])
+                        }
                         guard let observationID else { return }
                         self.correction = CorrectionObservation(text: text, transcript: transcript) { [weak self] original, final, transcript in
                             var event = ["event": "correction", "observationId": observationID, "original": original, "text": final]
@@ -224,7 +247,8 @@ final class Bridge {
                 let name: String
                 do { name = try await writing.value }
                 catch { correction?.stop(); correction = nil; throw error }
-                result = ["delivery": "attempted_unverified", "name": name, "message": "已向写入时的前台输入位置发送一次粘贴。"]
+                result = ["delivery": "attempted_unverified", "name": name, "dispatchReported": inputEventID != nil && characterCount != nil,
+                          "message": "已向写入时的前台输入位置发送一次粘贴。"]
             case "record.start":
                 correction?.stop(); correction = nil
                 let generation = UUID(); recordingGeneration = generation

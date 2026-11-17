@@ -100,7 +100,7 @@ class OnlineProviderTests(unittest.TestCase):
         local = Local()
         engine = Engine(local)
         with TemporaryDirectory() as directory, patch.object(online_provider, "transcribe", lambda c, a, l: "在线识别"), \
-                patch.object(online_provider, "generate", lambda c, s, p, t: ("Online text", "stop")), \
+                patch.object(online_provider, "generate", lambda c, s, p, t, **_: ("Online text", "stop")), \
                 patch("worker.resolve_model", lambda *_: Path(directory)):
             audio = Path(directory, "a.wav"); audio.write_bytes(b"RIFF")
             asr_only = {"asr": CONFIG}

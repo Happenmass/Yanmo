@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Controller } from '../controller';
 import { LibraryStore } from '../store';
-import { checkOnlineURL, defaultSettings, TaskEvent } from '../shared';
+import { checkOnlineURL, defaultSettings, localDayKey, TaskEvent } from '../shared';
 import { NativeBridge, BackendClient } from '../processes';
 
 class Native extends EventEmitter {
@@ -225,7 +225,8 @@ test('口述译文直接保存并向写入时焦点粘贴一次', async () => {
     assert.equal(value.backend.requests[0].operation, 'voiceTranslation');
     assert.equal(value.backend.requests[0].target_language, 'en');
     const calls = value.native.arguments.filter(call => call.command === 'insert');
-    assert.deepEqual(calls, [{ command: 'insert', args: { text: 'I want to create a new animation effect.' } }]);
+    assert.deepEqual(calls, [{ command: 'insert', args: { text: 'I want to create a new animation effect.',
+      inputEventId: value.backend.requests[0].task_id, characterCount: 40 } }]);
     assert.equal(value.controller.state.stage, 'idle');
     assert.equal(value.controller.state.draft, 'I want to create a new animation effect.');
     assert.equal(value.controller.state.library.manuscripts[0].text, 'I want to create a new animation effect.');
@@ -461,6 +462,33 @@ test('关闭历史保存时请求不归档音频，正文仍正常返回', async
     assert.equal(value.backend.requests[0].archive_audio, false);
     assert.equal(value.controller.state.library.manuscripts.length, 0);
     assert.match(value.controller.state.draft, /3500/);
+    assert.equal(value.controller.store.dailyUsage(localDayKey(new Date())).sent, 0);
+  } finally { await value.close(); }
+});
+
+test('粘贴发出后取消仍记给实际目标，关闭文稿保存也计入组合字符', async () => {
+  const value = fixture();
+  try {
+    await value.controller.updateSettings({ keepHistory: false });
+    value.backend.run = async (request, _audio, emit) => {
+      emit({ task_id: request.task_id, event: 'result', text: '甲👨‍👩‍👧‍👦e\u0301', processed: true });
+    };
+    const call = value.native.call.bind(value.native);
+    value.native.call = async (command, args = {}) => {
+      if (command !== 'insert') return call(command, args);
+      value.native.emit('inputDispatched', {
+        eventId: args.inputEventId, occurredAtMs: Date.now(), appKey: 'com.apple.TextEdit', appName: '文本编辑',
+        characters: args.characterCount, confirmed: false,
+      });
+      value.native.emit('cancel');
+      throw new Error('粘贴后的等待被取消');
+    };
+    await value.controller.perform('dictation', { name: '开始录音时的应用' });
+    await new Promise(resolve => setTimeout(resolve, 380));
+    await value.controller.finishRecording();
+    const stats = value.controller.store.dailyUsage(localDayKey(new Date()));
+    assert.deepEqual(stats.apps, [{ appKey: 'com.apple.TextEdit', name: '文本编辑', sent: 3, confirmed: 0, unverified: 3 }]);
+    assert.equal(value.controller.state.library.manuscripts.length, 0);
   } finally { await value.close(); }
 });
 

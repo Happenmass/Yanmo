@@ -1,12 +1,12 @@
 import { version as appVersion } from '../../package.json';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Cloud, Copy, Pencil, Trash2, X } from 'lucide-react';
-import { ACTIONS, Action, AppState, busy, Capability, CAPABILITIES, defaultSettings, Language, LANGUAGES, manuscriptDate, MODIFIER_NAMES, Page, Settings, Shortcut, shortcutID, shortcutLabel, shortcutNeedsEventTap, STYLES, Term, TermGroup, TERM_GROUPS } from '../shared';
+import { ACTIONS, Action, AppState, busy, Capability, CAPABILITIES, characterCount as count, defaultSettings, Language, LANGUAGES, localDayKey, manuscriptDate, MODIFIER_NAMES, Page, Settings, Shortcut, shortcutID, shortcutLabel, shortcutNeedsEventTap, STYLES, Term, TermGroup, TERM_GROUPS } from '../shared';
 import { renderMarkdown } from './markdown';
+import { DailyDetails } from './DailyDetails';
 
 const api = (action: string, args?: unknown) => window.yanmo.invoke(action, args) as Promise<{ ok: boolean; error?: string }>;
 const logoURL = new URL('../../docs/design/logo-v2.png', import.meta.url).href;
-const count = (text: string) => [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(text)].length;
 const keycap = (key: Shortcut) => <kbd key={shortcutID(key)}>{shortcutLabel(key)}</kbd>;
 const time = (value: number) => String(Math.floor(value / 60)).padStart(2, '0') + ':' + String(Math.floor(value % 60)).padStart(2, '0');
 const numerals = '〇一二三四五六七八九';
@@ -37,7 +37,9 @@ function PaperFibers() {
 
 export default function App() {
   const [state, setState] = useState<AppState | null>(null);
+  const [day, setDay] = useState<string>();
   const view = new URLSearchParams(location.search).get('view');
+  useEffect(() => { if (state?.page !== 'desk') setDay(undefined); }, [state?.page]);
   useEffect(() => {
     let alive = true;
     const off = window.yanmo.subscribe(value => { if (alive) setState(value); });
@@ -61,11 +63,11 @@ export default function App() {
   const guiding = !state.settings.onboarded;
   return <div className={'app-shell' + (guiding ? ' guiding' : '')}>
     <aside className="sidebar" inert={guiding}><PaperFibers/><div className="brand"><BrandMark /><div><h1>言墨</h1><span>YANMO</span><p className="brand-caption">语音输入</p></div></div>
-      <nav aria-label="主导航"><i className="nav-ink" style={{ transform: `translateY(${Object.keys(pageNames).indexOf(state.page) * 57}px)` }}/>{(Object.keys(pageNames) as Page[]).map(page => <button key={page} aria-current={state.page === page ? 'page' : undefined} className={state.page === page ? 'selected' : ''} onClick={() => void api('page', page)}><span>{pageNames[page][0]}</span></button>)}</nav>
+      <nav aria-label="主导航"><i className="nav-ink" style={{ transform: `translateY(${Object.keys(pageNames).indexOf(state.page) * 57}px)` }}/>{(Object.keys(pageNames) as Page[]).map(page => <button key={page} aria-current={state.page === page ? 'page' : undefined} className={state.page === page ? 'selected' : ''} onClick={() => { setDay(undefined); void api('page', page); }}><span>{pageNames[page][0]}</span></button>)}</nav>
       <div className="sidebar-bottom"><Dot ready={state.runtime.capabilities.asr !== 'unavailable'}>语音识别 · {capabilityLabel[state.runtime.capabilities.asr]}</Dot></div>
     </aside>
-    {guiding ? <main>{modelsReady(state) ? <Onboarding state={state}/> : <ModelSetup state={state}/>}<Mountains /><PaperFibers /></main> : <main><header className="topbar"><span className="page-name">{pageNames[state.page][0]}</span><span className="slash">·</span><span>{pageNames[state.page][1]}</span>{state.settings.online.asr.enabled || state.settings.online.text.enabled ? <div className="privacy online"><Cloud size={12} />{state.settings.online.asr.enabled ? '已开启在线语音识别' : '文字处理使用 API'}</div> : <div className="privacy">文字处理 API 待配置</div>}</header>
-      <div className="page-content" key={state.page}>{state.page === 'desk' ? <Desk state={state} /> : state.page === 'manuscripts' ? <Manuscripts state={state} /> : state.page === 'dictionary' ? <Dictionary state={state} /> : <Preferences state={state} />}</div>
+    {guiding ? <main>{modelsReady(state) ? <Onboarding state={state}/> : <ModelSetup state={state}/>}<Mountains /><PaperFibers /></main> : <main><header className="topbar"><span className="page-name">{pageNames[state.page][0]}</span><span className="slash">·</span><span>{state.page === 'desk' && day ? '当日详情' : pageNames[state.page][1]}</span>{state.settings.online.asr.enabled || state.settings.online.text.enabled ? <div className="privacy online"><Cloud size={12} />{state.settings.online.asr.enabled ? '已开启在线语音识别' : '文字处理使用 API'}</div> : <div className="privacy">文字处理 API 待配置</div>}</header>
+      <div className="page-content" key={state.page}>{state.page === 'desk' ? <Desk state={state} day={day} onDay={setDay}/> : state.page === 'manuscripts' ? <Manuscripts state={state} /> : state.page === 'dictionary' ? <Dictionary state={state} /> : <Preferences state={state} />}</div>
       {state.notice && <div className="notice" role="status"><span>{state.notice}</span><button className="icon-button" aria-label="关闭提示" onClick={() => void api('clearNotice')}><X size={13}/></button></div>}
       <footer className="footer"><Dot ready={state.runtime.capabilities.asr !== 'unavailable'}>语音识别 · {capabilityLabel[state.runtime.capabilities.asr]}</Dot><span className="footer-divider"/><Dot ready={state.runtime.capabilities.text !== 'unavailable'}>文字整理 · {capabilityLabel[state.runtime.capabilities.text]}</Dot><button className="footer-key" onClick={() => void api('page', 'settings')}>{state.settings.shortcuts.dictation[0] && keycap(state.settings.shortcuts.dictation[0])}<span>语音输入</span></button></footer>
       <Mountains /><PaperFibers />
@@ -137,8 +139,9 @@ function GuidePopup() {
   return <div className="guide-window guide-popup" aria-hidden="true"><i className="guide-lights"/><header><BrandMark small/><div><strong>划词翻译</strong><p>读懂另一种表达</p></div></header><div className="guide-row"><span>译为 英语 ▾</span><span className="segmented"><b>排版</b><span>源码</span></span></div><div className="guide-row">▸ 原文 · 32 字</div><p className="guide-result">A quiet sentence crosses the page.<br/>Its meaning remains, in another tongue.</p><footer><span className="guide-seal">复制译文</span><span>关闭</span></footer></div>;
 }
 
-function Desk({ state }: { state: AppState }) {
+function Desk({ state, day, onDay }: { state: AppState; day?: string; onDay: (day?: string) => void }) {
   const items = state.library.manuscripts;
+  const calendarDay = useRef<string>(undefined);
   const characters = items.reduce((sum, item) => sum + count(item.text), 0);
   const seconds = items.reduce((sum, item) => sum + item.seconds, 0);
   const timed = items.filter(item => item.seconds > 0);
@@ -147,15 +150,34 @@ function Desk({ state }: { state: AppState }) {
   for (const item of items) { const key = manuscriptDate(item.date).toDateString(); days.set(key, (days.get(key) || 0) + count(item.text)); }
   const stats = [['累计落笔', characters.toLocaleString(), '字'], ['音频时长', String(Math.floor(seconds < 60 ? seconds : seconds / 60)), seconds < 60 ? '秒' : '分钟'], ['平均口述速度', seconds ? String(Math.round(timedCharacters / seconds * 60)) : '—', '字 / 分钟'], ['活跃天数', String(days.size), '天']];
   return <div className="desk page-scroll"><section className="desk-heading"><h2 className="brush-reveal">言语之间，自有笔墨。</h2><p>让表达回到自然，让文字留有余地。</p></section>
-    <div className="desk-columns"><section className="usage"><h3>表达概览</h3><div className="stats">{stats.map(([name, value, unit], index) => <div className="stat ink-in" key={name} style={{ animationDelay: (index * .08) + 's' }}><div><strong className="ink-in" key={value}>{value}</strong><span>{unit}</span></div><p>{name}</p></div>)}</div><hr/><Calendar days={days}/><p className="fine-print">按本机保留的文稿统计，包含导入音频。</p></section>
+    <div className="desk-columns">{day ? <DailyDetails key={day} day={day} onBack={() => onDay()} onDay={onDay}/> : <section className="usage"><h3>表达概览</h3><div className="stats">{stats.map(([name, value, unit], index) => <div className="stat ink-in" key={name} style={{ animationDelay: (index * .08) + 's' }}><div><strong className="ink-in" key={value}>{value}</strong><span>{unit}</span></div><p>{name}</p></div>)}</div><hr/><Calendar days={days} focusDay={calendarDay.current} onDay={value => { calendarDay.current = value; onDay(value); }}/><p className="fine-print">按本机保留的文稿统计，包含导入音频。</p></section>}
       <section className="anywhere"><h3>随处落笔</h3><p>在任意输入框按下快捷键，<br/>说完后再按一次。</p><div className="key-list">{state.settings.shortcuts.dictation.map(keycap)}</div>{(['voiceTranslation', 'selectionTranslation'] as Action[]).map(action => <div className="action-keys" key={action}><span>{ACTIONS[action]}</span><div className="key-list">{state.settings.shortcuts[action].map(keycap)}</div></div>)}<p>Esc 取消本次输入</p><button className="text-button" onClick={() => void api('page', 'settings')}>自定义快捷键 →</button><hr/><button className="button" disabled={busy(state.stage) || state.checking} onClick={() => void api('import')}>导入一段录音</button><p className="fine-print">已有录音也可转成文稿。</p></section>
-    </div><hr/><section className="recent"><header><h3>最近文稿</h3><button className="text-button" onClick={() => void api('page', 'manuscripts')}>查看全部 →</button></header>{items.length ? items.slice(0, 3).map(item => <button className="recent-row" key={item.id} disabled={busy(state.stage)} onClick={() => void api('select', item.id)}><span>{item.text}</span><time>{dateLabel(item.date)}</time></button>) : <p className="empty-line">第一段文字，从开口开始。</p>}</section>
+    </div>{!day && <><hr/><section className="recent"><header><h3>最近文稿</h3><button className="text-button" onClick={() => void api('page', 'manuscripts')}>查看全部 →</button></header>{items.length ? items.slice(0, 3).map(item => <button className="recent-row" key={item.id} disabled={busy(state.stage)} onClick={() => void api('select', item.id)}><span>{item.text}</span><time>{dateLabel(item.date)}</time></button>) : <p className="empty-line">第一段文字，从开口开始。</p>}</section></>}
   </div>;
 }
-function Calendar({ days }: { days: Map<string, number> }) {
+function Calendar({ days, focusDay, onDay }: { days: Map<string, number>; focusDay?: string; onDay: (day: string) => void }) {
+  const focus = useRef<HTMLButtonElement>(null);
+  useEffect(() => { focus.current?.focus({ preventScroll: true }); }, []);
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const start = new Date(today); start.setDate(start.getDate() - ((start.getDay() + 6) % 7) - 19 * 7);
-  return <div className="activity-calendar"><header><h4>落笔日历</h4><span>近 20 周</span></header><div className="calendar-grid"><div className="week-labels">{['一', '', '三', '', '五', '', '日'].map((name, index) => <span key={index}>{name}</span>)}</div>{Array.from({ length: 20 }, (_, week) => <div className="calendar-week" key={week}>{Array.from({ length: 7 }, (_, day) => { const date = new Date(start); date.setDate(start.getDate() + week * 7 + day); const amount = days.get(date.toDateString()) || 0; const alpha = date > today ? .025 : amount === 0 ? .06 : amount < 100 ? .2 : amount < 500 ? .4 : .65; return <span key={day} className="calendar-day ink-in" title={date.toLocaleDateString() + ' · ' + amount + ' 字'} style={{ backgroundColor: 'rgba(41,43,38,' + alpha + ')', animationDelay: (.1 + week * .03 + day * .012) + 's' }}/>; })}</div>)}</div><div className="calendar-legend"><span>淡</span>{[.06, .2, .4, .65].map(alpha => <i key={alpha} style={{ opacity: alpha }}/>) }<span>浓</span></div></div>;
+  return <div className="activity-calendar"><header><h4>落笔日历</h4><span>近 20 周</span></header>
+    <div className="calendar-grid"><div className="week-labels">{['一', '', '三', '', '五', '', '日'].map((name, index) => <span key={index}>{name}</span>)}</div>
+      {Array.from({ length: 20 }, (_, week) => <div className="calendar-week" key={week}>
+        {Array.from({ length: 7 }, (_, day) => {
+          const date = new Date(start); date.setDate(start.getDate() + week * 7 + day);
+          const key = localDayKey(date);
+          const amount = days.get(date.toDateString()) || 0;
+          const future = date > today;
+          const alpha = future ? .025 : amount === 0 ? .06 : amount < 100 ? .2 : amount < 500 ? .4 : .65;
+          const style = { backgroundColor: 'rgba(41,43,38,' + alpha + ')', animationDelay: (.1 + week * .03 + day * .012) + 's' };
+          const label = date.toLocaleDateString('zh-CN') + ' · 文稿 ' + amount + ' 字';
+          return future ? <span key={key} className="calendar-day ink-in" title={label} style={style}/>
+            : <button key={key} ref={key === focusDay ? focus : undefined} className="calendar-day ink-in" data-day={key} title={label}
+                aria-label={label + '，查看当日详情'} style={style} onClick={() => onDay(key)}/>;
+        })}
+      </div>)}
+    </div><div className="calendar-legend"><span>淡</span>{[.06, .2, .4, .65].map(alpha => <i key={alpha} style={{ opacity: alpha }}/>) }<span>浓</span></div>
+  </div>;
 }
 
 function Manuscripts({ state }: { state: AppState }) {
@@ -292,7 +314,7 @@ function Preferences({ state }: { state: AppState }) {
     <PreferenceSection title="麦克风"><label className="inline-setting"><span>输入设备</span><select aria-label="输入设备" value={settings.microphone} onChange={event => patch({ microphone: event.target.value })}><option value="">跟随系统</option>{state.native.devices.map(device => <option key={device.id} value={device.id}>{device.name}</option>)}</select></label><p className="fine-print">仅选择言墨使用的输入设备，不更改系统默认麦克风。录音无提示音，不回放麦克风声音。</p></PreferenceSection>
     <PreferenceSection title="本地模型"><label className="inline-setting"><span>模型下载来源</span><select aria-label="模型下载来源" value={settings.modelSource} onChange={event => patch({ modelSource: event.target.value as Settings['modelSource'] })}><option value="modelscope">ModelScope（默认）</option><option value="huggingface">Hugging Face</option></select></label><AsrPreset state={state}/><Field title="语音识别模型" name="asrModel" value={settings.asrModel}/><Field title="中英复核模型" name="senseVoiceModel" value={settings.senseVoiceModel}/><p className="fine-print">自动识别为中文或英文后，使用 SenseVoice Small 再识别一次；同一模型按语言调用，两路原文用于整理对照。</p><p className="fine-print">语音模型保存在用户全局缓存。空闲 1 小时后释放模型，下次录音时后台准备。</p><button className="button compact prepare-models" disabled={state.checking} onClick={() => void api('prepareModels')}>准备模型</button><div className="model-check"><Dot ready={state.models.asr}>ASR 缓存{state.models.asr ? '完整' : '待准备'}</Dot><Dot ready={state.models.sensevoice}>中英复核缓存{state.models.sensevoice ? '完整' : '待准备'}</Dot><button className="button compact" disabled={state.checking} onClick={() => void api('check')}>{state.checking ? '正在检查…' : '检查本地环境'}</button></div></PreferenceSection>
     <PreferenceSection title="API 服务"><p className="fine-print">整理和翻译共用一个 OpenAI 兼容文字 API。文字请求可包含转写、词库和已启用的光标上下文。{state.platform === 'mac' && '语音写入后 10 秒内按 Enter，当前输入框的可读正文可能与上一段口述一起交给同一 API 提取词条。'}只有启用在线语音识别时才会发送音频。API Key 加密保存。</p>{(Object.keys(CAPABILITIES) as Capability[]).map(capability => <OnlineSetting key={capability} capability={capability} state={state}/>)}</PreferenceSection>
-    <PreferenceSection title="文字与隐私"><CheckSetting title="识别后整理语气与标点（纠错仍启用）" checked={settings.polishEnabled} onChange={value => patch({ polishEnabled: value })}/><label className="inline-setting"><span>整理风格</span><select aria-label="整理风格" value={settings.style} onChange={event => patch({ style: event.target.value })}>{STYLES.map(style => <option key={style}>{style}</option>)}</select></label><CheckSetting title="读取输入框光标前后各最多 300 字，辅助识别与纠错" checked={settings.readContext} onChange={value => patch({ readContext: value })}/><CheckSetting title="在本机保存新文稿" checked={settings.keepHistory} onChange={value => patch({ keepHistory: value })}/><label className="inline-setting"><span>文稿保留时间</span><select aria-label="文稿保留时间" value={settings.retention} onChange={event => patch({ retention: Number(event.target.value) })}>{[[0, '一直保留'], [1, '24 小时'], [7, '7 天'], [30, '30 天'], [365, '1 年']].map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label><p className="fine-print">开启保存后，文稿与压缩录音一同保存在本机，按文稿保留时间清理。临时音频处理后删除。关闭保存不删除已有文稿与录音；删除文稿会同时删除其录音。词库和设置始终仅保存在本机。</p></PreferenceSection>
+    <PreferenceSection title="文字与隐私"><CheckSetting title="识别后整理语气与标点（纠错仍启用）" checked={settings.polishEnabled} onChange={value => patch({ polishEnabled: value })}/><label className="inline-setting"><span>整理风格</span><select aria-label="整理风格" value={settings.style} onChange={event => patch({ style: event.target.value })}>{STYLES.map(style => <option key={style}>{style}</option>)}</select></label><CheckSetting title="读取输入框光标前后各最多 300 字，辅助识别与纠错" checked={settings.readContext} onChange={value => patch({ readContext: value })}/><CheckSetting title="在本机保存新文稿" checked={settings.keepHistory} onChange={value => patch({ keepHistory: value })}/><label className="inline-setting"><span>文稿保留时间</span><select aria-label="文稿保留时间" value={settings.retention} onChange={event => patch({ retention: Number(event.target.value) })}>{[[0, '一直保留'], [1, '24 小时'], [7, '7 天'], [30, '30 天'], [365, '1 年']].map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label><p className="fine-print">开启保存后，文稿与压缩录音一同保存在本机，按文稿保留时间清理。临时音频处理后删除。关闭保存不删除已有文稿与录音；删除文稿会同时删除其录音。词库和设置始终仅保存在本机。应用发送字数和文字 API 用量也仅保存在本机，独立于文稿保存及保留时间。</p></PreferenceSection>
     <PreferenceSection title="启动"><CheckSetting title="登录时启动言墨" checked={state.launchAtLogin} onChange={value => void api('login', value)}/><CheckSetting title="主窗口打开时在程序坞中显示言墨" checked={settings.showDock} onChange={value => patch({ showDock: value })}/><p className="fine-print">关闭主窗口后只保留顶部菜单栏，快捷键继续可用；从菜单栏可以重新打开或退出言墨。</p><button className="text-button" onClick={() => patch({ onboarded: false })}>重新查看引导 →</button></PreferenceSection>
     {state.update && <PreferenceSection title="软件更新">
       <div className="inline-setting"><span>当前版本 {state.update.version}</span><button className="button" disabled={state.update.busy} onClick={() => void api('checkUpdates')}>检查更新</button></div>

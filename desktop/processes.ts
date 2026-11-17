@@ -68,7 +68,7 @@ export class BackendClient {
   private idle?: NodeJS.Timeout;
   private active = false;
   private requests = 0;
-  constructor(private python: string, private root: string, private idleMs = 3600000, private diagnosticsDirectory?: string) {}
+  constructor(private python: string, private root: string, private idleMs = 3600000, private diagnosticsDirectory?: string, private usageDb?: string) {}
   private diagnostic(event: string, fields: Record<string, unknown> = {}) {
     if (!this.diagnosticsDirectory) return;
     try {
@@ -84,6 +84,8 @@ export class BackendClient {
     this.starting = new Promise<void>((resolve, reject) => {
       const env: NodeJS.ProcessEnv = { ...process.env, YANMO_BACKEND_TOKEN: this.token, YANMO_SUPERVISED: '1', HF_HUB_OFFLINE: '1', TRANSFORMERS_OFFLINE: '1', HF_HUB_DISABLE_TELEMETRY: '1', PYTHONUNBUFFERED: '1' };
       if (this.diagnosticsDirectory) env.YANMO_DIAGNOSTICS_DIR = this.diagnosticsDirectory;
+      if (this.usageDb) env.YANMO_USAGE_DB = this.usageDb;
+      else delete env.YANMO_USAGE_DB;
       delete env.PYTHONHOME; delete env.PYTHONPATH; delete env.VIRTUAL_ENV;
       const child = spawn(this.python, ['-B', '-u', '-m', 'backend.server'], { cwd: this.root, env, stdio: ['pipe', 'pipe', 'pipe'] });
       this.child = child;

@@ -40,6 +40,7 @@ class ServerTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json(), {"terms": ["沈砚"]})
             self.assertEqual(generate.call_args.args[:3], (ENDPOINT, CORRECTION_PROMPT, {"ORIGINAL": "联系沈燕。", "CORRECTED": "联系沈砚。"}))
+            self.assertEqual(generate.call_args.kwargs["purpose"], "hotword_extract")
             request.update(corrected="草稿：联系沈砚。", transcript="联系沈燕")
             response = client.post("/v1/corrections/terms", json=request, headers=headers)
             self.assertEqual(response.json(), {"terms": ["沈砚"]})
@@ -102,7 +103,7 @@ class ServerTests(unittest.TestCase):
     def testOnlineOnlyDictationNeverImportsMLX(self):
         """The Windows gateway path: the real Engine with both capabilities online."""
         request = {"task_id": "online", "operation": "dictation", "online": {"asr": ENDPOINT, "text": ENDPOINT}}
-        with patch.object(online_provider, "transcribe", lambda *_: "合成在线识别"), patch.object(online_provider, "generate", lambda *_: ("合成在线正文", "stop")), \
+        with patch.object(online_provider, "transcribe", lambda *_: "合成在线识别"), patch.object(online_provider, "generate", lambda *_, **_kwargs: ("合成在线正文", "stop")), \
                 TestClient(create_app(Engine(), token="test-only")) as client:
             response = client.post("/v1/tasks", data={"request": json.dumps(request)}, files={"audio": ("recording.wav", synthetic_wav(), "audio/wav")}, headers={"Authorization": "Bearer test-only"})
         events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
@@ -132,5 +133,6 @@ class ServerTests(unittest.TestCase):
                     self.assertEqual(events[-1]["text"], "合成 API 结果")
                     self.assertEqual(generate.call_count, 1)
                     self.assertEqual(generate.call_args.args[0], ENDPOINT)
+                    self.assertEqual(generate.call_args.kwargs["purpose"], "translate" if operation.endswith("Translation") else "polish")
             self.assertEqual(speech.call_count, 2)
             self.assertTrue(all("asr" not in call.args[0]["online"] for call in speech.call_args_list))

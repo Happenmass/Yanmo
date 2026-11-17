@@ -29,7 +29,7 @@ test('入库提醒按设计显示，不聚焦，撤销移除本次词条', async
       const controller = (globalThis as any).learningController;
       controller.state.settings.online.text = { enabled: true, baseURL: 'http://127.0.0.1:9/v1', model: 'fixture' };
       controller.backend.extractCorrectionTerms = async () => ['沈砚'];
-      controller.observationID = 'ui-fixture';
+      controller.observation = { id: 'ui-fixture', group: 'global' };
       controller.native.emit('correction', { observationId: 'ui-fixture', original: '明天联系沈言确认方案。', text: '明天联系沈砚确认方案。' });
     });
     const overlay = application.windows().find(window => window.url().includes('view=overlay'))!;
@@ -48,7 +48,8 @@ test('入库提醒按设计显示，不聚焦，撤销移除本次词条', async
     await expect(overlay.getByRole('status')).toHaveCount(0);
     // A subsequent notice expires without requiring any interaction.
     await application.evaluate(() => {
-      const c=(globalThis as any).learningController; c.observationID='expire';
+      const c = (globalThis as any).learningController;
+      c.observation = { id: 'expire', group: 'global' };
       c.native.emit('correction',{observationId:'expire',original:'联系沈言。',text:'联系沈砚。'});
     });
     await expect(overlay.getByRole('status')).toBeVisible();

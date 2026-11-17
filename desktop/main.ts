@@ -282,6 +282,24 @@ async function invoke(action: string, value: any) {
   }
 }
 ipcMain.handle('yanmo:state', event => { authorize(event.sender.id, event.senderFrame?.url); return controller?.state ?? null; });
+const appIcons = new Map<string, string | undefined>();
+ipcMain.handle('yanmo:dailyUsage', async (event, day: unknown) => {
+  authorize(event.sender.id, event.senderFrame?.url);
+  if (event.sender !== mainWindow.webContents || typeof day !== 'string') throw new Error('无效的统计请求。');
+  const usage = controller.store.dailyUsage(day);
+  if (process.platform === 'darwin') {
+    const missing = usage.apps.map(item => item.appKey).filter(key => !key.startsWith('name:') && !appIcons.has(key));
+    if (missing.length) {
+      const keys = missing.slice(0, 64);
+      try {
+        const icons = await controller.native.call<Record<string, string>>('appIcons', { appKeys: keys });
+        for (const key of keys) appIcons.set(key, Object.hasOwn(icons, key) ? 'data:image/png;base64,' + icons[key] : undefined);
+      } catch { /* The report remains available with generic app icons. */ }
+    }
+    for (const item of usage.apps) item.icon = appIcons.get(item.appKey);
+  }
+  return usage;
+});
 ipcMain.handle('yanmo:action', async (event, action, value) => {
   authorize(event.sender.id, event.senderFrame?.url);
   try { await invoke(action, value); return { ok: true }; }
@@ -307,7 +325,7 @@ app.whenReady().then(async () => {
   }
   const store = new LibraryStore(dataDirectory, defaults, process.env.YANMO_DATA_DIR ? undefined : join(app.getPath('appData'), 'Yanmo/library.json'));
   runtimePython = existsSync(python) ? python : developmentPython;
-  const backend = new BackendClient(runtimePython, root, 3600000, join(dataDirectory, "diagnostics"));
+  const backend = new BackendClient(runtimePython, root, 3600000, join(dataDirectory, "diagnostics"), store.error ? undefined : store.dbPath);
   controller = new Controller(store, native, backend);
   if (app.isPackaged && !windows && process.arch === 'arm64') controller.state.update = { version: app.getVersion(), busy: false, message: '' };
   if (windows) {

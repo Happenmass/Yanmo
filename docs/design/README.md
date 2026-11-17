@@ -41,6 +41,10 @@
 - 远山只占空白角落，不压文字。两张稿侧栏略有差异，按用户要求统一以书案稿为准。
 - 实现在 `desktop/renderer/`：字体用系统宋体／楷体（Songti SC、Kaiti SC），装有思源宋体或霞鹜文楷时优先使用，不随包分发字体；划词翻译与设置页沿用同一套按钮和细线规则。提示词见 [prompts-v2.md](prompts-v2.md)。
 
+## 书案 · 当日详情（2026-11-17）
+
+点击落笔日历中的日期，查看当日发送量、应用排名和 LLM 用量。按用户确认的 v2 布局移除折线图，见 [v3 设计稿](daily-detail-v3.png) 和 [交互说明与生成提示词](daily-detail-v3.md)。[v1 设计稿](daily-detail-v1.png) 和 [v2 设计稿](daily-detail-v2.png) 留作对照。
+
 ## 首次使用引导（2026-10-22 已确认并实现）
 
 ![第一步 语音输入](onboarding-v1-dictation.png)

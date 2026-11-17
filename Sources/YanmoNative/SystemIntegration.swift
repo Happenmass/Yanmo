@@ -203,7 +203,8 @@ public struct InputDestination {
     /// Deliver a normal paste to the application that owns focus now. The
     /// recording-time AX snapshot is context only, never an insertion lock.
     @MainActor
-    public static func pasteAtCurrentFocus(_ text: String, didPostPaste: (() -> Void)? = nil) async throws -> String {
+    public static func pasteAtCurrentFocus(_ text: String, didPostPaste: ((NSRunningApplication) -> Void)? = nil) async throws -> String {
+        try Task.checkCancellation()
         guard AXIsProcessTrusted() else { throw EngineError(message: "写入其他应用需要辅助功能权限。可先在文稿中复制文字。") }
         guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: true),
               let up = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: false) else {
@@ -214,7 +215,7 @@ public struct InputDestination {
             Dictionary(uniqueKeysWithValues: item.types.compactMap { type in item.data(forType: type).map { (type, $0) } })
         }
         clipboard.clearContents()
-        clipboard.setString(text, forType: .string)
+        let staged = clipboard.setString(text, forType: .string)
         let ownChange = clipboard.changeCount
         defer {
             if clipboard.changeCount == ownChange {
@@ -227,6 +228,7 @@ public struct InputDestination {
                 if !items.isEmpty { clipboard.writeObjects(items) }
             }
         }
+        guard staged else { throw EngineError(message: "无法准备粘贴文本，请手动复制正文。") }
         // Resolve immediately before posting; do not activate a recorded app,
         // compare old selections, inspect AX setters, or gate on field visibility.
         guard let application = NSWorkspace.shared.frontmostApplication else {
@@ -234,7 +236,7 @@ public struct InputDestination {
         }
         down.flags = .maskCommand; up.flags = .maskCommand
         down.postToPid(application.processIdentifier); up.postToPid(application.processIdentifier)
-        didPostPaste?()
+        didPostPaste?(application)
         try await Task.sleep(nanoseconds: 650_000_000)
         return application.localizedName ?? "当前应用"
     }
