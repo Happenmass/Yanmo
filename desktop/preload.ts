@@ -5,6 +5,7 @@ let snapshot: AppState;
 const api: DesktopAPI = {
   state: async () => { snapshot = await ipcRenderer.invoke('yanmo:state'); return snapshot; },
   dailyUsage: day => ipcRenderer.invoke('yanmo:dailyUsage', day),
+  manuscriptAttachments: id => ipcRenderer.invoke('yanmo:manuscriptAttachments', id),
   invoke: (action, args) => ipcRenderer.invoke('yanmo:action', action, args),
   subscribe(listener) {
     const handler = (_event: Electron.IpcRendererEvent, state: AppState) => { snapshot = state; listener(state); };

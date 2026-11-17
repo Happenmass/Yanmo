@@ -1,10 +1,11 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, safeStorage, screen, shell, Tray } from 'electron';
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, Menu, nativeImage, safeStorage, screen, shell, systemPreferences, Tray } from 'electron';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawn, ChildProcess } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { setTimeout as wait } from 'node:timers/promises';
 import { Controller } from './controller';
 import { NativeBridge, BackendClient } from './processes';
 import { LibraryStore } from './store';
@@ -81,6 +82,34 @@ function showOverlay() {
     overlay.setPosition(Math.round(workArea.x + (workArea.width - width) / 2), workArea.y + workArea.height - overlaySize.height - overlaySize.bottom);
     overlay.showInactive();
   }
+}
+async function captureRecordingScreenshot(): Promise<Buffer | undefined> {
+  if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted') return;
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const { width, height } = display.size;
+  const scale = Math.min(display.scaleFactor, 1920 / Math.max(width, height));
+  const thumbnailSize = { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
+  const timeout = new AbortController();
+  try {
+    const sources = await Promise.race([
+      desktopCapturer.getSources({ types: ['screen'], thumbnailSize }),
+      wait(1200, undefined, { signal: timeout.signal }),
+    ]);
+    const source = sources?.find(item => item.display_id === String(display.id))
+      ?? (sources?.length === 1 && !sources[0].display_id && screen.getAllDisplays().length === 1 ? sources[0] : undefined);
+    if (!source || source.thumbnail.isEmpty()) return;
+    const thumbnail = source.thumbnail;
+    if (process.platform === 'darwin') {
+      try {
+        const result = await Promise.race([
+          controller.native.call<{ avif?: string }>('screenshot.encode', { png: thumbnail.toPNG().toString('base64') }),
+          wait(3000, undefined, { signal: timeout.signal }),
+        ]);
+        if (result?.avif) return Buffer.from(result.avif, 'base64');
+      } catch { /* Older macOS versions may not offer an AVIF encoder. */ }
+    }
+    return thumbnail.toJPEG(54);
+  } finally { timeout.abort(); }
 }
 // Let the renderer's short fade finish before the panel disappears.
 function hideOverlay() {
@@ -243,10 +272,16 @@ async function invoke(action: string, value: any) {
     case 'settings': {
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('设置值无效。');
       if ('retention' in value && value.retention && controller.state.library.manuscripts.some(item => item.date < cocoaNow() - value.retention * 86400)) {
-        const choice = await dialog.showMessageBox(mainWindow, { type: 'warning', message: '更改保留时间后，超期文稿将从本机永久删除。', buttons: ['取消', '更改并删除超期文稿'], defaultId: 0, cancelId: 0 });
+        const choice = await dialog.showMessageBox(mainWindow, { type: 'warning', message: '超期文稿及其录音和截屏将从本机永久删除。', buttons: ['取消', '更改并删除超期文稿'], defaultId: 0, cancelId: 0 });
         if (choice.response !== 1) return;
       }
       await controller.updateSettings(value); break;
+    }
+    case 'screenRecordingSettings': {
+      if (process.platform === 'darwin' && controller.state.settings.keepHistory && controller.state.settings.saveRecordingScreenshot) {
+        await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+      }
+      break;
     }
     case 'capture': await controller.beginCapture(value); break;
     case 'captureEnd': await controller.endCapture(); break;
@@ -256,7 +291,7 @@ async function invoke(action: string, value: any) {
     case 'draft': if (value && typeof value.text === 'string') controller.updateDraft(value.id, value.text); break;
     case 'deleteManuscript': {
       if (typeof value !== 'string' || busy(controller.state.stage)) return;
-      const choice = await dialog.showMessageBox(mainWindow, { type: 'warning', message: '删除这份文稿及其录音？此操作无法撤销。', buttons: ['取消', '删除文稿'], defaultId: 0, cancelId: 0 });
+      const choice = await dialog.showMessageBox(mainWindow, { type: 'warning', message: '删除这份文稿及其录音和截屏？此操作无法撤销。', buttons: ['取消', '删除文稿'], defaultId: 0, cancelId: 0 });
       if (choice.response === 1) controller.deleteManuscript(value); break;
     }
     case 'termSave': if (value && typeof value.term === 'string' && typeof value.hint === 'string' && Array.isArray(value.aliases) && value.aliases.every((alias: unknown) => typeof alias === 'string')) controller.saveTerm(value); else throw new Error('词条格式无效。'); break;
@@ -282,6 +317,13 @@ async function invoke(action: string, value: any) {
   }
 }
 ipcMain.handle('yanmo:state', event => { authorize(event.sender.id, event.senderFrame?.url); return controller?.state ?? null; });
+ipcMain.handle('yanmo:manuscriptAttachments', (event, id: unknown) => {
+  if (event.sender !== mainWindow.webContents || event.senderFrame?.url !== indexURL || typeof id !== 'string') {
+    throw new Error('无效的文稿附件请求。');
+  }
+  if (controller.state.selectedID !== id) return {};
+  return controller.store.getAttachments(id);
+});
 const appIcons = new Map<string, string | undefined>();
 ipcMain.handle('yanmo:dailyUsage', async (event, day: unknown) => {
   authorize(event.sender.id, event.senderFrame?.url);
@@ -327,6 +369,7 @@ app.whenReady().then(async () => {
   runtimePython = existsSync(python) ? python : developmentPython;
   const backend = new BackendClient(runtimePython, root, 3600000, join(dataDirectory, "diagnostics"), store.error ? undefined : store.dbPath);
   controller = new Controller(store, native, backend);
+  controller.captureRecordingScreenshot = captureRecordingScreenshot;
   if (app.isPackaged && !windows && process.arch === 'arm64') controller.state.update = { version: app.getVersion(), busy: false, message: '' };
   if (windows) {
     // Multi-GB runtime stays in Local AppData, not the roaming profile.

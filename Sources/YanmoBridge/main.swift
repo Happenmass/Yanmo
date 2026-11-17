@@ -1,6 +1,7 @@
 import AppKit
 @preconcurrency import AVFoundation
 import ApplicationServices
+import ImageIO
 import PermissionFlow
 import YanmoCore
 import YanmoNative
@@ -161,6 +162,19 @@ final class Bridge {
         return ["path": url.path, "seconds": duration]
     }
 
+    private nonisolated static func encodeAVIF(_ png: String) -> String? {
+        let format = "public.avif" as CFString
+        guard let input = Data(base64Encoded: png),
+              let source = CGImageSourceCreateWithData(input as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(output, format, 1, nil) else { return nil }
+        let options = [kCGImageDestinationLossyCompressionQuality: 0.60] as CFDictionary
+        CGImageDestinationAddImage(destination, image, options)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return output.base64EncodedString()
+    }
+
     func handle(_ message: [String: Any]) async {
         let id = message["id"] as? String ?? ""
         let args = message["args"] as? [String: Any] ?? [:]
@@ -266,6 +280,11 @@ final class Bridge {
                 audioFiles.insert(url); result = ["path": url.path]
             case "record.cancel":
                 recordingGeneration = UUID(); meter?.invalidate(); meter = nil; recorder.cancel()
+            case "screenshot.encode":
+                if let png = args["png"] as? String {
+                    let encoded = await Task.detached(priority: .utility) { Self.encodeAVIF(png) }.value
+                    if let encoded { result = ["avif": encoded] }
+                }
             case "audio.import": result = try await normalizedAudio(args["path"] as? String ?? "")
             case "audio.delete":
                 let url = URL(fileURLWithPath: args["path"] as? String ?? "")

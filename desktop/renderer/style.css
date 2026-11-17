@@ -97,3 +97,21 @@ button.calendar-day:hover{box-shadow:inset 0 0 0 1px var(--red)}
 .daily-llm dt{color:var(--muted);font-size:12px}
 .daily-llm dd{margin:0;font:17px var(--serif);font-variant-numeric:tabular-nums}
 .daily-visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.manuscript-attachments{border-block:1px solid var(--line);padding:10px 0;flex-shrink:0}
+.manuscript-attachments h4,.screenshot-dialog h4{font:16px var(--serif);margin:0}
+.manuscript-media{display:flex;align-items:center;gap:14px;margin-top:8px}
+.recording-preview{display:flex;align-items:center;gap:10px;flex:1;min-width:0}
+.recording-toggle{display:grid;place-items:center;border:1px solid var(--line);border-radius:2px;width:32px;height:32px;flex-shrink:0}
+.recording-toggle:hover{color:var(--red);border-color:var(--red)}
+.recording-controls{min-width:0;flex:1;font-size:13px}
+.recording-timeline{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.recording-timeline input{margin:0;padding:0;min-width:0;flex:1;height:16px;accent-color:var(--red)}
+.screenshot-preview{display:grid;gap:3px;justify-items:center;font-size:11px;color:var(--muted);min-width:0}
+.recording-preview + .screenshot-preview{border-left:1px solid var(--line);padding-left:14px}
+.screenshot-thumbnail{position:relative;display:grid;place-items:center;width:145px;max-width:100%;height:76px;background:#e9e3d6;border:1px solid var(--line);overflow:hidden}
+.screenshot-thumbnail img{width:100%;height:100%;object-fit:contain}
+.screenshot-thumbnail svg{position:absolute;bottom:3px;right:3px;background:var(--ink);color:#fff;padding:2px;box-sizing:content-box}
+.screenshot-dialog{max-width:calc(100vw - 44px);max-height:calc(100vh - 44px);margin:auto;padding:14px;border:1px solid var(--line);background:#f6f3ec;color:var(--ink)}
+.screenshot-dialog::backdrop{background:#23262abb}
+.screenshot-dialog>header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:10px}
+.screenshot-dialog>img{display:block;max-width:100%;max-height:calc(100vh - 112px);object-fit:contain}

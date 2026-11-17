@@ -1,9 +1,9 @@
 import { mkdirSync, readFileSync, existsSync, renameSync, copyFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { DailyUsage, Library, LLMPurpose, Manuscript, Settings, TermGroup, cocoaNow, isTermGroup, localDayDate, manuscriptDate, shiftLocalDay, validateSettings } from './shared';
+import { DailyUsage, Library, LLMPurpose, Manuscript, ManuscriptAttachments, Settings, TermGroup, cocoaNow, isTermGroup, localDayDate, manuscriptDate, shiftLocalDay, validateSettings } from './shared';
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const STATISTICS_START = 'statistics_started_at_ms';
 
 const STATISTICS_SQL = `
@@ -69,6 +69,7 @@ export function parseLibrary(value: unknown): Library {
   for (const item of library.manuscripts) {
     if (typeof item.id !== 'string' || ids.has(item.id) || !Number.isFinite(item.date) || !Number.isFinite(item.seconds) || item.seconds < 0 || typeof item.text !== 'string' || typeof item.original !== 'string' || typeof item.application !== 'string' || typeof item.polished !== 'boolean' || (item.hasAudio !== undefined && typeof item.hasAudio !== 'boolean') || (item.audioWarning !== undefined && typeof item.audioWarning !== 'string')) throw new Error('文稿库中存在无效内容。');
     ids.add(item.id);
+    if (item.recordingEndedAtMs !== undefined && (!Number.isSafeInteger(item.recordingEndedAtMs) || item.recordingEndedAtMs <= 0)) throw new Error('录音结束时间无效。');
     if (item.asrResults !== undefined && (!Array.isArray(item.asrResults) || item.asrResults.some(result => !result || typeof result.engine_name !== 'string' || typeof result.transcript !== 'string' || (result.language != null && typeof result.language !== 'string')))) throw new Error('文稿的识别对照格式无效。');
   }
   ids.clear();
@@ -84,7 +85,7 @@ export function parseLibrary(value: unknown): Library {
   return library;
 }
 
-export interface ManuscriptAudio { id: string; data: Uint8Array }
+export interface ManuscriptMedia { id: string; audioOpus?: Uint8Array; screenshotImage?: Uint8Array }
 export interface AppInputEvent {
   eventId: string; occurredAtMs: number; appKey: string; appName: string; characters: number; confirmed: boolean;
 }
@@ -110,20 +111,22 @@ export class LibraryStore {
       const populated = Number(db.prepare('SELECT (SELECT count(*) FROM settings) + (SELECT count(*) FROM manuscripts) + (SELECT count(*) FROM lexicon) AS n').get()!.n) > 0;
       // A populated v0 database came from the unreleased SQLite prototype. It is
       // already authoritative: stale JSON must never overwrite committed rows.
-      if (version > 0 || populated) this.readDatabase(defaults);
-      else this.readLegacy(defaults, legacyLibrary);
-      if (version === 0) this.writeDatabase(undefined, true);
-      else {
+      if (version === 0) {
+        if (populated) this.readDatabase(defaults, false);
+        else this.readLegacy(defaults, legacyLibrary);
+        this.writeDatabase(undefined, true);
+      } else {
         if (version < SCHEMA_VERSION) {
           db.exec('BEGIN IMMEDIATE');
           try {
-            this.initializeStatistics(db);
+            this.migrateSchema(db, version);
+            this.readDatabase(defaults);
             db.exec('COMMIT');
           } catch (error) {
             db.exec('ROLLBACK');
             throw error;
           }
-        }
+        } else this.readDatabase(defaults);
         this.remember();
       }
       // This cleanup is outside the migration transaction. An interrupted rename
@@ -159,14 +162,15 @@ export class LibraryStore {
     validateSettings(this.settings);
   }
 
-  private readDatabase(defaults: Settings) {
+  private readDatabase(defaults: Settings, hasRecordingContext = true) {
     const db = this.openDatabase();
     const saved: Record<string, unknown> = {};
     for (const row of db.prepare('SELECT key, value FROM settings WHERE key != ?').all(STATISTICS_START)) saved[String(row.key)] = JSON.parse(String(row.value));
     const { llmModel: _old, ...settings } = saved;
     this.settings = { ...defaults, ...settings } as Settings;
     validateSettings(this.settings);
-    const rows = db.prepare('SELECT id, date, length(audio_opus) > 0 AS has_audio, seconds, application, original, asr_results, text, polished, user_edited, delivery_note, audio_warning FROM manuscripts ORDER BY date DESC').all();
+    const endedAt = hasRecordingContext ? 'recording_ended_at_ms' : 'NULL AS recording_ended_at_ms';
+    const rows = db.prepare(`SELECT id, date, length(audio_opus) > 0 AS has_audio, seconds, application, original, asr_results, text, polished, user_edited, delivery_note, audio_warning, ${endedAt} FROM manuscripts ORDER BY date DESC`).all();
     this.library = parseLibrary({
       manuscripts: rows.map(row => ({
         id: row.id, date: row.date, original: row.original, text: row.text,
@@ -176,6 +180,7 @@ export class LibraryStore {
         ...(row.delivery_note ? { deliveryNote: row.delivery_note } : {}),
         ...(row.audio_warning ? { audioWarning: row.audio_warning } : {}),
         ...(row.has_audio ? { hasAudio: true } : {}),
+        ...(row.recording_ended_at_ms !== null ? { recordingEndedAtMs: row.recording_ended_at_ms } : {}),
       })),
       lexicon: db.prepare('SELECT * FROM lexicon ORDER BY position').all().map(row => ({
         id: row.id, term: row.term, hint: row.hint, aliases: JSON.parse(String(row.aliases)),
@@ -225,28 +230,35 @@ export class LibraryStore {
     this.savedSettings = JSON.stringify(this.settings);
   }
 
-  private writeDatabase(audio?: ManuscriptAudio, initialize = false) {
+  private writeDatabase(media?: ManuscriptMedia, initialize = false) {
     const db = this.openDatabase();
-    if (audio && (!audio.data.byteLength || !this.library.manuscripts.some(item => item.id === audio.id))) throw new Error('录音没有对应的文稿。');
+    if (media && !this.library.manuscripts.some(item => item.id === media.id &&
+        (media.audioOpus?.byteLength || media.screenshotImage?.byteLength) &&
+        (!media.screenshotImage?.byteLength || item.recordingEndedAtMs))) throw new Error('录音或截图没有对应的文稿。');
     db.exec('BEGIN IMMEDIATE');
     try {
+      if (initialize) this.migrateSchema(db, 0);
       const upsert = db.prepare(`
-        INSERT INTO manuscripts (id, date, occurred_at, audio_opus, seconds, application, original, asr_results, text, polished, user_edited, delivery_note, audio_warning)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO manuscripts (id, date, occurred_at, audio_opus, seconds, application, original, asr_results, text, polished, user_edited, delivery_note, audio_warning, recording_ended_at_ms, screenshot_image)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           date=excluded.date, occurred_at=excluded.occurred_at,
           audio_opus=COALESCE(excluded.audio_opus, manuscripts.audio_opus),
           seconds=excluded.seconds, application=excluded.application, original=excluded.original,
           asr_results=excluded.asr_results, text=excluded.text, polished=excluded.polished,
-          user_edited=excluded.user_edited, delivery_note=excluded.delivery_note, audio_warning=excluded.audio_warning
+          user_edited=excluded.user_edited, delivery_note=excluded.delivery_note, audio_warning=excluded.audio_warning,
+          recording_ended_at_ms=COALESCE(excluded.recording_ended_at_ms, manuscripts.recording_ended_at_ms),
+          screenshot_image=COALESCE(excluded.screenshot_image, manuscripts.screenshot_image)
       `);
       const ids = new Set<string>();
       for (const item of this.library.manuscripts) {
         ids.add(item.id);
-        if (this.savedManuscripts.get(item.id) === this.serialized(item) && audio?.id !== item.id) continue;
-        upsert.run(item.id, item.date, manuscriptDate(item.date).toISOString(), audio?.id === item.id ? Buffer.from(audio.data) : null,
+        if (this.savedManuscripts.get(item.id) === this.serialized(item) && media?.id !== item.id) continue;
+        const attachments = media?.id === item.id ? media : undefined;
+        upsert.run(item.id, item.date, manuscriptDate(item.date).toISOString(), attachments?.audioOpus ?? null,
           item.seconds, item.application, item.original, JSON.stringify(item.asrResults || []), item.text,
-          item.polished ? 1 : 0, item.userEdited ? 1 : 0, item.deliveryNote ?? null, item.audioWarning ?? null);
+          item.polished ? 1 : 0, item.userEdited ? 1 : 0, item.deliveryNote ?? null, item.audioWarning ?? null,
+          item.recordingEndedAtMs ?? null, attachments?.screenshotImage ?? null);
       }
       const remove = db.prepare('DELETE FROM manuscripts WHERE id = ?');
       for (const id of this.savedManuscripts.keys()) if (!ids.has(id)) remove.run(id);
@@ -271,10 +283,9 @@ export class LibraryStore {
         const insert = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');
         for (const [key, value] of Object.entries(this.settings)) insert.run(key, JSON.stringify(value));
       }
-      if (initialize) this.initializeStatistics(db);
       db.exec('COMMIT');
       this.audioIds = new Set([...this.audioIds].filter(id => ids.has(id)));
-      if (audio) this.audioIds.add(audio.id);
+      if (media?.audioOpus?.byteLength) this.audioIds.add(media.id);
       for (const item of this.library.manuscripts) {
         if (this.audioIds.has(item.id)) item.hasAudio = true;
         else delete item.hasAudio;
@@ -286,16 +297,19 @@ export class LibraryStore {
     }
   }
 
-  /** Metadata, optional audio, pruning and preferences commit as one unit. */
-  persist(audio?: ManuscriptAudio) {
+  /** Metadata, optional recordings and screenshots, pruning and preferences commit as one unit. */
+  persist(media?: ManuscriptMedia) {
     if (this.error) throw new Error(this.error);
     parseLibrary(this.library); validateSettings(this.settings);
-    this.writeDatabase(audio);
+    this.writeDatabase(media);
   }
 
-  private initializeStatistics(db: DatabaseSync) {
-    db.exec(STATISTICS_SQL);
-    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(STATISTICS_START, String(Date.now()));
+  private migrateSchema(db: DatabaseSync, version: number) {
+    if (version < 3) {
+      db.exec(STATISTICS_SQL);
+      db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(STATISTICS_START, String(Date.now()));
+    }
+    db.exec('ALTER TABLE manuscripts ADD COLUMN recording_ended_at_ms INTEGER; ALTER TABLE manuscripts ADD COLUMN screenshot_image BLOB');
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   }
 
@@ -350,6 +364,15 @@ export class LibraryStore {
     if (this.error) return undefined;
     const row = this.openDatabase().prepare('SELECT audio_opus FROM manuscripts WHERE id = ?').get(id);
     return row?.audio_opus instanceof Uint8Array && row.audio_opus.byteLength ? Buffer.from(row.audio_opus) : undefined;
+  }
+
+  getAttachments(id: string): ManuscriptAttachments {
+    if (this.error) return {};
+    const row = this.openDatabase().prepare('SELECT audio_opus, screenshot_image FROM manuscripts WHERE id = ?').get(id);
+    const attachments: ManuscriptAttachments = {};
+    if (row?.audio_opus instanceof Uint8Array && row.audio_opus.byteLength) attachments.audio = row.audio_opus;
+    if (row?.screenshot_image instanceof Uint8Array && row.screenshot_image.byteLength) attachments.screenshot = row.screenshot_image;
+    return attachments;
   }
 
   prune() {

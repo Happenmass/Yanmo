@@ -104,8 +104,8 @@ test('统一 SQLite 数据库保存发生时间、Opus 音频、多路转写与�
       { id: 'old', date: expired, original: '过期原文', text: '过期正文', seconds: 1, application: '备忘录', polished: true },
     );
     store.persist();
-    store.persist({ id: 'recent', data: opus });
-    store.persist({ id: 'old', data: opus });
+    store.persist({ id: 'recent', audioOpus: opus });
+    store.persist({ id: 'old', audioOpus: opus });
     store.close();
 
     const db = new DatabaseSync(join(directory, 'yanmo.db'));

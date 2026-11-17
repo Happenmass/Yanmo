@@ -466,6 +466,44 @@ test('关闭历史保存时请求不归档音频，正文仍正常返回', async
   } finally { await value.close(); }
 });
 
+for (const mode of ['default', 'enabled', 'unavailable', 'historyOff'] as const) test(`录音结束截屏与文稿联动：${mode}`, async () => {
+  const value = fixture(); value.backend.mode = 'dual';
+  const { controller, backend, native } = value;
+  const jpeg = Buffer.from('synthetic screenshot');
+  let captures = 0;
+  controller.captureRecordingScreenshot = async () => {
+    captures++;
+    assert.ok(native.calls.includes('record.finish'));
+    assert.equal(backend.requests.length, 0);
+    if (mode === 'unavailable') throw new Error('模拟权限失败');
+    return jpeg;
+  };
+  try {
+    if (mode !== 'default') await controller.updateSettings({ saveRecordingScreenshot: true, keepHistory: mode !== 'historyOff' });
+    await controller.perform(mode === 'unavailable' ? 'voiceTranslation' : 'dictation', {});
+    await new Promise(resolve => setTimeout(resolve, 380));
+    assert.equal(captures, 0);
+    const ended = Date.now();
+    await controller.finishRecording();
+    assert.equal(captures, mode === 'enabled' || mode === 'unavailable' ? 1 : 0);
+    assert.match(controller.state.draft, /3500/);
+    assert.equal(native.calls.filter(call => call === 'insert').length, 1);
+    assert.ok(!Object.keys(backend.requests[0]).some(key => key.includes('screenshot')));
+    const db = new DatabaseSync(controller.store.dbPath, { readOnly: true });
+    try {
+      const row = db.prepare('SELECT occurred_at, recording_ended_at_ms, screenshot_image FROM manuscripts').get();
+      if (mode === 'historyOff') assert.equal(row, undefined);
+      else {
+        assert.ok(Number(row!.recording_ended_at_ms) >= ended);
+        assert.ok(Date.parse(String(row!.occurred_at)) >= Number(row!.recording_ended_at_ms));
+        if (mode === 'enabled') assert.deepEqual(Buffer.from(row!.screenshot_image as Uint8Array), jpeg);
+        else assert.equal(row!.screenshot_image, null);
+      }
+      if (mode === 'unavailable') assert.match(controller.state.notice, /未能保存截屏/);
+    } finally { db.close(); }
+  } finally { await value.close(); }
+});
+
 test('粘贴发出后取消仍记给实际目标，关闭文稿保存也计入组合字符', async () => {
   const value = fixture();
   try {

@@ -35,7 +35,11 @@ export function shiftLocalDay(day: string, amount: number) {
 }
 export interface Shortcut { keyCode: number; modifiers: number; keyLabel: string; modifierKeys?: number[] }
 export interface ASRResult { engine_name: string; transcript: string; language?: string | null; language_source?: 'detected' | 'forced' | 'unknown' }
-export interface Manuscript { id: string; date: number; original: string; text: string; seconds: number; application: string; polished: boolean; deliveryNote?: string; asrResults?: ASRResult[]; userEdited?: boolean; hasAudio?: boolean; audioWarning?: string }
+export interface Manuscript { id: string; date: number; recordingEndedAtMs?: number; original: string; text: string; seconds: number; application: string; polished: boolean; deliveryNote?: string; asrResults?: ASRResult[]; userEdited?: boolean; hasAudio?: boolean; audioWarning?: string }
+export interface ManuscriptAttachments {
+  audio?: Uint8Array;
+  screenshot?: Uint8Array;
+}
 export const TERM_GROUPS = { global: '全局', ai_tools: 'AI 工具', code_editor: '代码编辑器', messaging: '聊天', email: '邮件', document: '文档' } as const;
 export type TermGroup = keyof typeof TERM_GROUPS;
 export const isTermGroup = (value: unknown): value is TermGroup => typeof value === 'string' && Object.hasOwn(TERM_GROUPS, value);
@@ -48,7 +52,7 @@ export type Capability = 'asr' | 'text';
 export interface OnlineEndpoint { enabled: boolean; baseURL: string; model: string }
 export interface Settings {
   asrModel: string; senseVoiceModel: string; modelSource: 'modelscope' | 'huggingface'; polishEnabled: boolean; style: string; readContext: boolean;
-  keepHistory: boolean; microphone: string; showDock: boolean; retention: number;
+  keepHistory: boolean; saveRecordingScreenshot: boolean; microphone: string; showDock: boolean; retention: number;
   // False only for a fresh install until the first-run guide is finished or skipped.
   onboarded: boolean;
   voiceTarget: Language; selectionTarget: Language; shortcuts: Record<Action, Shortcut[]>;
@@ -85,7 +89,7 @@ export const MODIFIER_NAMES: Record<number, string> = { 63: 'FN', 59: '左 Contr
 const MODIFIER_BITS: Record<number, number> = { 59: 4096, 62: 4096, 56: 512, 60: 512, 58: 2048, 61: 2048, 55: 256, 54: 256 };
 export const defaultSettings = (): Settings => ({
   asrModel: 'mlx-community/Qwen3-ASR-1.7B-8bit', senseVoiceModel: 'mlx-community/SenseVoiceSmall', modelSource: 'modelscope',
-  polishEnabled: true, style: '自然整理', readContext: false, keepHistory: true, microphone: '', showDock: true, retention: 0, onboarded: true,
+  polishEnabled: true, style: '自然整理', readContext: false, keepHistory: true, saveRecordingScreenshot: false, microphone: '', showDock: true, retention: 0, onboarded: true,
   voiceTarget: 'en', selectionTarget: 'en', shortcuts: {
     dictation: [{ keyCode: 63, modifiers: 0, keyLabel: 'FN' }],
     voiceTranslation: [{ keyCode: 63, modifiers: 512, keyLabel: 'FN' }],
@@ -123,7 +127,7 @@ export function shortcutLabel(key: Shortcut) {
 export function validateSettings(settings: Settings) {
   if (!settings || typeof settings !== 'object') throw new Error('设置无效。');
   for (const name of ['asrModel', 'senseVoiceModel', 'microphone'] as const) if (typeof settings[name] !== 'string' || settings[name].length > 2000) throw new Error('模型或设备配置无效。');
-  for (const name of ['polishEnabled', 'readContext', 'keepHistory', 'showDock', 'onboarded'] as const) if (typeof settings[name] !== 'boolean') throw new Error('设置值无效。');
+  for (const name of ['polishEnabled', 'readContext', 'keepHistory', 'saveRecordingScreenshot', 'showDock', 'onboarded'] as const) if (typeof settings[name] !== 'boolean') throw new Error('设置值无效。');
   if (!STYLES.includes(settings.style) || ![0, 1, 7, 30, 365].includes(settings.retention)) throw new Error('整理风格或保留时间无效。');
   if (!['modelscope', 'huggingface'].includes(settings.modelSource)) throw new Error('模型下载源无效。');
   for (const capability of Object.keys(CAPABILITIES) as Capability[]) {
@@ -169,6 +173,7 @@ export function migrateSettings(legacy: Record<string, unknown>): Settings {
 export interface DesktopAPI {
   state(): Promise<AppState>;
   dailyUsage(day: string): Promise<DailyUsage>;
+  manuscriptAttachments(id: string): Promise<ManuscriptAttachments>;
   invoke(action: string, args?: unknown): Promise<unknown>;
   subscribe(listener: (state: AppState) => void): () => void;
 }

@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { ACTIONS, Action, AppState, ASRResult, Capability, busy, characterCount, cocoaNow, defaultSettings, Destination, isTermGroup, Language, LANGUAGES, LocalEnvironment, Manuscript, NativeStatus, Page, Settings, Shortcut, shortcutID, TaskEvent, Term, TermGroup, validateSettings } from './shared';
 import { BackendClient, NativeBridge } from './processes';
-import { AppInputEvent, LibraryStore, ManuscriptAudio } from './store';
+import { AppInputEvent, LibraryStore, ManuscriptMedia } from './store';
 import { decideRuntime } from './precheck';
 import { matchedTermIDs, scopedTerms, selectASRHotwords, termGroup, termKey } from './hotwords';
 
@@ -10,6 +10,7 @@ interface Task {
   id: string; action: Action; settings: Settings; destination: Destination; lexicon: Term[];
   started: number; manuscriptID: string; original: string; asrResults: ASRResult[]; audio?: string;
   audioOpus?: Buffer; audioWarning?: string; userText?: string; manual?: boolean; writeToFocus?: boolean;
+  recordingEndedAtMs?: number; screenshotImage?: Buffer;
 }
 
 export class Controller extends EventEmitter {
@@ -26,6 +27,8 @@ export class Controller extends EventEmitter {
   private settingsQueue: Promise<unknown> = Promise.resolve();
   /** Selected text in 言墨's focused main window, if any. */
   ownSelection?: () => Promise<string>;
+  /** A single local screenshot, requested only when ending an opted-in recording. */
+  captureRecordingScreenshot?: () => Promise<Buffer | undefined>;
   /** Set on Windows: probes the GPU and the PyTorch CUDA runtime instead of asking the backend for MLX caches. */
   windowsPrecheck?: () => Promise<LocalEnvironment>;
   /** Set on Windows: cache completeness of the transformers-format models, checked with the PyTorch runtime. */
@@ -74,9 +77,9 @@ export class Controller extends EventEmitter {
     this.state.runtime = decideRuntime(this.state.settings.online, models.asr && (models.sensevoice || !!this.windowsPrecheck), this.environment);
   }
   notice(message: string) { this.state.notice = message; this.changed(); }
-  private persist(audio?: ManuscriptAudio) {
+  private persist(media?: ManuscriptMedia) {
     this.store.library = this.state.library; this.store.settings = this.state.settings;
-    try { this.store.persist(audio); return true; } catch { this.state.notice = '文稿或设置未保存，请检查存储空间后重试；当前正文仍可复制。'; return false; }
+    try { this.store.persist(media); return true; } catch { this.state.notice = '文稿或设置未保存，请检查存储空间后重试；当前正文仍可复制。'; return false; }
   }
   private bindings(settings = this.state.settings) {
     return (Object.keys(ACTIONS) as Action[]).flatMap(action => settings.shortcuts[action].map(shortcut => ({ action, shortcut })));
@@ -225,14 +228,24 @@ export class Controller extends EventEmitter {
   }
   async finishRecording() {
     const task = this.task; if (!task || this.state.stage !== 'recording') return;
-    clearInterval(this.clock); this.state.seconds = (Date.now() - task.started) / 1000;
+    task.recordingEndedAtMs = Date.now();
+    const seconds = (task.recordingEndedAtMs - task.started) / 1000;
+    clearInterval(this.clock); this.state.seconds = seconds;
     this.state.stage = 'transcribing'; this.state.level = 0; this.changed();
+    let screenshot: Promise<Buffer | undefined> | undefined;
     try {
-      const { path } = await this.native.call<{ path: string }>('record.finish'); task.audio = path;
+      const recording = this.native.call<{ path: string }>('record.finish');
+      if (seconds >= 0.35 && task.settings.keepHistory && task.settings.saveRecordingScreenshot) {
+        screenshot = this.captureRecordingScreenshot?.().catch(() => undefined);
+      }
+      const { path } = await recording; task.audio = path;
       if (!this.valid(task)) return;
-      if (this.state.seconds < 0.35) throw new Error('录音太短，请再说一句。');
-      await this.process(task);
-    } catch (error) { if (this.valid(task)) await this.fail(task, (error as Error).message); }
+      if (seconds < 0.35) throw new Error('录音太短，请再说一句。');
+      await this.process(task, screenshot);
+    } catch (error) {
+      if (this.valid(task) && task.original && screenshot) task.screenshotImage = await screenshot;
+      if (this.valid(task)) await this.fail(task, (error as Error).message);
+    }
     finally { await this.deleteAudio(task); }
   }
   async importAudio(path: string) {
@@ -301,11 +314,12 @@ export class Controller extends EventEmitter {
     }
     if (task.settings.keepHistory) {
       const existing = previous.manuscripts.find(value => value.id === task.manuscriptID);
-      const item: Manuscript = { ...existing, id: task.manuscriptID, date: cocoaNow(), original: task.original, text, seconds: this.state.seconds, application: task.destination.name || '言墨文稿', polished: processed, asrResults: structuredClone(task.asrResults), userEdited: this.userEdited, ...(task.audioWarning ? { audioWarning: task.audioWarning } : {}) };
+      const item: Manuscript = { ...existing, id: task.manuscriptID, date: cocoaNow(), original: task.original, text, seconds: this.state.seconds, application: task.destination.name || '言墨文稿', polished: processed, asrResults: structuredClone(task.asrResults), userEdited: this.userEdited, ...(task.audioWarning ? { audioWarning: task.audioWarning } : {}), ...(task.recordingEndedAtMs ? { recordingEndedAtMs: task.recordingEndedAtMs } : {}) };
       this.state.library = { lexicon, manuscripts: [item, ...previous.manuscripts.filter(value => value.id !== item.id)] };
       this.store.library = this.state.library; this.store.prune(); this.state.library = this.store.library;
-      const audio = task.audioOpus?.length ? { id: task.manuscriptID, data: task.audioOpus } : undefined;
-      if (!this.persist(audio)) {
+      const audioOpus = task.audioOpus?.length ? task.audioOpus : undefined;
+      const screenshotImage = task.screenshotImage?.length ? task.screenshotImage : undefined;
+      if (!this.persist(audioOpus || screenshotImage ? { id: task.manuscriptID, audioOpus, screenshotImage } : undefined)) {
         this.state.library = this.store.library = previous;
         this.state.selectedID = null;
         return false;
@@ -326,9 +340,12 @@ export class Controller extends EventEmitter {
     try { this.store.recordAppInput(event); }
     catch { this.notice('本次应用发送字数未能保存。'); }
   }
-  private async process(task: Task) {
+  private async process(task: Task, screenshot?: Promise<Buffer | undefined>) {
     const result = await this.collect(task, task.action === 'voiceTranslation' ? 'voiceTranslation' : 'dictation');
     if (!result || !this.valid(task)) return;
+    if (screenshot) task.screenshotImage = await screenshot;
+    if (!this.valid(task)) return;
+    if (screenshot && !task.screenshotImage?.length) this.state.notice = '本次未能保存截屏，文字处理继续。';
     // Only successful live dictation counts. Rank against every in-scope term,
     // including those that did not fit in this recording's ASR prompt.
     const scope = scopedTerms(task.lexicon, task.destination.category);

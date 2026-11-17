@@ -14,7 +14,8 @@ function fixture() {
 }
 
 function restorePreStatisticsSchema(db: DatabaseSync, version: 0 | 2) {
-  db.exec(`DROP TABLE llm_usage_events; DROP TABLE app_input_events; DELETE FROM settings WHERE key='statistics_started_at_ms'; PRAGMA user_version=${version};`);
+  db.exec(`DROP TABLE llm_usage_events; DROP TABLE app_input_events; DELETE FROM settings WHERE key='statistics_started_at_ms';
+    ALTER TABLE manuscripts DROP COLUMN recording_ended_at_ms; ALTER TABLE manuscripts DROP COLUMN screenshot_image; PRAGMA user_version=${version};`);
 }
 
 test('数据库提交后，陈旧或损坏的旧 JSON 不再回退正文与设置', () => {
@@ -67,7 +68,7 @@ test('文稿、音频与设置任一步失败整笔回滚，重试后一起提�
     store.library.manuscripts.push(manuscript('existing')); store.persist();
     db.exec("CREATE TRIGGER fail_settings BEFORE INSERT ON settings BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END");
     const item = manuscript('new');
-    const audio = { id: item.id, data: Buffer.from('OggS-synthetic') };
+    const audio = { id: item.id, audioOpus: Buffer.from('OggS-synthetic') };
     store.library.manuscripts[0].text = '修改'; store.library.manuscripts.push(item);
     store.settings.voiceTarget = 'ja';
     assert.throws(() => store.persist(audio), /synthetic failure/);
@@ -76,13 +77,13 @@ test('文稿、音频与设置任一步失败整笔回滚，重试后一起提�
     assert.equal(store.library.manuscripts[1].hasAudio, undefined);
     db.exec('DROP TRIGGER fail_settings');
     store.persist(audio);
-    assert.deepEqual(store.getAudio(item.id), audio.data);
+    assert.deepEqual(store.getAudio(item.id), audio.audioOpus);
     assert.equal(store.library.manuscripts[1].hasAudio, true);
     // Editing text must preserve audio and must not rewrite unrelated rows/tables.
     db.exec("CREATE TRIGGER reject_unrelated BEFORE UPDATE ON manuscripts WHEN old.id = 'existing' BEGIN SELECT RAISE(ABORT, 'unrelated write'); END");
     db.exec("CREATE TRIGGER reject_settings BEFORE INSERT ON settings BEGIN SELECT RAISE(ABORT, 'unrelated settings'); END");
     item.text = '只修改这一条'; store.persist();
-    assert.deepEqual(store.getAudio(item.id), audio.data);
+    assert.deepEqual(store.getAudio(item.id), audio.audioOpus);
   } finally { db.close(); store.close(); f.close(); }
 });
 
@@ -113,7 +114,7 @@ test('未发布的 v0 数据库也优先于 JSON，音频随升级保留', () =>
     const initial = new LibraryStore(f.directory, defaultSettings());
     initial.library.manuscripts.push(manuscript());
     const audio = Buffer.from('OggS-fixture');
-    initial.persist({ id: 'synthetic', data: audio }); initial.close();
+    initial.persist({ id: 'synthetic', audioOpus: audio }); initial.close();
     const db = new DatabaseSync(join(f.directory, 'yanmo.db')); restorePreStatisticsSchema(db, 0); db.close();
     writeFileSync(join(f.directory, 'library.json'), JSON.stringify({ manuscripts: [], lexicon: [] }));
     const upgraded = new LibraryStore(f.directory, defaultSettings());
@@ -136,7 +137,7 @@ test('v1 词条升级后沿用全局，写入一次命中只更新该词条且�
       assert.deepEqual(store.library.lexicon[0], { id: 'old', term: '旧词条', hint: '备注', aliases: ['别名'] });
       const db = new DatabaseSync(path);
       try {
-        assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 3);
+        assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 4);
         db.exec("CREATE TRIGGER reject_unrelated BEFORE UPDATE ON lexicon WHEN old.id = 'other' BEGIN SELECT RAISE(ABORT, 'unrelated term'); END");
         db.exec("CREATE TRIGGER reject_delete BEFORE DELETE ON lexicon BEGIN SELECT RAISE(ABORT, 'term was rewritten'); END");
         Object.assign(store.library.lexicon[0], { group: 'ai_tools', matchCount: 2, lastMatchedAt: 1200, createdAt: 800 });
@@ -158,7 +159,7 @@ test('v2 升级保留文稿和词库，按日查询只合计已知用量及该�
     initial.library.manuscripts.push({ ...manuscript(), date: cocoaNow() - 2 * 86400 });
     initial.library.lexicon.push({ id: 'term', term: '合成词', hint: '', group: 'ai_tools', matchCount: 3 });
     initial.settings.voiceTarget = 'ja';
-    initial.persist({ id: 'synthetic', data: Buffer.from('OggS-fixture') });
+    initial.persist({ id: 'synthetic', audioOpus: Buffer.from('OggS-fixture') });
     initial.close();
     const path = join(f.directory, 'yanmo.db');
     const db = new DatabaseSync(path);
@@ -166,7 +167,7 @@ test('v2 升级保留文稿和词库，按日查询只合计已知用量及该�
     const store = new LibraryStore(f.directory, defaultSettings());
     try {
       assert.equal(store.error, '');
-      assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 3);
+      assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 4);
       assert.deepEqual(store.getAudio('synthetic'), Buffer.from('OggS-fixture'));
       assert.equal(store.library.lexicon[0].matchCount, 3);
       assert.equal(store.settings.voiceTarget, 'ja');
@@ -202,5 +203,56 @@ test('v2 升级保留文稿和词库，按日查询只合计已知用量及该�
     const reopened = new LibraryStore(f.directory, defaultSettings());
     try { assert.equal(reopened.dailyUsage(localDayKey(new Date())).sent, 100); }
     finally { reopened.close(); }
+  } finally { f.close(); }
+});
+
+test('v3 升级保留历史录音和统计，从新文稿开始保存录音结束时间及可选截屏', () => {
+  const f = fixture();
+  try {
+    const audioOpus = Buffer.from('OggS-synthetic');
+    const screenshotImage = Buffer.from('synthetic screenshot');
+    const initial = new LibraryStore(f.directory, defaultSettings());
+    initial.library.manuscripts.push(manuscript('old'));
+    initial.persist({ id: 'old', audioOpus });
+    initial.recordAppInput({ eventId: 'old', occurredAtMs: Date.now(), appKey: 'editor', appName: '编辑器', characters: 3, confirmed: true });
+    initial.close();
+    const db = new DatabaseSync(initial.dbPath);
+    try {
+      const oldTime = db.prepare("SELECT occurred_at FROM manuscripts WHERE id='old'").get()?.occurred_at;
+      const statisticsStart = db.prepare("SELECT value FROM settings WHERE key='statistics_started_at_ms'").get()?.value;
+      db.exec(`ALTER TABLE manuscripts DROP COLUMN recording_ended_at_ms; ALTER TABLE manuscripts DROP COLUMN screenshot_image;
+        DELETE FROM settings WHERE key='saveRecordingScreenshot'; PRAGMA user_version=3;`);
+      const store = new LibraryStore(f.directory, defaultSettings());
+      const ended = Date.now() - 500;
+      try {
+        assert.equal(store.error, '');
+        assert.equal(store.settings.saveRecordingScreenshot, false);
+        assert.deepEqual(store.getAudio('old'), audioOpus);
+        const old = db.prepare("SELECT occurred_at, recording_ended_at_ms, screenshot_image FROM manuscripts WHERE id='old'").get()!;
+        assert.equal(old.occurred_at, oldTime);
+        assert.equal(old.recording_ended_at_ms, null);
+        assert.equal(old.screenshot_image, null);
+        assert.equal(db.prepare("SELECT value FROM settings WHERE key='statistics_started_at_ms'").get()?.value, statisticsStart);
+        assert.equal(db.prepare("SELECT character_count FROM app_input_events WHERE event_id='old'").get()?.character_count, 3);
+        store.settings.saveRecordingScreenshot = true;
+        store.library.manuscripts.push({ ...manuscript('live'), recordingEndedAtMs: ended });
+        store.persist({ id: 'live', audioOpus, screenshotImage });
+      } finally { store.close(); }
+      const reopened = new LibraryStore(f.directory, defaultSettings());
+      try {
+        const live = reopened.library.manuscripts.find(item => item.id === 'live')!;
+        assert.equal(live.recordingEndedAtMs, ended);
+        assert.equal(reopened.settings.saveRecordingScreenshot, true);
+        reopened.settings.saveRecordingScreenshot = false;
+        live.text = '编辑后';
+        reopened.persist();
+        const row = db.prepare("SELECT recording_ended_at_ms, screenshot_image FROM manuscripts WHERE id='live'").get()!;
+        assert.equal(row.recording_ended_at_ms, ended);
+        assert.deepEqual(Buffer.from(row.screenshot_image as Uint8Array), screenshotImage);
+        reopened.library.manuscripts = reopened.library.manuscripts.filter(item => item.id !== live.id);
+        reopened.persist();
+        assert.equal(db.prepare("SELECT screenshot_image FROM manuscripts WHERE id='live'").get(), undefined);
+      } finally { reopened.close(); }
+    } finally { db.close(); }
   } finally { f.close(); }
 });
