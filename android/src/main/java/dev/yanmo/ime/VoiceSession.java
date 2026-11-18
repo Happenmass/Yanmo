@@ -15,9 +15,12 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.widget.Toast;
 
-import java.io.File;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.BooleanSupplier;
@@ -39,11 +42,11 @@ public final class VoiceSession {
     }
 
     interface Recorder {
-        void record(File wav, BooleanSupplier stopped) throws IOException;
+        void record(ByteArrayOutputStream pcm, BooleanSupplier stopped) throws IOException;
     }
 
     interface Transcriber {
-        String transcribe(File wav, Consumer<String> saveRaw) throws Exception;
+        String transcribe(byte[] wav, Consumer<String> saveRaw) throws Exception;
     }
 
     private final InputMethodService host;
@@ -108,12 +111,13 @@ public final class VoiceSession {
         Recording recording = active;
         if (recording == null || recording.stopped) return;
         recording.stopped = true;
+        recording.finishRecording = true;
         try {
             Manuscripts.capture(app, recording.id);
         } catch (RuntimeException ignored) {
             // A screenshot failure must not discard the recording or prevent transcription.
         } finally {
-            recording.finishRecording = true;
+            recording.readyToSave.countDown();
         }
         listener.onVoiceState(PROCESSING);
     }
@@ -126,6 +130,7 @@ public final class VoiceSession {
         recording.stopped = true;
         recording.cancelled = true;
         recording.finishRecording = true;
+        recording.readyToSave.countDown();
         listener.onVoiceState(PROCESSING);
     }
 
@@ -144,11 +149,10 @@ public final class VoiceSession {
         String failure = null;
         String stage = "录音";
         try {
-            File wav = Manuscripts.audio(app, recording.id);
-            recorder.record(wav, () -> recording.finishRecording);
+            byte[] wav = collect(recording);
             if (recording.cancelled) {
                 failure = "录音已取消";
-            } else if (wav.length() <= WAV_HEADER) {
+            } else if (wav.length <= WAV_HEADER) {
                 failure = "未采集到音频";
             } else {
                 stage = "语音识别";
@@ -210,56 +214,85 @@ public final class VoiceSession {
         if (!destroyed && failure != null && !recording.cancelled) notice(failure);
     }
 
-    private static void record(File wav, BooleanSupplier stopped) throws IOException {
+    private byte[] collect(Recording recording) throws IOException, InterruptedException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.write(new byte[WAV_HEADER], 0, WAV_HEADER);
+        recorder.record(output, () -> recording.finishRecording);
+        if (!recording.finishRecording) {
+            main.post(() -> {
+                if (active == recording && !recording.stopped) {
+                    stop();
+                    notice("录音已达到当前可用内存上限，正在处理");
+                }
+            });
+        }
+        // Wait until the end of the take has requested its screenshot.
+        recording.readyToSave.await();
+        return saveAudio(recording, output);
+    }
+
+    private byte[] saveAudio(Recording recording, ByteArrayOutputStream output) {
+        byte[] wav = output.toByteArray();
+        if (wav.length > WAV_HEADER) {
+            writeHeader(wav);
+            Manuscripts.saveAudio(app, recording.id, wav);
+        }
+        return wav;
+    }
+
+    private static void record(ByteArrayOutputStream output, BooleanSupplier stopped) throws IOException {
+        if (stopped.getAsBoolean()) return;
+        int byteLimit = recordingByteLimit();
+        if (byteLimit <= WAV_HEADER) throw new IOException("Not enough heap for recording");
         int minBuffer = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
         if (minBuffer <= 0) throw new IOException("Unsupported recording format");
         byte[] buffer = new byte[3200];
-        try (RandomAccessFile output = new RandomAccessFile(wav, "rw")) {
-            output.setLength(0);
-            writeHeader(output, 0);
-            if (stopped.getAsBoolean()) return;
-            AudioRecord mic = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, SAMPLE_RATE,
-                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(minBuffer, buffer.length));
+        AudioRecord mic = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(minBuffer, buffer.length));
+        try {
+            if (mic.getState() != AudioRecord.STATE_INITIALIZED) throw new IOException("Microphone unavailable");
+            mic.startRecording();
+            if (mic.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) throw new IOException("Microphone unavailable");
+            while (!stopped.getAsBoolean() && output.size() < byteLimit) {
+                int available = Math.min(buffer.length, byteLimit - output.size());
+                int count = mic.read(buffer, 0, available, AudioRecord.READ_NON_BLOCKING);
+                if (count > 0 && count % FRAME_BYTES == 0) {
+                    output.write(buffer, 0, count);
+                } else if (count == 0) {
+                    SystemClock.sleep(10);
+                } else {
+                    throw new IOException("Microphone read failed");
+                }
+            }
+        } finally {
             try {
-                if (mic.getState() != AudioRecord.STATE_INITIALIZED) throw new IOException("Microphone unavailable");
-                mic.startRecording();
-                if (mic.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) throw new IOException("Microphone unavailable");
-                while (!stopped.getAsBoolean()) {
-                    int count = mic.read(buffer, 0, buffer.length, AudioRecord.READ_NON_BLOCKING);
-                    if (count > 0) {
-                        output.write(buffer, 0, count);
-                    } else if (count == 0) {
-                        SystemClock.sleep(10);
-                    } else {
-                        throw new IOException("Microphone read failed");
-                    }
-                }
+                if (mic.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) mic.stop();
             } finally {
-                try {
-                    if (mic.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) mic.stop();
-                } finally {
-                    mic.release();
-                    writeHeader(output, (int) (output.length() - WAV_HEADER));
-                }
+                mic.release();
             }
         }
     }
 
-    private String transcribe(File wav, Consumer<String> saveRaw) throws Exception {
-        File window = File.createTempFile("yanmo-asr-", ".wav", app.getCacheDir());
+    private static int recordingByteLimit() {
+        Runtime runtime = Runtime.getRuntime();
+        long used = runtime.totalMemory() - runtime.freeMemory();
+        long available = Math.max(0, runtime.maxMemory() - used);
+        // Leave headroom for the growing buffer, its final WAV copy, SQLite binding,
+        // and work by the keyboard while dictation is active.
+        long pcmBudget = Math.min(available / 8, Integer.MAX_VALUE - WAV_HEADER);
+        return WAV_HEADER + (int) (pcmBudget - pcmBudget % FRAME_BYTES);
+    }
+
+    private String transcribe(byte[] wav, Consumer<String> saveRaw) throws Exception {
         StringBuilder raw = new StringBuilder();
-        try (LocalAsr client = new LocalAsr(app, speechPackage);
-             RandomAccessFile input = new RandomAccessFile(wav, "r");
-             RandomAccessFile output = new RandomAccessFile(window, "rw")) {
+        try (LocalAsr client = new LocalAsr(app, speechPackage)) {
             client.requireReady();
-            byte[] buffer = new byte[WINDOW_BYTES];
-            input.seek(WAV_HEADER);
-            while (input.getFilePointer() < input.length()) {
-                int length = (int) Math.min(WINDOW_BYTES, input.length() - input.getFilePointer());
-                input.readFully(buffer, 0, length);
-                output.setLength(0);
-                writeHeader(output, length);
-                output.write(buffer, 0, length);
+            byte[] window = new byte[WAV_HEADER + Math.min(WINDOW_BYTES, wav.length - WAV_HEADER)];
+            for (int offset = WAV_HEADER; offset < wav.length; offset += WINDOW_BYTES) {
+                int length = Math.min(WINDOW_BYTES, wav.length - offset);
+                if (window.length != WAV_HEADER + length) window = new byte[WAV_HEADER + length];
+                System.arraycopy(wav, offset, window, WAV_HEADER, length);
+                writeHeader(window);
                 String recognized = client.transcribeWindow(window);
                 if (!recognized.trim().isEmpty()) {
                     if (raw.length() > 0) raw.append('\n');
@@ -267,26 +300,18 @@ public final class VoiceSession {
                     saveRaw.accept(raw.toString());
                 }
             }
-        } finally {
-            window.delete();
         }
         return raw.toString();
     }
 
-    private static void writeHeader(RandomAccessFile file, int length) throws IOException {
-        file.seek(0);
-        file.writeBytes("RIFF");
-        file.writeInt(Integer.reverseBytes(36 + length));
-        file.writeBytes("WAVEfmt ");
-        file.writeInt(Integer.reverseBytes(16));
-        file.writeShort(Short.reverseBytes((short) 1)); // PCM
-        file.writeShort(Short.reverseBytes((short) 1)); // Mono
-        file.writeInt(Integer.reverseBytes(SAMPLE_RATE));
-        file.writeInt(Integer.reverseBytes(SAMPLE_RATE * FRAME_BYTES));
-        file.writeShort(Short.reverseBytes((short) FRAME_BYTES));
-        file.writeShort(Short.reverseBytes((short) 16));
-        file.writeBytes("data");
-        file.writeInt(Integer.reverseBytes(length));
+    static void writeHeader(byte[] wav) {
+        ByteBuffer header = ByteBuffer.wrap(wav).order(ByteOrder.LITTLE_ENDIAN);
+        header.put("RIFF".getBytes(StandardCharsets.US_ASCII)).putInt(wav.length - 8);
+        header.put("WAVEfmt ".getBytes(StandardCharsets.US_ASCII)).putInt(16);
+        header.putShort((short) 1).putShort((short) 1); // PCM, mono
+        header.putInt(SAMPLE_RATE).putInt(SAMPLE_RATE * FRAME_BYTES);
+        header.putShort((short) FRAME_BYTES).putShort((short) 16);
+        header.put("data".getBytes(StandardCharsets.US_ASCII)).putInt(wav.length - WAV_HEADER);
     }
 
     private static boolean passwordField(EditorInfo info) {
@@ -318,6 +343,7 @@ public final class VoiceSession {
     private static final class Recording {
         final String id;
         final String application;
+        final CountDownLatch readyToSave = new CountDownLatch(1);
         InputConnection editor;
         boolean stopped;
         volatile boolean finishRecording;

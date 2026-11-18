@@ -7,14 +7,18 @@ import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Message;
 import android.os.Messenger;
 import android.os.ParcelFileDescriptor;
+import android.os.ProxyFileDescriptorCallback;
 import android.os.RemoteException;
+import android.os.storage.StorageManager;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -41,6 +45,7 @@ final class LocalAsr implements AutoCloseable {
 
     private volatile boolean disconnected;
     private boolean bound;
+    private HandlerThread audioCallbacks;
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder binder) {
@@ -83,13 +88,77 @@ final class LocalAsr implements AutoCloseable {
         if (!status.equals("READY")) throw new Failure(status);
     }
 
-    String transcribeWindow(File window) throws IOException {
-        try (ParcelFileDescriptor audio = ParcelFileDescriptor.open(window, ParcelFileDescriptor.MODE_READ_ONLY)) {
-            Bundle input = new Bundle();
-            input.putParcelable("audio", audio);
-            String text = request(ASR, input, 120).getString("text");
+    String transcribeWindow(byte[] window) throws IOException {
+        ParcelFileDescriptor memory;
+        try {
+            memory = openProxyAudio(new WavReader(window));
+        } catch (IOException unavailable) {
+            memory = null;
+        }
+        try (ParcelFileDescriptor audio = memory != null ? memory : openUnlinkedAudio(window)) {
+            String text = requestAudio(ASR, audio, 120).getString("text");
             if (text == null) throw new Failure("INVALID_REPLY");
             return text;
+        }
+    }
+
+    Bundle requestAudio(int operation, ParcelFileDescriptor audio, long timeoutSeconds) throws Failure {
+        Bundle input = new Bundle();
+        input.putParcelable("audio", audio);
+        return request(operation, input, timeoutSeconds);
+    }
+
+    ParcelFileDescriptor openProxyAudio(WavReader reader) throws IOException {
+        StorageManager storage = app.getSystemService(StorageManager.class);
+        if (storage == null) throw new IOException("Proxy file descriptors are unavailable");
+        if (audioCallbacks == null) {
+            audioCallbacks = new HandlerThread("YanmoAsrAudio");
+            audioCallbacks.start();
+        }
+        ParcelFileDescriptor audio = storage.openProxyFileDescriptor(ParcelFileDescriptor.MODE_READ_ONLY,
+                reader, new Handler(audioCallbacks.getLooper()));
+        if (audio.getStatSize() == reader.onGetSize()) return audio;
+        audio.close();
+        throw new IOException("The proxy descriptor does not report its audio size");
+    }
+
+    static class WavReader extends ProxyFileDescriptorCallback {
+        private final byte[] wav;
+
+        WavReader(byte[] wav) {
+            this.wav = wav;
+        }
+
+        @Override public long onGetSize() {
+            return wav.length;
+        }
+
+        @Override public int onRead(long offset, int size, byte[] buffer) {
+            if (offset >= wav.length || size <= 0) return 0;
+            int count = Math.min(size, wav.length - (int) offset);
+            System.arraycopy(wav, (int) offset, buffer, 0, count);
+            return count;
+        }
+
+        @Override public void onRelease() {}
+    }
+
+    private ParcelFileDescriptor openUnlinkedAudio(byte[] window) throws IOException {
+        File file = File.createTempFile("asr-", ".wav", app.getCacheDir());
+        try (FileOutputStream output = new FileOutputStream(file)) {
+            ParcelFileDescriptor audio = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
+            boolean success = false;
+            try {
+                // Remove the name before writing a byte, including for process death mid-request.
+                if (!file.delete()) throw new IOException("Cannot unlink the temporary ASR window");
+                output.write(window);
+                success = true;
+                return audio;
+            } finally {
+                if (!success) audio.close();
+            }
+        } finally {
+            file.delete();
         }
     }
 
@@ -147,6 +216,7 @@ final class LocalAsr implements AutoCloseable {
     }
 
     @Override public void close() {
+        if (audioCallbacks != null) audioCallbacks.quitSafely();
         if (bound) {
             app.unbindService(connection);
             bound = false;

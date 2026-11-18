@@ -15,14 +15,19 @@ cat > "$work/AndroidManifest.xml" <<'XML'
   <uses-permission android:name="android.permission.INTERNET"/>
   <uses-permission android:name="dev.androidagent.sample.fixture.permission.SPEECH"/>
   <queries><package android:name="dev.androidagent.sample.fixture"/></queries>
-  <application android:debuggable="true"/>
+  <application android:debuggable="true">
+    <service android:name="dev.yanmo.ime.SpeechWireProbeService" android:exported="false"
+        android:process=":speechwire" android:isolatedProcess="true">
+      <intent-filter><action android:name="dev.androidagent.action.SPEECH_SERVICE_V1"/></intent-filter>
+    </service>
+  </application>
   <instrumentation android:name="dev.yanmo.ime.VoiceSessionProbe" android:targetPackage="dev.yanmo.ime.voiceprobe"/>
 </manifest>
 XML
 main="$repo/android/src/main/java/dev/yanmo/ime"
 javac --release 8 -cp "$platform" -d "$work/classes" \
     "$main"/{VoiceSession,LocalAsr,Manuscripts,Polish,ScreenCapture}.java \
-    "$repo/android/src/androidTest/java/dev/yanmo/ime/VoiceSessionProbe.java"
+    "$repo"/android/src/androidTest/java/dev/yanmo/ime/{VoiceSessionProbe,ManuscriptStoreProbe,SpeechWireProbeService}.java
 jar cf "$work/classes.jar" -C "$work/classes" .
 "$tools/d8" --lib "$platform" --min-api 28 --output "$work/dex" "$work/classes.jar"
 "$tools/aapt2" link -I "$platform" --min-sdk-version 28 --target-sdk-version 35 \

@@ -25,8 +25,7 @@ import android.util.DisplayMetrics;
 import android.view.WindowManager;
 import android.widget.Toast;
 
-import java.io.File;
-import java.io.FileOutputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
@@ -148,7 +147,7 @@ public final class ScreenCapture extends Service {
                 if (source != reader) return;
                 try (Image frame = source.acquireLatestImage()) {
                     if (frame == null) return;
-                    save(frame, Manuscripts.screenshot(this, id));
+                    Manuscripts.saveScreenshot(this, id, encode(frame));
                     pendingId = null;
                     clearSurface();
                 } catch (IOException | RuntimeException ignored) {
@@ -160,7 +159,7 @@ public final class ScreenCapture extends Service {
         } catch (RuntimeException ex) { abandon("截屏会话已失效"); }
     }
 
-    private static void save(Image frame, File destination) throws IOException {
+    private static byte[] encode(Image frame) throws IOException {
         Image.Plane plane = frame.getPlanes()[0];
         int w = frame.getWidth(), h = frame.getHeight();
         ByteBuffer source = plane.getBuffer();
@@ -174,14 +173,14 @@ public final class ScreenCapture extends Service {
         }
         pixels.flip();
         Bitmap bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
-        File pending = new File(destination.getParentFile(), destination.getName() + ".tmp");
         try {
             bitmap.copyPixelsFromBuffer(pixels);
-            try (FileOutputStream out = new FileOutputStream(pending)) {
-                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) throw new IOException("截屏编码失败");
-            }
-            if (!pending.renameTo(destination)) throw new IOException("截屏保存失败");
-        } finally { bitmap.recycle(); if (pending.exists()) pending.delete(); }
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) throw new IOException("截屏编码失败");
+            return out.toByteArray();
+        } finally {
+            bitmap.recycle();
+        }
     }
 
     private void abandon(String reason) {

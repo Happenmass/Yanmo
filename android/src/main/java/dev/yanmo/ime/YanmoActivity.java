@@ -32,10 +32,14 @@ import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 
-import java.io.File;
 import java.io.IOException;
 import java.text.DateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 public final class YanmoActivity extends Activity {
     private static final int PAPER = Color.rgb(248, 245, 236);
@@ -47,6 +51,7 @@ public final class YanmoActivity extends Activity {
     private static final int MIC_REQUEST = 200;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final ExecutorService storage = Executors.newSingleThreadExecutor();
     private LinearLayout page;
     private TextView keyboardStatus;
     private Button microphone;
@@ -56,6 +61,7 @@ public final class YanmoActivity extends Activity {
     private Runnable goBack;
     private Button audioButton;
     private SeekBar audioPosition;
+    private int audioRequest;
     private boolean onHome;
 
     @Override
@@ -94,6 +100,7 @@ public final class YanmoActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        storage.shutdownNow();
         handler.removeCallbacksAndMessages(null);
         super.onDestroy();
     }
@@ -207,66 +214,92 @@ public final class YanmoActivity extends Activity {
 
     private void showHistory() {
         openPage("语稿历史", this::showHome);
-        String[] ids = Manuscripts.history(this);
-        if (ids.length == 0) {
-            paragraph("录音识别后，文稿会出现在这里。", LIGHT_INK);
-            return;
-        }
-        for (String id : ids) {
-            TextView title = paragraph(date(id), LIGHT_INK);
-            TextView preview = paragraph(preview(id), INK);
-            preview.setMaxLines(2);
-            preview.setEllipsize(TextUtils.TruncateAt.END);
-            title.setOnClickListener(view -> showEntry(id));
-            preview.setOnClickListener(view -> showEntry(id));
-            divider();
-        }
-        paragraph("文稿保存在设备上，可在详情中删除。", LIGHT_INK);
+        TextView status = paragraph("正在读取文稿…", LIGHT_INK);
+        load(() -> {
+            boolean retry = false;
+            try {
+                Manuscripts.migrate(this);
+            } catch (IOException failure) {
+                retry = true;
+            }
+            return new History(Manuscripts.summaries(this), retry);
+        }, history -> {
+            if (history.retryMigration) {
+                status.setText("部分旧文稿尚未迁移，原文件已保留。");
+                button("重试迁移", false, this::showHistory);
+            } else if (history.entries.isEmpty()) {
+                status.setText("录音识别后，文稿会出现在这里。");
+                return;
+            } else {
+                page.removeView(status);
+            }
+            for (Manuscripts.Summary item : history.entries) {
+                TextView title = paragraph(date(item.id), LIGHT_INK);
+                TextView preview = paragraph(item.preview, INK);
+                preview.setMaxLines(2);
+                preview.setEllipsize(TextUtils.TruncateAt.END);
+                title.setOnClickListener(view -> showEntry(item.id));
+                preview.setOnClickListener(view -> showEntry(item.id));
+                divider();
+            }
+            paragraph("文稿保存在设备上，可在详情中删除。", LIGHT_INK);
+        }, () -> {
+            status.setText("无法读取或迁移文稿，请重试。");
+            button("重试", false, this::showHistory);
+        });
     }
 
-    private String preview(String id) {
-        try {
-            String text = Manuscripts.read(this, id, "polished");
-            if (!text.isEmpty()) return text;
-            text = Manuscripts.read(this, id, "raw");
-            if (!text.isEmpty()) return text;
-            String error = Manuscripts.read(this, id, "error");
-            if (!error.isEmpty()) return error;
-            if (Manuscripts.audio(this, id).length() > 44) return "录音";
-            return "录音未完成";
-        } catch (IOException failure) {
-            return "无法读取文稿";
+    private static final class History {
+        final ArrayList<Manuscripts.Summary> entries;
+        final boolean retryMigration;
+
+        History(ArrayList<Manuscripts.Summary> entries, boolean retryMigration) {
+            this.entries = entries;
+            this.retryMigration = retryMigration;
         }
+    }
+
+    private static final class Entry {
+        String error;
+        String polished;
+        String raw;
+        String captureStatus;
+        boolean audio;
+        boolean screenshot;
+        Bitmap thumbnail;
     }
 
     private void showEntry(String id) {
         openPage("文稿", this::showHistory);
         paragraph(date(id), LIGHT_INK);
-        try {
-            String error = Manuscripts.read(this, id, "error");
-            if (!error.isEmpty()) paragraph(error, OCHRE);
-            entryText("整理稿", Manuscripts.read(this, id, "polished"), "尚无整理稿");
-            entryText("识别原文", Manuscripts.read(this, id, "raw"), "尚无识别原文");
-        } catch (IOException failure) {
-            paragraph("无法读取已保存的文稿。", OCHRE);
-        }
-        File audio = Manuscripts.audio(this, id);
-        File screenshot = Manuscripts.screenshot(this, id);
-        String captureStatus = "";
-        if (screenshot.length() == 0) {
-            try {
-                captureStatus = Manuscripts.read(this, id, "capture-status");
-            } catch (IOException failure) {
-                captureStatus = "无法读取截屏状态。";
-            }
-        }
-        if (audio.length() > 44 || screenshot.length() > 0 || !captureStatus.isEmpty()) {
+        TextView status = paragraph("正在读取文稿…", LIGHT_INK);
+        load(() -> {
+            Entry entry = new Entry();
+            entry.error = Manuscripts.read(this, id, "error");
+            entry.polished = Manuscripts.read(this, id, "polished");
+            entry.raw = Manuscripts.read(this, id, "raw");
+            entry.audio = Manuscripts.size(this, id, "audio") > 44;
+            entry.screenshot = Manuscripts.size(this, id, "screenshot") > 0;
+            entry.captureStatus = Manuscripts.read(this, id, "capture-status");
+            if (entry.screenshot) entry.thumbnail = decode(Manuscripts.media(this, id, "screenshot"), 420);
+            return entry;
+        }, entry -> {
+            page.removeView(status);
+            renderEntry(id, entry);
+        }, () -> status.setText("无法读取已保存的文稿。"));
+    }
+
+    private void renderEntry(String id, Entry entry) {
+        if (!entry.error.isEmpty()) paragraph(entry.error, OCHRE);
+        entryText("整理稿", entry.polished, "尚无整理稿");
+        entryText("识别原文", entry.raw, "尚无识别原文");
+        if (entry.audio || entry.screenshot || !entry.captureStatus.isEmpty()) {
             divider();
             heading("附件", 22);
         }
-        if (audio.length() > 44) showAudio(audio);
-        if (screenshot.length() > 0) showScreenshot(screenshot);
-        if (!captureStatus.isEmpty()) paragraph(captureStatus, LIGHT_INK);
+        if (entry.audio) showAudio(id);
+        if (entry.screenshot) showScreenshot(id, entry.thumbnail);
+        else if (!entry.captureStatus.isEmpty()) paragraph(entry.captureStatus, LIGHT_INK);
         if (!Manuscripts.active(id)) {
             divider();
             button("删除文稿", false, () -> new AlertDialog.Builder(this)
@@ -275,17 +308,32 @@ public final class YanmoActivity extends Activity {
                     .setNegativeButton("取消", null)
                     .setPositiveButton("删除", (dialog, which) -> {
                         releasePlayer();
-                        try {
+                        load(() -> {
                             Manuscripts.delete(this, id);
-                            showHistory();
-                        } catch (IOException failure) {
-                            new AlertDialog.Builder(this).setMessage(failure.getMessage())
-                                    .setPositiveButton("关闭", null).show();
-                        }
+                            return null;
+                        }, ignored -> showHistory(),
+                                () -> new AlertDialog.Builder(this).setMessage("无法删除文稿，请稍后重试。")
+                                        .setPositiveButton("关闭", null).show());
                     }).show());
         } else {
             button("刷新文稿", false, () -> showEntry(id));
         }
+    }
+
+    private <T> void load(Callable<T> work, Consumer<T> loaded, Runnable failed) {
+        LinearLayout destination = page;
+        storage.execute(() -> {
+            try {
+                T value = work.call();
+                handler.post(() -> {
+                    if (page == destination && !isDestroyed() && !isFinishing()) loaded.accept(value);
+                });
+            } catch (Exception failure) {
+                handler.post(() -> {
+                    if (page == destination && !isDestroyed() && !isFinishing()) failed.run();
+                });
+            }
+        });
     }
 
     private void entryText(String title, String value, String empty) {
@@ -295,7 +343,7 @@ public final class YanmoActivity extends Activity {
         text.setTextIsSelectable(!value.isEmpty());
     }
 
-    private void showAudio(File audio) {
+    private void showAudio(String id) {
         TextView error = paragraph("", OCHRE);
         error.setVisibility(View.GONE);
         SeekBar position = add(new SeekBar(this));
@@ -310,30 +358,22 @@ public final class YanmoActivity extends Activity {
                     error.setVisibility(View.GONE);
                     play.setEnabled(false);
                     play.setText("载入录音…");
-                    player = new MediaPlayer();
-                    player.setDataSource(audio.getAbsolutePath());
-                    player.setOnPreparedListener(ready -> {
-                        if (player != ready) return;
+                    int attempt = ++audioRequest;
+                    load(() -> Manuscripts.openAudio(this, id), source -> {
+                        if (attempt != audioRequest) {
+                            if (source != null) source.close();
+                            return;
+                        }
                         try {
-                            play.setEnabled(true);
-                            position.setEnabled(true);
-                            position.setMax(ready.getDuration());
-                            startPlayback(play, position);
-                        } catch (RuntimeException failure) {
+                            if (source == null) throw new IOException("Missing audio");
+                            preparePlayback(source, error, play, position);
+                        } catch (IOException | RuntimeException failure) {
+                            if (source != null) source.close();
                             audioError(error, position, play);
                         }
+                    }, () -> {
+                        if (attempt == audioRequest) audioError(error, position, play);
                     });
-                    player.setOnCompletionListener(ignored -> {
-                        if (player != null) player.seekTo(0);
-                        play.setText("播放录音");
-                        position.setProgress(0);
-                        handler.removeCallbacks(progress);
-                    });
-                    player.setOnErrorListener((ignored, what, extra) -> {
-                        audioError(error, position, play);
-                        return true;
-                    });
-                    player.prepareAsync();
                 } else if (player.isPlaying()) {
                     player.pause();
                     play.setText("继续播放");
@@ -341,7 +381,7 @@ public final class YanmoActivity extends Activity {
                 } else {
                     startPlayback(play, position);
                 }
-            } catch (IOException | RuntimeException failure) {
+            } catch (RuntimeException failure) {
                 audioError(error, position, play);
             }
         });
@@ -357,6 +397,35 @@ public final class YanmoActivity extends Activity {
             @Override
             public void onStopTrackingTouch(SeekBar bar) {}
         });
+    }
+
+    private void preparePlayback(Manuscripts.AudioSource source, TextView error, Button play, SeekBar position)
+            throws IOException {
+        player = new MediaPlayer();
+        player.setDataSource(source);
+        player.setOnPreparedListener(ready -> {
+            if (player != ready) return;
+            try {
+                play.setEnabled(true);
+                position.setEnabled(true);
+                position.setMax(ready.getDuration());
+                startPlayback(play, position);
+            } catch (RuntimeException failure) {
+                audioError(error, position, play);
+            }
+        });
+        player.setOnCompletionListener(ready -> {
+            if (player != ready) return;
+            ready.seekTo(0);
+            play.setText("播放录音");
+            position.setProgress(0);
+            handler.removeCallbacks(progress);
+        });
+        player.setOnErrorListener((ready, what, extra) -> {
+            if (player == ready) audioError(error, position, play);
+            return true;
+        });
+        player.prepareAsync();
     }
 
     private void startPlayback(Button play, SeekBar position) {
@@ -382,8 +451,7 @@ public final class YanmoActivity extends Activity {
         play.setText("播放录音");
     }
 
-    private void showScreenshot(File file) {
-        Bitmap thumbnail = decode(file, 420);
+    private void showScreenshot(String id, Bitmap thumbnail) {
         if (thumbnail == null) {
             paragraph("无法预览截屏，文件可能已损坏。", OCHRE);
             return;
@@ -392,31 +460,34 @@ public final class YanmoActivity extends Activity {
         preview.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(180)));
         preview.setImageBitmap(thumbnail);
         preview.setContentDescription("放大录音时截屏");
-        preview.setOnClickListener(view -> {
-            Bitmap image = decode(file, 1600);
-            if (image == null) {
-                new AlertDialog.Builder(this).setMessage("无法预览截屏。").setPositiveButton("关闭", null).show();
-                return;
-            }
-            ImageView enlarged = new ImageView(this);
-            enlarged.setAdjustViewBounds(true);
-            enlarged.setImageBitmap(image);
-            enlarged.setContentDescription("录音时截屏");
-            new AlertDialog.Builder(this).setTitle("录音时截屏").setView(enlarged)
-                    .setPositiveButton("关闭", null).show();
-        });
+        preview.setOnClickListener(view -> load(() -> decode(Manuscripts.media(this, id, "screenshot"), 1600),
+                this::showEnlargedScreenshot, () -> showEnlargedScreenshot(null)));
     }
 
-    private static Bitmap decode(File file, int maxDimension) {
+    private void showEnlargedScreenshot(Bitmap image) {
+        if (image == null) {
+            new AlertDialog.Builder(this).setMessage("无法预览截屏。").setPositiveButton("关闭", null).show();
+            return;
+        }
+        ImageView enlarged = new ImageView(this);
+        enlarged.setAdjustViewBounds(true);
+        enlarged.setImageBitmap(image);
+        enlarged.setContentDescription("录音时截屏");
+        new AlertDialog.Builder(this).setTitle("录音时截屏").setView(enlarged)
+                .setPositiveButton("关闭", null).show();
+    }
+
+    private static Bitmap decode(byte[] data, int maxDimension) {
+        if (data == null) return null;
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inJustDecodeBounds = true;
-        BitmapFactory.decodeFile(file.getAbsolutePath(), options);
+        BitmapFactory.decodeByteArray(data, 0, data.length, options);
         options.inSampleSize = 1;
         while (Math.max(options.outWidth, options.outHeight) / options.inSampleSize > maxDimension) {
             options.inSampleSize *= 2;
         }
         options.inJustDecodeBounds = false;
-        return BitmapFactory.decodeFile(file.getAbsolutePath(), options);
+        return BitmapFactory.decodeByteArray(data, 0, data.length, options);
     }
 
     private void openPage(String title, Runnable back) {
@@ -451,6 +522,7 @@ public final class YanmoActivity extends Activity {
     }
 
     private void releasePlayer() {
+        audioRequest++;
         if (progress != null) handler.removeCallbacks(progress);
         progress = null;
         if (player != null) {
