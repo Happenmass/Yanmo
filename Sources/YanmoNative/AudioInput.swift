@@ -71,6 +71,7 @@ public final class AudioRecorder: @unchecked Sendable {
             capture.append(buffer)
         }
         let session = RecordingSession(engine: engine, input: input, capture: capture)
+        let deviceAtStart = session.currentDeviceID
         self.session = session
         do {
             engine.prepare()
@@ -84,6 +85,10 @@ public final class AudioRecorder: @unchecked Sendable {
             // Return to AVAudioEngine before stopping its graph.
             Task { @MainActor in
                 guard let self, self.generation == ticket, let session = self.session else { return }
+                // Selecting an input can deliver a queued configuration notification
+                // after start, even while that same input is still recording.
+                if session.isRunning, let deviceAtStart, session.currentDeviceID == deviceAtStart,
+                   session.inputFormat == format { return }
                 session.capture.fail("录音设备已断开或更改，请重新录音。")
                 session.stop()
             }
@@ -131,6 +136,17 @@ private final class RecordingSession {
     }
 
     var isRunning: Bool { engine?.isRunning == true }
+
+    var inputFormat: AVAudioFormat { input.outputFormat(forBus: 0) }
+
+    var currentDeviceID: AudioDeviceID? {
+        guard let unit = input.audioUnit else { return nil }
+        var id = AudioDeviceID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout.size(ofValue: id))
+        let status = AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice,
+                                          kAudioUnitScope_Global, 0, &id, &size)
+        return status == noErr && id != kAudioObjectUnknown ? id : nil
+    }
 
     func stop() {
         if let configurationObserver {
