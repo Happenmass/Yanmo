@@ -6,6 +6,8 @@
 
 > Yanmo supports Chinese, English, and mixed Chinese–English dictation on Apple Silicon Macs. Press **FN** to start and stop recording. By default, speech recognition runs on your Mac. Yanmo uses your configured text API for polishing and translation.
 
+本分支另含 [Android 输入法原型](android/README.md)，支持 CyIME 九键和 26 键。长按空格说话，松手后由本地语音 SDK 识别，再按用户配置整理上屏。
+
 ![主窗口](docs/design/main-window-v2.png)
 
 ## 下载安装
