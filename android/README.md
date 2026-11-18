@@ -2,6 +2,8 @@
 
 言墨 Android 的应用 ID 是 `dev.yanmo.ime`。键盘使用 CyIME 1.15.94 的九键与 26 键布局、候选栏、Rime JNI 和雾凇词库。切换布局时点工具栏左侧第二个键盘图标，再选九键或 26 键。短按空格照常输入。长按空格开始听写，松手结束，向上滑动后松手取消。原型复用桌面端的 `engine/polish.txt`。
 
+[音频、截屏与文稿架构图](../docs/architecture/android-ime-media.svg) · [可编辑的 draw.io 图](../docs/architecture/android-ime-media.drawio)
+
 ## 构建试用 APK
 
 需要 Python 3.11 或更高版本、JDK 17 或更高版本、Android SDK Platform 36、Build-Tools 36.1.0。
