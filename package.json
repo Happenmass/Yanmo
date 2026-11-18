@@ -1,6 +1,6 @@
 {
   "name": "yanmo",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "private": true,
   "description": "言墨 · 本地语音输入",
   "author": "Yanmo contributors",
@@ -59,7 +59,12 @@
       }
     ],
     "mac": {
-      "extraResources": [{ "from": "scripts/install-mac-update.sh", "to": "install-mac-update.sh" }],
+      "extraResources": [
+        {
+          "from": "scripts/install-mac-update.sh",
+          "to": "install-mac-update.sh"
+        }
+      ],
       "target": [
         {
           "target": "dir",
