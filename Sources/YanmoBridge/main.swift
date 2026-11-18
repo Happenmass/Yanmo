@@ -162,14 +162,16 @@ final class Bridge {
         return ["path": url.path, "seconds": duration]
     }
 
-    private nonisolated static func encodeAVIF(_ png: String) -> String? {
-        let format = "public.avif" as CFString
-        guard let input = Data(base64Encoded: png),
+    private nonisolated static func transcodeScreenshot(_ encoded: String, to format: String) -> String? {
+        guard let input = Data(base64Encoded: encoded),
               let source = CGImageSourceCreateWithData(input as CFData, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        let isAVIF = format == "public.avif"
+        // ImageIO's odd-sized AVIF output can render transparent in Chromium.
+        if isAVIF && !(image.width.isMultiple(of: 2) && image.height.isMultiple(of: 2)) { return nil }
         let output = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(output, format, 1, nil) else { return nil }
-        let options = [kCGImageDestinationLossyCompressionQuality: 0.60] as CFDictionary
+        guard let destination = CGImageDestinationCreateWithData(output, format as CFString, 1, nil) else { return nil }
+        let options = isAVIF ? [kCGImageDestinationLossyCompressionQuality: 0.60] as CFDictionary : nil
         CGImageDestinationAddImage(destination, image, options)
         guard CGImageDestinationFinalize(destination) else { return nil }
         return output.base64EncodedString()
@@ -282,8 +284,13 @@ final class Bridge {
                 recordingGeneration = UUID(); meter?.invalidate(); meter = nil; recorder.cancel()
             case "screenshot.encode":
                 if let png = args["png"] as? String {
-                    let encoded = await Task.detached(priority: .utility) { Self.encodeAVIF(png) }.value
+                    let encoded = await Task.detached(priority: .utility) { Self.transcodeScreenshot(png, to: "public.avif") }.value
                     if let encoded { result = ["avif": encoded] }
+                }
+            case "screenshot.preview":
+                if let avif = args["avif"] as? String {
+                    let decoded = await Task.detached(priority: .utility) { Self.transcodeScreenshot(avif, to: "public.png") }.value
+                    if let decoded { result = ["png": decoded] }
                 }
             case "audio.import": result = try await normalizedAudio(args["path"] as? String ?? "")
             case "audio.delete":

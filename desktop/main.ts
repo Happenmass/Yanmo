@@ -88,7 +88,9 @@ async function captureRecordingScreenshot(): Promise<Buffer | undefined> {
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   const { width, height } = display.size;
   const scale = Math.min(display.scaleFactor, 1920 / Math.max(width, height));
-  const thumbnailSize = { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
+  const alignment = process.platform === 'darwin' ? 2 : 1;
+  const fit = (length: number) => Math.max(alignment, Math.round(length * scale / alignment) * alignment);
+  const thumbnailSize = { width: fit(width), height: fit(height) };
   const timeout = new AbortController();
   try {
     const sources = await Promise.race([
@@ -317,12 +319,23 @@ async function invoke(action: string, value: any) {
   }
 }
 ipcMain.handle('yanmo:state', event => { authorize(event.sender.id, event.senderFrame?.url); return controller?.state ?? null; });
-ipcMain.handle('yanmo:manuscriptAttachments', (event, id: unknown) => {
+ipcMain.handle('yanmo:manuscriptAttachments', async (event, id: unknown) => {
   if (event.sender !== mainWindow.webContents || event.senderFrame?.url !== indexURL || typeof id !== 'string') {
     throw new Error('无效的文稿附件请求。');
   }
   if (controller.state.selectedID !== id) return {};
-  return controller.store.getAttachments(id);
+  const attachments = controller.store.getAttachments(id);
+  if (process.platform === 'darwin' && attachments.screenshot) {
+    const screenshot = Buffer.from(attachments.screenshot);
+    if (screenshot.toString('ascii', 4, 12) === 'ftypavif') {
+      try {
+        // Decode old AVIFs with ImageIO and send a PNG to the renderer, leaving the stored bytes intact.
+        const { png } = await controller.native.call<{ png?: string }>('screenshot.preview', { avif: screenshot.toString('base64') });
+        if (png) attachments.screenshot = Buffer.from(png, 'base64');
+      } catch { /* A native preview failure leaves the original attachment available. */ }
+    }
+  }
+  return attachments;
 });
 const appIcons = new Map<string, string | undefined>();
 ipcMain.handle('yanmo:dailyUsage', async (event, day: unknown) => {

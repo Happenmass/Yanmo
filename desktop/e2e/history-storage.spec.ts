@@ -20,6 +20,10 @@ test('文稿预览可播放录音并放大 JPEG 与 AVIF，附件随文稿重启
   const media = (format: string) => readFile(join(__dirname, 'fixtures', `manuscript-preview.${format}`));
   store.persist({ id: item.id, audioOpus: await media('ogg'), screenshotImage: await media('jpg') });
   store.persist({ id: 'avif', screenshotImage: await media('avif') });
+  if (process.platform === 'darwin') {
+    store.library.manuscripts.push({ ...item, id: 'odd-avif', text: '旧版保存的奇数高度截屏', recordingEndedAtMs: endedAt });
+    store.persist({ id: 'odd-avif', screenshotImage: await media('odd.avif') });
+  }
   store.close();
   let application: ElectronApplication | undefined;
   const launch = async () => {
@@ -46,6 +50,28 @@ test('文稿预览可播放录音并放大 JPEG 与 AVIF，附件随文稿重启
     const thumbnail = page.getByRole('img', { name: '录音结束时的屏幕缩略图' });
     await expect.poll(() => thumbnail.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(32);
     await expect(page.getByRole('button', { name: '播放录音' })).toHaveCount(0);
+    if (process.platform === 'darwin') {
+      await page.locator('.manuscript-select').filter({ hasText: '旧版保存的奇数高度截屏' }).click();
+      await expect.poll(() => thumbnail.evaluate((image: HTMLImageElement) => image.naturalHeight)).toBe(1241);
+      const opacity = async (image: HTMLImageElement) => {
+        await image.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 1;
+        const context = canvas.getContext('2d')!;
+        context.drawImage(image, 0, 0, 1, 1);
+        return context.getImageData(0, 0, 1, 1).data[3];
+      };
+      expect.soft(await thumbnail.evaluate(opacity)).toBe(255);
+      await page.getByRole('button', { name: '放大录音结束截屏' }).click();
+      const preview = page.getByRole('dialog', { name: '录音结束截屏' });
+      const fullImage = preview.locator('img');
+      await expect.poll(() => fullImage.evaluate((image: HTMLImageElement) => image.naturalHeight)).toBe(1241);
+      expect.soft(await fullImage.evaluate(opacity)).toBe(255);
+      await expect.soft(page.locator('.topbar')).toHaveCSS('-webkit-app-region', 'no-drag', { timeout: 1000 });
+      await page.getByRole('button', { name: '关闭截屏预览' }).click();
+      await expect(preview).not.toBeVisible();
+      await expect(page.locator('.topbar')).toHaveCSS('-webkit-app-region', 'drag');
+    }
     await page.locator('.manuscript-select').filter({ hasText: /^合成正文/ }).click();
     await expect.poll(() => thumbnail.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(32);
     await page.getByRole('button', { name: '放大录音结束截屏' }).click();
@@ -87,7 +113,7 @@ test('文稿预览可播放录音并放大 JPEG 与 AVIF，附件随文稿重启
     db.close();
     await application!.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false }); });
     await page.locator('.manuscript-item').filter({ hasText: '编辑后的合成正文' }).getByRole('button', { name: '删除文稿' }).click();
-    await expect(page.locator('.manuscript-item')).toHaveCount(2);
+    await expect(page.locator('.manuscript-item')).toHaveCount(process.platform === 'darwin' ? 3 : 2);
     await application!.close(); application = undefined;
     db = new DatabaseSync(join(directory, 'yanmo.db'), { readOnly: true });
     expect(db.prepare('SELECT id FROM manuscripts WHERE id=?').get('fixture')).toBeUndefined(); db.close();
