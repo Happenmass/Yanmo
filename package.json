@@ -1,6 +1,6 @@
 {
   "name": "yanmo",
-  "version": "0.4.12",
+  "version": "0.4.13",
   "private": true,
   "description": "言墨 · 本地语音输入",
   "author": "Yanmo contributors",
@@ -18,6 +18,7 @@
   },
   "build": {
     "appId": "org.yanmo.desktop",
+    "afterPack": "./scripts/sign-mac-bridge.cjs",
     "productName": "言墨",
     "directories": {
       "output": "dist-electron"
@@ -38,7 +39,8 @@
       },
       {
         "from": "runtime/macos/python",
-        "to": "python"
+        "to": "python",
+        "filter": ["**/*", "!**/__pycache__/**", "!**/*.pyc"]
       },
       {
         "from": "backend",
@@ -76,7 +78,13 @@
       "category": "public.app-category.productivity",
       "icon": ".electron/Yanmo.icns",
       "minimumSystemVersion": "14.0",
-      "identity": "-",
+      "type": "distribution",
+      "identity": "Haipeng Gu (299DDXTQH5)",
+      "forceCodeSigning": true,
+      "signIgnore": [
+        "(^|/)Contents/Resources/native/YanmoBridge$",
+        "/Contents/Resources/python/.*[.](mat|sav|gif|wav|npy|npz|zip|gz|png|ico|whl|exe)$"
+      ],
       "hardenedRuntime": true,
       "entitlements": "runtime/macos/entitlements.plist",
       "entitlementsInherit": "runtime/macos/entitlements.plist",

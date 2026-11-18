@@ -12,19 +12,9 @@
 
 从[下载页](https://happenmass.github.io/Yanmo/)或 [GitHub Releases](https://github.com/Happenmass/Yanmo/releases/latest) 下载 `Yanmo-<版本>-mac-arm64.zip`，解压后把 `言墨.app` 拖入「应用程序」。要求 Apple Silicon、macOS 14+。从 0.4.5 或更早版本升级时，请完整退出旧版，再替换整个应用。
 
-从 0.4.6 起，可在「设置 → 软件更新」或言墨菜单中检查更新。确认后，言墨会下载并校验 GitHub 安装包，完整退出后替换应用并重新启动。当前版本采用 ad-hoc 签名，macOS 更新后仍可能要求重新授权辅助功能、麦克风或钥匙串访问。
+从 0.4.6 起，可在「设置 → 软件更新」或言墨菜单中检查更新。确认后，言墨会下载并校验 GitHub 安装包，完整退出后替换应用并重新启动。从 0.4.13 起，正式版和原生录音桥接使用同一团队的 Developer ID Application 身份签名。从旧版首次升级时，macOS 可能要求重新授权辅助功能、麦克风或录屏。
 
-言墨是个人开源项目，未加入 Apple 开发者计划，应用为 ad-hoc 签名、未经 Apple 公证，首次打开会被 Gatekeeper 拦截。确认来源后任选一种方式放行：
-
-- 终端执行：
-
-  ```bash
-  xattr -dr com.apple.quarantine /Applications/言墨.app
-  ```
-
-- 或先双击打开一次，在提示框点「完成」，再到「系统设置 → 隐私与安全性」底部点「仍要打开」，并输入密码确认。macOS 15 起右键「打开」不再能绕过拦截。
-
-ad-hoc 签名每次构建都会变化，更新版本后若辅助功能显示已授权却无法使用，请在系统设置中移除旧条目后重新添加。
+0.4.13 已通过 Apple 公证，票据已装订到应用。首次打开时，Gatekeeper 可验证开发者身份。官方签名团队 ID 为 `299DDXTQH5`。安装包的 SHA-256 见对应版本的 GitHub Release。
 
 从 0.4.5 起，在「设置 → 本地模型」准备本机语音模型，再到「设置 → API 服务」启用「文字整理与翻译」，填写兼容 OpenAI 的服务地址、模型 ID 和服务要求的 API Key。按提示授予麦克风与辅助功能权限。升级时沿用已启用的文字 API 配置。
 
@@ -140,7 +130,7 @@ npm run package:mac
 open dist-electron/mac-arm64/言墨.app
 ```
 
-产物 `dist-electron/mac-arm64/言墨.app` 可以移出项目目录运行，不需要另外安装 Python、uv 或 Homebrew。当前应用包约 830 MB，不含模型权重。发布到其他机器前仍需稳定签名、公证及系统权限验收。
+产物 `dist-electron/mac-arm64/言墨.app` 可以移出项目目录运行，不需要另外安装 Python、uv 或 Homebrew。当前应用包约 830 MB，不含模型权重。正式构建需要发布团队的 Developer ID Application 证书和私钥。发布机配置好公证钥匙串凭据后，可运行 `APPLE_KEYCHAIN_PROFILE=Yanmo-Notary npm run package:mac` 完成签名和公证，再用 `xcrun stapler validate dist-electron/mac-arm64/言墨.app` 检查票据。
 
 旧 0.3 应用包已移除，当前只使用上述 0.4 应用。`./scripts/build.sh` 同样调用新版打包入口；原 SwiftUI 源码仅保留作迁移对照。
 
@@ -148,7 +138,7 @@ open dist-electron/mac-arm64/言墨.app
 
 首次录音由 macOS 请求麦克风权限。FN、纯修饰键与跨应用写入需要在「系统设置 → 隐私与安全性 → 辅助功能」中允许当前的言墨应用；设置页提供权限入口与重新检查。
 
-ad-hoc 开发签名随构建变化。若系统显示已授权但当前版本仍无法使用，请移除旧条目，重新添加当前应用，再点击重新检查。与其他使用 FN 的软件同时运行时，快捷键可能冲突。
+从旧版 ad-hoc 签名升级后，系统权限可能需要刷新。若系统显示已授权但当前版本仍无法使用，请移除旧条目，重新添加当前应用，再点击重新检查。与其他使用 FN 的软件同时运行时，快捷键可能冲突。
 
 按快捷键开始录音，正文生成后粘贴到当时的当前输入位置；期间可以切换应用、窗口、聊天或光标。输入框不可读时仍正常录音，只是不提供其正文作为上下文。结果同时保留为文稿；导入音频仅生成文稿。
 

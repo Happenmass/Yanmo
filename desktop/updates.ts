@@ -10,6 +10,8 @@ import { promisify } from 'node:util';
 const run = promisify(execFile);
 const repository = 'Happenmass/Yanmo';
 const releaseAPI = 'https://api.github.com/repos/' + repository + '/releases/latest';
+const releaseSignature = 'identifier "org.yanmo.desktop" and anchor apple generic'
+  + ' and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "299DDXTQH5"';
 const stableVersion = /^v?(\d+)\.(\d+)\.(\d+)$/;
 const maxDownloadBytes = 2 * 1024 ** 3;
 export class UpdateError extends Error {}
@@ -81,7 +83,7 @@ export async function stageUpdate(bundle: string, installer: string, update: Upd
     const info = join(replacement, 'Contents/Info.plist');
     const { stdout } = await run('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', info]);
     if (stdout.trim() !== update.version) throw new UpdateError('安装包版本不匹配。');
-    await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '-R=identifier "org.yanmo.desktop"', replacement])
+    await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '-R=' + releaseSignature, replacement])
       .catch(() => { throw new UpdateError('安装包签名校验失败。'); });
     await rm(archive);
     const helper = join(staging, 'install.sh');
