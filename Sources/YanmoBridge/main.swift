@@ -47,8 +47,12 @@ final class Bridge {
     }
 
     func send(_ value: [String: Any]) {
-        guard JSONSerialization.isValidJSONObject(value), let data = try? JSONSerialization.data(withJSONObject: value) else { return }
-        try? FileHandle.standardOutput.write(contentsOf: data + Data([10]))
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: .withoutEscapingSlashes) else { return }
+        do {
+            try FileHandle.standardOutput.write(contentsOf: data)
+            try FileHandle.standardOutput.write(contentsOf: Data([10]))
+        } catch { return }
     }
 
     private func captured(_ shortcut: InputShortcut?) {
@@ -268,18 +272,19 @@ final class Bridge {
             case "record.start":
                 correction?.stop(); correction = nil
                 let generation = UUID(); recordingGeneration = generation
-                recorder.cancel()
                 try await recorder.start(deviceUID: args["device"] as? String ?? "")
-                guard recordingGeneration == generation else { recorder.cancel(); throw EngineError(message: "录音已取消。") }
+                guard recordingGeneration == generation else { throw EngineError(message: "录音已取消。") }
                 recordingID = args["taskId"] as? String ?? ""
                 meter?.invalidate()
                 meter = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in
                     MainActor.assumeIsolated { guard let self else { return }; self.send(["event": "meter", "taskId": self.recordingID, "level": self.recorder.level]) }
                 }
             case "record.finish":
+                recordingGeneration = UUID()
                 meter?.invalidate(); meter = nil
-                guard let url = recorder.finish() else { throw EngineError(message: "录音没有生成，请重试。") }
-                audioFiles.insert(url); result = ["path": url.path]
+                let recording = try recorder.finishWAV()
+                let encoded = await Task.detached(priority: .userInitiated) { recording.data.base64EncodedString() }.value
+                result = ["audioBase64": encoded, "seconds": recording.seconds]
             case "record.cancel":
                 recordingGeneration = UUID(); meter?.invalidate(); meter = nil; recorder.cancel()
             case "screenshot.encode":

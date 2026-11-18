@@ -2,13 +2,12 @@
 import asyncio
 import contextlib
 from concurrent.futures import ThreadPoolExecutor
+import io
 import json
 import os
-from pathlib import Path
 import secrets
 import socket
 import sys
-import tempfile
 from threading import Event
 
 os.environ["HF_HUB_OFFLINE"] = "1"
@@ -16,13 +15,17 @@ os.environ["TRANSFORMERS_OFFLINE"] = "1"
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 os.environ["DO_NOT_TRACK"] = "1"
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from typing import Literal
 
 from engine.worker import DEFAULT_ASR, DEFAULT_SENSEVOICE, Engine
 from backend.pipeline import ASR_HOTWORD_LIMIT, run_pipeline
+from engine.audio import soundfile_source
+
+MAX_TASK_METADATA = 1024 * 1024
+MAX_TASK_AUDIO = 160 * 1024 * 1024
 
 
 class OnlineEndpoint(BaseModel):
@@ -119,13 +122,11 @@ def create_app(engine=None, token=None, announce=None):
             raise HTTPException(status_code=502, detail="词库提取未完成。") from None
         return {"terms": terms}
 
-    @app.post("/v1/tasks")
-    async def task(request: str = Form(...), audio: UploadFile | None = File(default=None)):
+    def reserve_task(metadata, has_audio):
         try:
-            payload = TaskRequest.model_validate_json(request).model_dump()
+            payload = TaskRequest.model_validate_json(metadata).model_dump()
         except ValidationError:
             raise HTTPException(status_code=422, detail="推理任务参数无效。") from None
-        task_id = payload["task_id"]
         if tasks:
             raise HTTPException(status_code=409, detail="请等待当前推理任务结束。")
         if set(payload["models"]) - {"asr_model", "sensevoice_model", "model_source"}:
@@ -137,29 +138,84 @@ def create_app(engine=None, token=None, announce=None):
             raise HTTPException(status_code=422, detail="上下文参数无效。")
         if any(not isinstance(item.get("transcript"), str) or len(item["transcript"]) > 20000 for item in payload["asr_results"]):
             raise HTTPException(status_code=422, detail="识别对照参数无效。")
-        if payload["operation"] in ("dictation", "voiceTranslation") and audio is None:
+        if payload["operation"] in ("dictation", "voiceTranslation") and not has_audio:
             raise HTTPException(status_code=422, detail="缺少录音文件。")
         cancelled = Event()
-        tasks[task_id] = cancelled
-        path = None
+        tasks[payload["task_id"]] = cancelled
+        return payload, cancelled
+
+    def append_audio(output, chunk):
+        if output.tell() + len(chunk) > MAX_TASK_AUDIO:
+            raise HTTPException(status_code=413, detail="音频文件过大，请分段处理。")
+        output.write(chunk)
+
+    @app.post("/v1/tasks")
+    async def task(request: str = Form(...), audio: UploadFile | None = File(default=None)):
+        payload, cancelled = reserve_task(request, audio is not None)
+        buffer = io.BytesIO() if audio is not None else None
         try:
-            if audio:
-                with tempfile.NamedTemporaryFile(prefix="yanmo-backend-", suffix=".wav", delete=False) as output:
-                    path = Path(output.name)
-                    size = 0
-                    while chunk := await audio.read(1024 * 1024):
-                        size += len(chunk)
-                        if size > 160 * 1024 * 1024:
-                            raise HTTPException(status_code=413, detail="音频文件过大，请分段处理。")
-                        output.write(chunk)
+            if audio is not None:
+                try:
+                    while not cancelled.is_set() and (chunk := await audio.read(1024 * 1024)):
+                        append_audio(buffer, chunk)
+                finally:
+                    await audio.close()
+            return respond(payload, buffer, cancelled)
         except BaseException:
-            tasks.pop(task_id, None)
-            if path:
-                path.unlink(missing_ok=True)
+            if buffer is not None:
+                buffer.close()
+            tasks.pop(payload["task_id"], None)
             raise
-        finally:
-            if audio:
-                await audio.close()
+
+    @app.post("/v1/tasks/audio")
+    async def audio_task(request: Request):
+        if request.headers.get("content-type", "").partition(";")[0].strip().lower() != "application/octet-stream":
+            raise HTTPException(status_code=415, detail="录音请求格式无效。")
+        if tasks:
+            raise HTTPException(status_code=409, detail="请等待当前推理任务结束。")
+        prefix = bytearray()
+        metadata = bytearray()
+        metadata_length = None
+        payload = None
+        buffer = io.BytesIO()
+        try:
+            async for chunk in request.stream():
+                view = memoryview(chunk)
+                if metadata_length is None:
+                    take = min(4 - len(prefix), len(view))
+                    prefix.extend(view[:take])
+                    view = view[take:]
+                    if len(prefix) != 4:
+                        continue
+                    metadata_length = int.from_bytes(prefix, "big")
+                    if metadata_length > MAX_TASK_METADATA:
+                        raise HTTPException(status_code=413, detail="推理任务参数过大。")
+                    if not metadata_length:
+                        raise HTTPException(status_code=422, detail="推理任务参数无效。")
+                if payload is None:
+                    take = min(metadata_length - len(metadata), len(view))
+                    metadata.extend(view[:take])
+                    view = view[take:]
+                    if len(metadata) != metadata_length:
+                        continue
+                    payload, cancelled = reserve_task(metadata, True)
+                    metadata.clear()
+                if cancelled.is_set():
+                    break
+                append_audio(buffer, view)
+            if payload is None:
+                raise HTTPException(status_code=422, detail="推理任务参数不完整。")
+            if not buffer.tell() and not cancelled.is_set():
+                raise HTTPException(status_code=422, detail="缺少录音文件。")
+            return respond(payload, buffer, cancelled, require_wav=True)
+        except BaseException:
+            buffer.close()
+            if payload is not None:
+                tasks.pop(payload["task_id"], None)
+            raise
+
+    def respond(payload, audio, cancelled, *, require_wav=False):
+        task_id = payload["task_id"]
         loop = asyncio.get_running_loop()
         queue = asyncio.Queue()
 
@@ -169,17 +225,25 @@ def create_app(engine=None, token=None, announce=None):
         def work():
             try:
                 with contextlib.redirect_stdout(sys.stderr):
-                    if path:
+                    if cancelled.is_set():
+                        emit({"event": "cancelled", "original": ""})
+                        return
+                    if audio is not None:
                         import soundfile as sf
-                        info = sf.info(str(path))
+                        try:
+                            info = sf.info(soundfile_source(audio))
+                        except sf.LibsndfileError:
+                            raise ValueError("无法读取录音文件。") from None
+                        if require_wav and info.format not in ("WAV", "WAVEX", "RF64"):
+                            raise ValueError("录音文件必须是 WAV 格式。")
                         if info.duration <= 0 or info.duration > 300:
                             raise ValueError("首版支持 5 分钟以内的音频。")
-                    run_pipeline(engine, payload, path, cancelled, emit)
+                    run_pipeline(engine, payload, audio, cancelled, emit)
             except Exception as exc:
                 emit({"event": "error", "message": str(exc), "original": ""})
             finally:
-                if path:
-                    path.unlink(missing_ok=True)
+                if audio is not None:
+                    audio.close()
                 loop.call_soon_threadsafe(tasks.pop, task_id, None)
                 loop.call_soon_threadsafe(queue.put_nowait, None)
 

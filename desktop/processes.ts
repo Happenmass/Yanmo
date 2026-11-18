@@ -60,6 +60,10 @@ export function decodeSSE(buffer: string): { events: TaskEvent[]; rest: string }
   return { events, rest };
 }
 
+export const maxAudioBytes = 160 * 1024 * 1024;
+const maxTaskJsonBytes = 1024 * 1024;
+export type TaskAudio = string | Buffer<ArrayBuffer>;
+
 export class BackendClient {
   private child?: ReturnType<typeof spawn>;
   private starting?: Promise<void>;
@@ -110,7 +114,7 @@ export class BackendClient {
     clearTimeout(this.idle); this.requests++;
     try {
       await this.start();
-      const response = await fetch(this.origin + path, { ...init, headers: { ...init.headers, Authorization: 'Bearer ' + this.token }, signal: init.signal ?? AbortSignal.timeout(180000) });
+      const response = await fetch(this.origin + path, { ...init, headers: { ...init.headers, Authorization: 'Bearer ' + this.token }, signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(180000)]) : AbortSignal.timeout(180000) });
       if (!response.ok) { const value = await response.json().catch(() => ({})); throw new Error(value.detail || '本地推理请求失败。'); }
       return response;
     } catch (error) { throw new Error(error instanceof Error ? error.message : '本地后端连接失败。'); }
@@ -131,9 +135,24 @@ export class BackendClient {
     if (!Array.isArray(terms) || terms.some(term => typeof term !== 'string')) throw new Error('词库提取结果格式无效。');
     return terms;
   }
-  async run(payload: Record<string, unknown>, audio: string | undefined, onEvent: (event: TaskEvent) => void) {
-    const body = new FormData(); body.set('request', JSON.stringify(payload));
-    if (audio) body.set('audio', new Blob([await readFile(audio)]), 'recording.wav');
+  private async submitTask(payload: Record<string, unknown>, audio?: TaskAudio, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    const json = JSON.stringify(payload);
+    if (Buffer.isBuffer(audio)) {
+      if (!audio.length || audio.length > maxAudioBytes) throw new Error('音频大小无效，请分段处理。');
+      const metadata = Buffer.from(json, 'utf8');
+      if (metadata.length > maxTaskJsonBytes) throw new Error('推理任务参数过大。');
+      const header = Buffer.alloc(4);
+      header.writeUInt32BE(metadata.length);
+      // Blob provides Content-Length without constructing a second concatenated frame.
+      const body = new Blob([header, metadata, audio], { type: 'application/octet-stream' });
+      return this.request('/v1/tasks/audio', { method: 'POST', body, signal, redirect: 'error' });
+    }
+    const body = new FormData(); body.set('request', json);
+    if (audio) body.set('audio', new Blob([await readFile(audio, { signal })]), 'recording.wav');
+    return this.request('/v1/tasks', { method: 'POST', body, signal });
+  }
+  async run(payload: Record<string, unknown>, audio: TaskAudio | undefined, onEvent: (event: TaskEvent) => void, signal?: AbortSignal) {
     // Retain the lifecycle hold for the full stream, not just response headers.
     this.requests++;
     let terminal = false;
@@ -141,7 +160,9 @@ export class BackendClient {
     const started = Date.now();
     this.diagnostic("task_start", { task_id: payload.task_id, operation: payload.operation });
     try {
-      const response = await this.request('/v1/tasks', { method: 'POST', body });
+      const submitted = this.submitTask(payload, audio, signal);
+      audio = undefined;
+      const response = await submitted;
       if (!response.body) throw new Error('本地后端没有返回结果。');
       let buffer = ''; const decoder = new TextDecoder();
       for await (const chunk of response.body) {

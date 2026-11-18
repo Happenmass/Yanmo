@@ -76,7 +76,7 @@
       "entitlements": "runtime/macos/entitlements.plist",
       "entitlementsInherit": "runtime/macos/entitlements.plist",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "言墨需要录音以识别语音。默认在本机识别；只有启用语音识别 API 时才会发送音频。处理结束后删除临时录音。"
+        "NSMicrophoneUsageDescription": "言墨需要录音以识别语音。默认在本机识别；只有启用语音识别 API 时才会发送音频。实时录音在内存中处理。"
       }
     }
   },

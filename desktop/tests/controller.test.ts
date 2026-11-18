@@ -13,7 +13,7 @@ import { NativeBridge, BackendClient } from '../processes';
 class Native extends EventEmitter {
   calls: string[] = [];
   arguments: { command: string; args: Record<string, unknown> }[] = [];
-  async call(command: string, args: Record<string, unknown> = {}) { this.calls.push(command); this.arguments.push({ command, args }); if (['audio.import', 'record.finish'].includes(command)) return { path: '/synthetic.wav', seconds: 2 }; if (command === 'insert') return { delivery: 'attempted_unverified', name: '写入时的应用' }; return { accessibility: true, eventTap: true, microphone: 3, devices: [] }; }
+  async call(command: string, args: Record<string, unknown> = {}): Promise<Record<string, unknown>> { this.calls.push(command); this.arguments.push({ command, args }); if (['audio.import', 'record.finish'].includes(command)) return { path: '/synthetic.wav', seconds: 2 }; if (command === 'insert') return { delivery: 'attempted_unverified', name: '写入时的应用' }; return { accessibility: true, eventTap: true, microphone: 3, devices: [] }; }
   async start() {} stop() {}
 }
 class Backend {
@@ -230,6 +230,33 @@ test('口述译文直接保存并向写入时焦点粘贴一次', async () => {
     assert.equal(value.controller.state.stage, 'idle');
     assert.equal(value.controller.state.draft, 'I want to create a new animation effect.');
     assert.equal(value.controller.state.library.manuscripts[0].text, 'I want to create a new animation effect.');
+  } finally { await value.close(); }
+});
+test('Mac 内存录音采用原生时长，不删除路径也不因关闭历史停止识别', async () => {
+  const value = fixture();
+  value.backend.mode = 'dual';
+  value.controller.state.settings.keepHistory = false;
+  value.controller.state.settings.saveRecordingScreenshot = true;
+  let captured = false;
+  value.controller.captureRecordingScreenshot = async () => { captured = true; return undefined; };
+  const wav = Buffer.from('RIFF_SYNTHETIC');
+  const call = value.native.call.bind(value.native);
+  value.native.call = async (command, args) => command === 'record.finish'
+    ? { audioBase64: wav.toString('base64'), seconds: 1.5 }
+    : call(command, args);
+  const run = value.backend.run.bind(value.backend);
+  value.backend.run = async (request, audio, emit) => {
+    assert.deepEqual(audio, wav);
+    assert.equal(request.archive_audio, false);
+    await run(request, audio, emit);
+  };
+  try {
+    await value.controller.perform('dictation', {});
+    await value.controller.finishRecording();
+    assert.equal(value.controller.state.seconds, 1.5);
+    assert.equal(value.controller.state.library.manuscripts.length, 0);
+    assert.equal(value.backend.requests.length, 1);
+    assert.ok(!captured && !value.native.calls.includes('audio.delete'));
   } finally { await value.close(); }
 });
 test('划词翻译可读取言墨自身窗口的选区，空选区仍提示先选中', async () => {

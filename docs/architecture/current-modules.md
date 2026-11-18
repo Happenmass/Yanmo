@@ -10,7 +10,7 @@ flowchart TB
 
     subgraph Native["Swift 子进程 · YanmoBridge"]
         Keys["快捷键、设备与权限"]
-        Audio["AVFoundation 录音 / 导入 · 临时 WAV"]
+        Audio["AVFoundation · 实时录音存内存，导入单独转换"]
         Access["辅助功能与剪贴板 · 读取上下文 / 选区 / 粘贴"]
         Observe["写入后 10 秒 · 观察手动纠词"]
     end
@@ -22,7 +22,7 @@ flowchart TB
     end
 
     subgraph Backend["Python 子进程 · FastAPI 与推理引擎"]
-        API["本机 HTTP · 校验、取消与 SSE 事件"]
+        API["本机 HTTP · 流式接收内存 WAV、取消与 SSE 事件"]
         Flow["任务流水线 · 语音输入 / 导入 / 两种翻译 / 文稿整理"]
         ASR["语音识别路由 · 本机 Qwen3-ASR / 中英 SenseVoice 复核"]
         Text["正文生成 · 自然整理 / 保留原话 / 指定语言翻译"]
@@ -39,7 +39,7 @@ flowchart TB
     Mic --> Audio
     App -->|"选区 / 可选光标上下文"| Access
     Keys -->|"按键事件 / 权限状态"| Main
-    Audio -->|"音量与临时 WAV 路径"| Main
+    Audio -->|"音量与内存 WAV，导入传路径"| Main
     Access -->|"选区 / 上下文"| Main
     Main -->|"完成口述任务后写入"| Access
     Access -->|"向写入时的焦点粘贴一次"| App

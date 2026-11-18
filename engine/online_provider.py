@@ -1,4 +1,6 @@
 """OpenAI-compatible endpoints the user explicitly enabled. Only used when a request carries an online config."""
+from contextlib import nullcontext
+import io
 import json
 from time import monotonic
 try:
@@ -49,7 +51,7 @@ def _post(config: dict, path: str, *, purpose=None, **kwargs) -> dict:
     return result
 
 
-def transcribe(config: dict, audio: Path, language=None, prompt: str | None = None) -> str:
+def transcribe(config: dict, audio: Path | io.BytesIO, language=None, prompt: str | None = None) -> str:
     # OpenAI 兼容 /audio/transcriptions (如 Whisper / GPT-4o-transcribe) 仅支持 language 与纯文本 prompt 热词偏置；
     # 不支持结构化传入当前应用 (application/category) 或词条别名映射 (aliases)，因此仅将词库热词与上下文扁平化写入 prompt。
     data = {"model": config["model"], "response_format": "json"}
@@ -57,8 +59,13 @@ def transcribe(config: dict, audio: Path, language=None, prompt: str | None = No
         data["language"] = language
     if prompt:
         data["prompt"] = prompt
-    with audio.open("rb") as file:
-        result = _post(config, "/audio/transcriptions", data=data, files={"file": (audio.name, file, "audio/wav")})
+    if isinstance(audio, io.BytesIO):
+        audio.seek(0)
+        source, name = nullcontext(audio), "recording.wav"
+    else:
+        source, name = audio.open("rb"), audio.name
+    with source as file:
+        result = _post(config, "/audio/transcriptions", data=data, files={"file": (name, file, "audio/wav")})
     return str(result.get("text") or "").strip()
 
 

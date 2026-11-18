@@ -28,7 +28,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200); self.end_headers()
         self.wfile.write(json.dumps({'pid': os.getpid(), 'dont_write_bytecode': sys.dont_write_bytecode}).encode())
     def do_POST(self):
-        self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        body = self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        if self.path == '/v1/tasks/audio':
+            length = int.from_bytes(body[:4], 'big')
+            metadata = json.loads(body[4:4+length])
+            if self.headers.get('Content-Type') != 'application/octet-stream' or metadata.get('text') != '内存录音' or body[4+length:] != b'RIFF_SYNTHETIC_WAV':
+                self.send_error(400); return
+        elif self.path != '/v1/tasks':
+            self.send_error(404); return
         self.send_response(200); self.send_header('Content-Type','text/event-stream'); self.end_headers()
         for event in [{'event':'stage','stage':'polishing'}, {'event':'result','text':'合成结果'}]:
             event['task_id'] = 'fixture'
@@ -55,10 +62,18 @@ server.serve_forever()
     assert.deepEqual(events, ['stage', 'result']);
     assert.equal((await client.status(defaultSettings())).pid, second, '长流完成前保留进程，完成后可复用');
     await assert.rejects(client.run({ task_id: "other", text: "PRIVATE_INPUT" }, undefined, () => {}), /任务编号不匹配/);
+    const recording = Buffer.from('RIFF_SYNTHETIC_WAV');
+    const audioEvents: string[] = [];
+    await client.run({ task_id: 'fixture', text: '内存录音' }, recording, event => audioEvents.push(event.event));
+    assert.deepEqual(audioEvents, ['stage', 'result']);
+    const abort = new AbortController();
+    await assert.rejects(client.run({ task_id: 'fixture', text: '内存录音' }, recording, () => abort.abort(), abort.signal), /abort/i);
     const log = await readFile(join(directory, "diagnostics", "desktop.jsonl"), "utf8");
     assert.ok(log.includes("task_transport_error"));
     assert.ok(log.includes("polishing"));
     assert.ok(!log.includes("PRIVATE_INPUT"));
+    assert.ok(!log.includes("RIFF_SYNTHETIC_WAV"));
+    assert.ok(!log.includes("内存录音"));
     assert.ok(!log.includes("合成结果"));
     await exited(second);
   } finally { await client.stop(); await rm(directory, { recursive: true, force: true }); }

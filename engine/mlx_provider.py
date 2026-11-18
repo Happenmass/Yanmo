@@ -1,9 +1,22 @@
 """Mac-only compute adapter. Importing this module does not load MLX or weights."""
 import gc
+import io
 import json
 import re
 import sys
 from pathlib import Path
+
+if __package__:
+    from .audio import AudioInput, read_mono, resample_mono
+else:
+    from audio import AudioInput, read_mono, resample_mono
+
+
+def mlx_audio_input(audio: AudioInput):
+    if isinstance(audio, io.BytesIO):
+        samples, rate = read_mono(audio)
+        return resample_mono(samples, rate, 16000)
+    return str(audio)
 
 
 def parse_qwen_output(text):
@@ -41,7 +54,7 @@ class MLXProvider:
             self.asr = load_model(str(path))
             self.asr_path = str(path)
 
-    def transcribe(self, audio: Path, language=None, context=None):
+    def transcribe(self, audio: AudioInput, language=None, context=None):
         # mlx-community/Qwen3-ASR-* 支持通过 system_prompt 注入统一上下文
         # （当前应用 application、历史热词 lexicon 及光标前后文 before/after）。
         detected = []
@@ -59,7 +72,7 @@ class MLXProvider:
         if parser and language is None:
             object.__setattr__(owner, "extract_language", extract)
         try:
-            result = self.asr.generate(str(audio), language=language, verbose=False, **({"system_prompt": context} if context else {}))
+            result = self.asr.generate(mlx_audio_input(audio), language=language, verbose=False, **({"system_prompt": context} if context else {}))
         finally:
             if parser and language is None:
                 if previous is None:
@@ -70,7 +83,7 @@ class MLXProvider:
         return {"text": result.text.strip(), "language": language or value,
                 "language_source": "forced" if language else "detected" if value else "unknown"}
 
-    def transcribe_secondary(self, audio: Path, path: Path, language: str):
+    def transcribe_secondary(self, audio: AudioInput, path: Path, language: str):
         # mlx-community/SenseVoiceSmall (FunASR SenseVoice CTC/AED) 仅支持 language (zh/en) 与 use_itn 参数；
         # 不支持传入当前应用 (application)、历史热词词库 (lexicon) 及光标上下文 (before/after)。
         options = {"Chinese": "zh", "English": "en"}
@@ -82,7 +95,8 @@ class MLXProvider:
             self.sensevoice_path = str(path)
         from mlx_audio.stt.utils import load_audio
         import mlx.core as mx
-        audio_data = load_audio(str(audio), sr=16000)
+        source = mlx_audio_input(audio)
+        audio_data = load_audio(source, sr=16000) if isinstance(source, str) else mx.array(source)
         texts = []
         # Bound encoder memory on the existing five-minute import path.
         for start in range(0, len(audio_data), 30 * 16000):

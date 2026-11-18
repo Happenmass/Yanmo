@@ -326,7 +326,7 @@ function Preferences({ state }: { state: AppState }) {
       <p className="fine-print">需同时开启文稿保存。截屏取自结束录音时鼠标所在的屏幕，随文稿留在本机。</p>
       {settings.keepHistory && settings.saveRecordingScreenshot && state.platform === 'mac' && <p className="fine-print">首次使用请在「屏幕与系统音频录制」中允许言墨，然后重新打开言墨。 <button className="text-button red" onClick={() => void api('screenRecordingSettings')}>打开系统设置</button></p>}
       <label className="inline-setting"><span>文稿保留时间</span><select aria-label="文稿保留时间" value={settings.retention} onChange={event => patch({ retention: Number(event.target.value) })}>{[[0, '一直保留'], [1, '24 小时'], [7, '7 天'], [30, '30 天'], [365, '1 年']].map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-      <p className="fine-print">文稿、压缩录音和截屏按文稿保留时间一同清理。临时音频处理后删除。关闭保存不删除已有记录。词库和设置始终仅保存在本机。应用发送字数和文字 API 用量也仅保存在本机，独立于文稿保存及保留时间。</p>
+      <p className="fine-print">文稿、压缩录音和截屏按文稿保留时间一同清理。关闭保存不删除已有记录。词库和设置始终仅保存在本机。应用发送字数和文字 API 用量也仅保存在本机，独立于文稿保存及保留时间。</p>
     </PreferenceSection>
     <PreferenceSection title="启动"><CheckSetting title="登录时启动言墨" checked={state.launchAtLogin} onChange={value => void api('login', value)}/><CheckSetting title="主窗口打开时在程序坞中显示言墨" checked={settings.showDock} onChange={value => patch({ showDock: value })}/><p className="fine-print">关闭主窗口后只保留顶部菜单栏，快捷键继续可用；从菜单栏可以重新打开或退出言墨。</p><button className="text-button" onClick={() => patch({ onboarded: false })}>重新查看引导 →</button></PreferenceSection>
     {state.update && <PreferenceSection title="软件更新">

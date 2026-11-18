@@ -1,5 +1,6 @@
 """Application-independent inference flow. Providers never own cursor insertion."""
 import base64
+from pathlib import Path
 from threading import Event
 from time import monotonic
 from engine.audio import encode_opus
@@ -53,7 +54,8 @@ def run_pipeline(engine, request, audio, cancelled: Event, emit):
         candidates = list(request.get("asr_results") or [])
         if operation in ("dictation", "voiceTranslation"):
             stage("transcribing")
-            primary = invoke("transcribe", audio=str(audio))
+            source = str(audio) if isinstance(audio, Path) else audio
+            primary = invoke("transcribe", audio=source)
             original = primary["text"]
             language = primary.get("language")
             def candidate(value):
@@ -65,13 +67,17 @@ def run_pipeline(engine, request, audio, cancelled: Event, emit):
             if request.get("archive_audio", False):
                 try:
                     encoded = encode_opus(audio)
+                    check()
                     emit({"event": "audio", "audio_opus": base64.b64encode(encoded).decode("ascii")})
+                except TaskCancelled:
+                    raise
                 except Exception as exc:
+                    check()
                     record("audio_archive_failed", error_type=type(exc).__name__)
                     emit({"event": "audio", "audio_warning": "录音未保存：音频压缩失败，文字处理继续。"})
             if primary.get("secondary") and primary.get("language_source") == "detected" and language in ("Chinese", "English"):
                 stage("reviewing")
-                secondary = invoke("transcribe_secondary", audio=str(audio), language=language)
+                secondary = invoke("transcribe_secondary", audio=source, language=language)
                 candidates.append(candidate(secondary))
                 emit({"event": "transcript", "text": original, "asr_results": list(candidates)})
         else:

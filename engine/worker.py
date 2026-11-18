@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -196,6 +197,13 @@ def require_text(output: str) -> str:
     return output
 
 
+def request_audio(request):
+    source = request["audio"]
+    if isinstance(source, io.BytesIO):
+        return source
+    return Path(source).expanduser()
+
+
 class Engine:
     def __init__(self, provider=None, *, allow_local_text=False):
         if provider is None:
@@ -228,8 +236,8 @@ class Engine:
         online = online_config(request, "asr")
         if not online:
             self.load_asr(request)
-        audio = Path(request["audio"]).expanduser()
-        if not audio.is_file():
+        audio = request_audio(request)
+        if isinstance(audio, Path) and not audio.is_file():
             raise ValueError("音频文件不存在。")
         language = request.get("language") or None
         if online:
@@ -251,7 +259,7 @@ class Engine:
         path = resolve_model(request.get("sensevoice_model") or DEFAULT_SENSEVOICE, request.get("model_source", "modelscope"))
         # mlx-community/SenseVoiceSmall 仅支持 language (zh/en) 与 use_itn；
         # 不支持传入当前应用 (application)、历史热词 (lexicon) 与光标上下文 (before/after)。
-        result = self.provider.transcribe_secondary(Path(request["audio"]), path, language)
+        result = self.provider.transcribe_secondary(request_audio(request), path, language)
         return {**result, "engine": "SenseVoice Small"}
 
     def load_llm(self, request: dict) -> Path:

@@ -1,14 +1,16 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { ACTIONS, Action, AppState, ASRResult, Capability, busy, characterCount, cocoaNow, defaultSettings, Destination, isTermGroup, Language, LANGUAGES, LocalEnvironment, Manuscript, NativeStatus, Page, Settings, Shortcut, shortcutID, TaskEvent, Term, TermGroup, validateSettings } from './shared';
-import { BackendClient, NativeBridge } from './processes';
+import { BackendClient, maxAudioBytes, NativeBridge, TaskAudio } from './processes';
 import { AppInputEvent, LibraryStore, ManuscriptMedia } from './store';
 import { decideRuntime } from './precheck';
 import { matchedTermIDs, scopedTerms, selectASRHotwords, termGroup, termKey } from './hotwords';
 
+interface FinishedRecording { path?: string; audioBase64?: string; seconds?: number }
+
 interface Task {
   id: string; action: Action; settings: Settings; destination: Destination; lexicon: Term[];
-  started: number; manuscriptID: string; original: string; asrResults: ASRResult[]; audio?: string;
+  started: number; manuscriptID: string; original: string; asrResults: ASRResult[]; audio?: TaskAudio; abort: AbortController;
   audioOpus?: Buffer; audioWarning?: string; userText?: string; manual?: boolean; writeToFocus?: boolean;
   recordingEndedAtMs?: number; screenshotImage?: Buffer;
 }
@@ -192,7 +194,7 @@ export class Controller extends EventEmitter {
     this.clearLearningNotice();
     if (this.state.platform === 'mac') void this.native.call('correction.stop').catch(() => {});
     clearTimeout(this.dismiss);
-    const task: Task = { id: randomUUID(), action, settings: structuredClone(this.state.settings), destination: {}, lexicon: structuredClone(this.state.library.lexicon), started: Date.now(), manuscriptID: randomUUID(), original: '', asrResults: [] };
+    const task: Task = { id: randomUUID(), action, abort: new AbortController(), settings: structuredClone(this.state.settings), destination: {}, lexicon: structuredClone(this.state.library.lexicon), started: Date.now(), manuscriptID: randomUUID(), original: '', asrResults: [] };
     this.task = task; this.state.action = action; this.state.stage = 'preparing'; this.state.notice = ''; this.state.level = 0; this.state.seconds = 0; this.state.overlayVisible = showOverlay && action !== 'selectionTranslation';
     this.backend.setActive(true); this.changed();
     try {
@@ -234,13 +236,28 @@ export class Controller extends EventEmitter {
     this.state.stage = 'transcribing'; this.state.level = 0; this.changed();
     let screenshot: Promise<Buffer | undefined> | undefined;
     try {
-      const recording = this.native.call<{ path: string }>('record.finish');
+      const recording = this.native.call<FinishedRecording>('record.finish').then(result => {
+        // Keep any legacy path even on cancellation so finally can remove that file.
+        task.audio = result.path;
+        if (!this.valid(task)) return;
+        if (!task.audio && typeof result.audioBase64 === 'string') {
+          if (!result.audioBase64.length || result.audioBase64.length > Math.ceil(maxAudioBytes / 3) * 4) {
+            throw new Error('音频大小无效，请分段处理。');
+          }
+          const wav = Buffer.from(result.audioBase64, 'base64');
+          if (!wav.length || wav.length > maxAudioBytes) throw new Error('音频大小无效，请分段处理。');
+          task.audio = wav;
+          if (typeof result.seconds === 'number' && Number.isFinite(result.seconds) && result.seconds >= 0) {
+            this.state.seconds = result.seconds;
+          }
+        }
+      });
       if (seconds >= 0.35 && task.settings.keepHistory && task.settings.saveRecordingScreenshot) {
         screenshot = this.captureRecordingScreenshot?.().catch(() => undefined);
       }
-      const { path } = await recording; task.audio = path;
+      await recording;
       if (!this.valid(task)) return;
-      if (seconds < 0.35) throw new Error('录音太短，请再说一句。');
+      if (this.state.seconds < 0.35) throw new Error('录音太短，请再说一句。');
       await this.process(task, screenshot);
     } catch (error) {
       if (this.valid(task) && task.original && screenshot) task.screenshotImage = await screenshot;
@@ -283,7 +300,7 @@ export class Controller extends EventEmitter {
   }
   private async collect(task: Task, operation: string, text = '', language?: Language) {
     let result: TaskEvent | undefined;
-    await this.backend.run(this.payload(task, operation, text, language), task.audio, event => {
+    const running = this.backend.run(this.payload(task, operation, text, language), task.audio, event => {
       if (!this.valid(task)) return;
       if (event.event === 'stage' && ['transcribing', 'reviewing', 'polishing', 'translating'].includes(event.stage || '')) { this.state.stage = event.stage!; this.changed(); }
       if (event.event === 'transcript') {
@@ -296,7 +313,9 @@ export class Controller extends EventEmitter {
         if (event.audio_warning) { task.audioWarning = event.audio_warning; this.notice(event.audio_warning); }
       }
       if (['result', 'error', 'cancelled'].includes(event.event)) result = event;
-    });
+    }, task.abort.signal);
+    if (Buffer.isBuffer(task.audio)) task.audio = undefined;
+    await running;
     if (!this.valid(task)) return;
     if (!result || result.event !== 'result' || !result.text) throw new Error(result?.message || '处理未完成，已保留原文。');
     return result;
@@ -459,16 +478,20 @@ export class Controller extends EventEmitter {
     clearInterval(this.clock); this.task = undefined; this.backend.setActive(false);
     await this.native.call('active', { value: false }).catch(() => {});
   }
-  private async deleteAudio(task: Task) { if (task.audio) await this.native.call('audio.delete', { path: task.audio }).catch(() => {}); }
+  private async deleteAudio(task: Task) {
+    const path = typeof task.audio === 'string' ? task.audio : undefined;
+    task.audio = undefined;
+    if (path) await this.native.call('audio.delete', { path }).catch(() => {});
+  }
   async cancel() {
     clearTimeout(this.dismiss);
     const task = this.task;
     if (!task) { this.state.stage = 'idle'; this.state.overlayVisible = false; this.changed(); return; }
-    this.task = undefined; clearInterval(this.clock); this.state.level = 0; this.state.stage = 'idle'; this.state.overlayVisible = false;
+    this.task = undefined; task.abort.abort(); clearInterval(this.clock); this.state.level = 0; this.state.stage = 'idle'; this.state.overlayVisible = false;
     if (task.action === 'selectionTranslation') { this.state.translation.loading = false; this.state.translation.error = '已取消翻译。'; }
     else if (task.manual) this.state.notice = '已停止整理，当前文稿已保留。';
     else if (task.original) { const saved = this.saveTask(task, task.original, false); this.state.notice = saved ? '已停止整理，识别原文已保留。' : '已停止整理。' + this.state.notice; }
-    else this.state.notice = '已取消，本次临时录音已删除。';
+    else this.state.notice = '已取消，本次录音已丢弃。';
     this.backend.setActive(false);
     this.cancelling = Promise.all([this.native.call('record.cancel').catch(() => {}), this.native.call('active', { value: false }).catch(() => {}), this.backend.cancel(task.id)]);
     this.changed(); await this.cancelling;

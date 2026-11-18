@@ -6,19 +6,19 @@ import re
 import sys
 
 if __package__:
+    from .audio import AudioInput, read_mono
     from .mlx_provider import parse_qwen_output
 else:
+    from audio import AudioInput, read_mono
     from mlx_provider import parse_qwen_output
 
 SAMPLE_RATE = 16000
 
 
-def load_audio(path: Path):
+def load_audio(audio: AudioInput):
     """Mono float32 at 16 kHz. The native helpers record 16 kHz WAV; other rates are resampled linearly."""
     import numpy as np
-    import soundfile as sf
-    samples, rate = sf.read(str(path), dtype="float32", always_2d=True)
-    samples = samples.mean(axis=1)
+    samples, rate = read_mono(audio)
     if rate != SAMPLE_RATE:
         # ponytail: linear resampling, enough for speech; use a polyphase filter if imports of other rates matter.
         positions = np.arange(0, len(samples), rate / SAMPLE_RATE)
@@ -71,7 +71,7 @@ class TorchProvider:
         self.asr = self.load(Qwen3ASRForConditionalGeneration, path, dtype=dtype)
         self.asr_path = str(path)
 
-    def transcribe(self, audio: Path, language=None, context=None):
+    def transcribe(self, audio: AudioInput, language=None, context=None):
         # Qwen/Qwen3-ASR-* (transformers) 支持通过 apply_transcription_request(..., prompt=context)
         # 注入统一上下文（当前应用 application、历史热词 lexicon 及光标前后文 before/after）。
         import torch
