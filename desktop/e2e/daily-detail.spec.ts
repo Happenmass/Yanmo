@@ -8,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { defaultSettings, localDayDate, localDayKey, shiftLocalDay } from '../shared';
 import { LibraryStore } from '../store';
 
-test('日历读取按日排名和真实文字请求用量，并区分未验证、未知用量和旧日期', async () => {
+test('日历显示各应用发送总量和真实文字请求用量，并区分未知用量和旧日期', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'yanmo-daily-qa-'));
   const today = localDayKey(new Date());
   const yesterday = shiftLocalDay(today, -1);
@@ -57,7 +57,8 @@ test('日历读取按日排名和真实文字请求用量，并区分未验证�
     const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
       YANMO_DATA_DIR: directory, YANMO_QA: '1' };
     delete env.ELECTRON_RUN_AS_NODE;
-    application = await electron.launch({ args: [resolve('.')], env, cwd: resolve('.') });
+    const executablePath = process.env.YANMO_QA_APP;
+    application = await electron.launch({ args: executablePath ? [] : [resolve('.')], env, executablePath, cwd: executablePath ? tmpdir() : resolve('.') });
     const page = await application.firstWindow();
     await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).modelsChecked)).toBe(true);
     const yesterdayCell = page.locator(`button[data-day="${yesterday}"]`);
@@ -65,10 +66,13 @@ test('日历读取按日排名和真实文字请求用量，并区分未验证�
     await yesterdayCell.press('Enter');
     const details = page.getByRole('region', { name: '当日详情' });
     await expect(details.locator('time')).toHaveAttribute('datetime', yesterday);
+    await expect(details.getByRole('columnheader')).toHaveText(['应用', '发送总量 ↓']);
     const rows = details.locator('tbody tr');
     await expect(rows).toHaveCount(2);
     await expect(rows.nth(0)).toContainText('文本编辑');
-    await expect(rows.nth(0).locator('td').filter({ hasText: /\d/ })).toHaveText(['1,240', '980', '260']);
+    await expect(rows.nth(0).getByRole('cell')).toHaveText(['1,240']);
+    await expect(rows.nth(1)).toContainText('Safari');
+    await expect(rows.nth(1).getByRole('cell')).toHaveText(['320']);
     await expect(rows.nth(0).locator('img')).toHaveAttribute('src', /^data:image\/png;base64,/);
     await expect(page.getByRole('heading', { name: '随处落笔' })).toBeVisible();
     await expect(details.locator('.daily-sent small')).toContainText('+30.0%');

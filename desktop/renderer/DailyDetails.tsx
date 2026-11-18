@@ -56,16 +56,16 @@ export function DailyDetails({ day, onBack, onDay }: { day: string; onBack: () =
         <section className="daily-apps" aria-labelledby="daily-apps-title">
           <h4 id="daily-apps-title">各应用发送字数</h4>
           {usage.apps.length ? <table aria-labelledby="daily-apps-title">
-            <colgroup><col className="daily-app-column"/><col className="daily-bar-column"/><col/><col/><col/></colgroup>
+            <colgroup><col className="daily-app-column"/><col/><col className="daily-total-column"/></colgroup>
             <thead><tr><th scope="col" colSpan={2}><span className="daily-visually-hidden">应用</span></th>
-              <th scope="col" aria-sort="descending">发送总量 ↓</th><th scope="col">已确认</th><th scope="col">未验证</th></tr></thead>
+              <th scope="col" aria-sort="descending">发送总量 ↓</th></tr></thead>
             <tbody>{usage.apps.map(item => <tr key={item.appKey}>
               <th scope="row" title={item.name}><span className="daily-app-name">
                 {item.icon ? <img className="daily-app-icon" src={item.icon} alt=""/> : <AppWindow className="daily-app-icon" aria-hidden="true"/>}
                 <span>{item.name}</span>
               </span></th>
               <td aria-hidden="true"><span className="daily-bar"><i style={{ width: item.sent / usage.apps[0].sent * 100 + '%' }}/></span></td>
-              <td>{number.format(item.sent)}</td><td>{number.format(item.confirmed)}</td><td>{number.format(item.unverified)}</td>
+              <td>{number.format(item.sent)}</td>
             </tr>)}</tbody>
           </table> : <p className="empty-line">当天没有应用发送记录。</p>}
         </section>

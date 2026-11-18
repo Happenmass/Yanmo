@@ -76,8 +76,8 @@ button.calendar-day:hover{box-shadow:inset 0 0 0 1px var(--red)}
 .daily-sent b{color:var(--red);font-weight:500}
 .daily-detail .fine-print{margin-top:8px}
 .daily-apps table{width:100%;border-collapse:collapse;table-layout:fixed;font-variant-numeric:tabular-nums}
-.daily-app-column{width:26%}
-.daily-bar-column{width:27%}
+.daily-app-column{width:34%}
+.daily-total-column{width:16%}
 .daily-apps th,.daily-apps td{text-align:right;padding:8px 0 8px 6px;font-weight:400}
 .daily-apps thead th{color:var(--muted);font-size:11px;white-space:nowrap;padding-top:2px}
 .daily-apps tbody tr+tr{border-top:1px solid #d9d1c080}
