@@ -20,6 +20,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -67,21 +71,73 @@ final class Polish {
         if (!editor.commit()) throw new IOException("无法保存文字 API 设置。");
     }
 
-    static String generate(Context context, String original) throws Exception {
-        return generate(context, original, "言墨");
+    static String generate(Context app, String original) throws Exception {
+        return generate(app, original, "言墨", Lexicon.GLOBAL, EditorContext.EMPTY, Lexicon.list(app));
     }
 
-    static String generate(Context context, String original, String application) throws Exception {
-        return generate(settings(context).getAll(), () -> context.getAssets().open("polish.txt"),
-                original, application);
+    static String generate(Context app, String original, String application, String group,
+                           EditorContext editor, List<Lexicon.Entry> terms) throws Exception {
+        return generate(settings(app).getAll(), () -> app.getAssets().open("polish.txt"),
+                original, application, group, editor, terms);
     }
 
     interface PromptAsset {
         InputStream open() throws IOException;
     }
 
-    static String generate(Map<String, ?> preferences, PromptAsset asset, String original, String application)
-            throws Exception {
+    static String generate(Map<String, ?> preferences, PromptAsset asset, String original, String application,
+                           String group, EditorContext editor, List<Lexicon.Entry> lexicon) throws Exception {
+        JSONArray terms = new JSONArray();
+        for (Lexicon.Entry entry : lexicon) {
+            terms.put(new JSONObject().put("term", entry.term).put("hint", "").put("aliases", new JSONArray()));
+        }
+        String payload = new JSONStringer().object()
+                .key("INSTRUCTION").value("")
+                .key("AUDIO_CONTEXT").object()
+                    .key("lexicon").value(terms)
+                    .key("application").object()
+                        .key("categories").array().value(Lexicon.GLOBAL.equals(group) ? "general" : group).endArray()
+                        .key("name").value(application)
+                    .endObject()
+                    .key("background_screen_text").array().endArray()
+                .endObject()
+                .key("context").object()
+                    .key("text_before_cursor").value(editor.before)
+                    .key("text_after_cursor").value(editor.after)
+                .endObject()
+                .key("ASR_RESULTS").array().object()
+                    .key("engine_name").value("ASR 1")
+                    .key("transcript").value(original)
+                .endObject().endArray()
+                .endObject().toString();
+        return request(preferences, asset, payload, 4096, false);
+    }
+
+    static List<String> correctionTerms(Context app, String original, String corrected, String raw) throws Exception {
+        return correctionTerms(settings(app).getAll(), () -> app.getAssets().open("correction-terms.txt"),
+                original, corrected, raw);
+    }
+
+    static List<String> correctionTerms(Map<String, ?> preferences, PromptAsset asset,
+                                        String original, String corrected, String raw) throws Exception {
+        if (original.equals(corrected) || corrected.trim().isEmpty()) return Collections.emptyList();
+        JSONObject payload = new JSONObject().put("ORIGINAL", original).put("CORRECTED", corrected);
+        if (raw != null && !raw.equals(original)) payload.put("ASR", raw);
+        JSONArray output = new JSONArray(request(preferences, asset, payload.toString(), 512, true));
+        if (output.length() > 10) return Collections.emptyList();
+        LinkedHashSet<String> terms = new LinkedHashSet<>();
+        for (int i = 0; i < output.length(); i++) {
+            Object item = output.get(i);
+            if (!(item instanceof String)) return Collections.emptyList();
+            String term = ((String) item).trim();
+            if (!term.isEmpty() && term.length() <= 64 && !term.matches("(?s).*\\R.*")
+                    && corrected.contains(term) && !original.contains(term)) terms.add(term);
+        }
+        return new ArrayList<>(terms);
+    }
+
+    private static String request(Map<String, ?> preferences, PromptAsset asset, String payload, int maxTokens,
+                                  boolean extraction) throws Exception {
         if (!Boolean.TRUE.equals(preferences.get("enabled"))) {
             throw new Failure("请先在言墨设置中配置并启用文字处理 API。");
         }
@@ -97,34 +153,14 @@ final class Polish {
         try (InputStream input = asset.open()) {
             prompt = read(input);
         }
-        String payload = new JSONStringer().object()
-                .key("INSTRUCTION").value("")
-                .key("AUDIO_CONTEXT").object()
-                    .key("lexicon").array().endArray()
-                    .key("application").object()
-                        .key("categories").array().value("general").endArray()
-                        .key("name").value(application)
-                    .endObject()
-                    .key("background_screen_text").array().endArray()
-                .endObject()
-                .key("context").object()
-                    .key("text_before_cursor").value("")
-                    .key("text_after_cursor").value("")
-                .endObject()
-                .key("ASR_RESULTS").array().object()
-                    .key("engine_name").value("ASR 1")
-                    .key("transcript").value(original)
-                .endObject().endArray()
-                .endObject().toString();
-
         JSONArray messages = new JSONArray()
                 .put(new JSONObject().put("role", "system").put("content", prompt))
                 .put(new JSONObject().put("role", "user").put("content", payload));
         JSONObject body = new JSONObject().put("model", model).put("messages", messages)
-                .put("temperature", 0).put("max_tokens", 4096);
+                .put("temperature", 0).put("max_tokens", maxTokens);
         if ("api.deepseek.com".equalsIgnoreCase(base.getHost())) {
-            body.put("thinking", new JSONObject().put("type", "enabled"));
-            body.put("reasoning_effort", "low");
+            body.put("thinking", new JSONObject().put("type", extraction ? "disabled" : "enabled"));
+            if (!extraction) body.put("reasoning_effort", "low");
         }
         return post(base, key, body);
     }

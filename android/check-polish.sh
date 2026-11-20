@@ -21,7 +21,7 @@ printf '%s  %s\n' dfb7bae2f404cfe0b72b4d23944698cb716b7665171812a0a4d0f5926c0fac
 original='我想约周四下午三点，please book Room 2A。'
 application='contract.editor'
 "${java_bin}javac" --release 17 -encoding UTF-8 -classpath "$json_jar:$platform" -d "$work" \
-    android/src/main/java/dev/yanmo/ime/Polish.java android/tools/PolishContract.java
+    android/src/main/java/dev/yanmo/ime/{Lexicon,Polish,EditorContext,CorrectionWindow}.java android/tools/PolishContract.java
 "${java_bin}java" -classpath "$work:$json_jar:$platform" dev.yanmo.ime.PolishContract "$work" "$original" "$application"
 python3 - "$work" "$original" "$application" <<'PY'
 import json
@@ -36,8 +36,12 @@ with patch.dict(sys.modules, {"httpx": SimpleNamespace(Timeout=lambda *a, **kw: 
 
 work = Path(sys.argv[1])
 prompt = Path("engine/polish.txt").read_text(encoding="utf-8")
-payload = fusion.build_polish_payload({"text": sys.argv[2], "application": sys.argv[3]})
 for label, base_url in [("generic", "https://text.example.test/v1"), ("deepseek", "https://api.deepseek.com/v1")]:
+    terms = ["项目晨星", "ChatGPT"] if label == "generic" else []
+    inputs = {"text": sys.argv[2], "application": sys.argv[3], "lexicon": terms}
+    if label == "generic":
+        inputs.update(category="ai_tools", before="前" * 310, after="后" * 310)
+    payload = fusion.build_polish_payload(inputs)
     with patch.object(online_provider, "_post", return_value={
         "choices": [{"message": {"content": "fixture"}, "finish_reason": "stop"}]
     }) as post:

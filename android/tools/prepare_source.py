@@ -18,8 +18,10 @@ TOOLS_NS = "http://schemas.android.com/tools"
 A = f"{{{MANIFEST_NS}}}"
 YANMO_SERVICE = "dev.yanmo.ime.YanmoInputMethodService"
 YANMO_ACTIVITY = "dev.yanmo.ime.YanmoActivity"
+YANMO_SETTINGS_ENTRY = "dev.yanmo.ime.SettingsEntry"
 UPSTREAM_ACTIVITY = "com.kingzcheung.xime.MainActivity"
 UPSTREAM_IME = "com.kingzcheung.xime.service.XimeInputMethodService"
+LAUNCHER_CATEGORY = "android.intent.category.LAUNCHER"
 
 
 def replace_once(path, original, modified):
@@ -35,35 +37,69 @@ def write_manifest(path, speech_package):
     xml = ET.parse(path)
     root = xml.getroot()
     app = root.find("application")
+    unused_permissions = {
+        "android.permission.REQUEST_INSTALL_PACKAGES", "android.permission.CAMERA",
+        "android.permission.READ_CONTACTS", "android.permission.RECEIVE_SMS",
+        "android.permission.READ_MEDIA_IMAGES", "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.READ_EXTERNAL_STORAGE", "android.permission.ACCESS_WIFI_STATE", "android.permission.WAKE_LOCK",
+    }
+    for permission in root.findall("uses-permission"):
+        if permission.get(A + "name") in unused_permissions:
+            root.remove(permission)
+    camera = root.find(f"uses-feature[@{A}name='android.hardware.camera.any']")
+    if camera is not None:
+        root.remove(camera)
     app.set(A + "allowBackup", "false")
-    app.set(A + "label", "言墨")
-    for item in app.findall("activity-alias"):
-        if item.get(A + "targetActivity") == UPSTREAM_ACTIVITY:
-            item.set(A + "enabled", "false")
-            item.set(A + "icon", "@mipmap/cyime_launcher_facet")
-            item.set(A + "label", "言墨")
+    app.set(A + "label", "@string/app_name")
+    app.set(A + "icon", "@drawable/yanmo_mark")
+    app.set(A + "roundIcon", "@drawable/yanmo_mark")
+    for component in list(app):
+        name = component.get(A + "name", "")
+        target = component.get(A + "targetActivity")
+        if (name in {UPSTREAM_ACTIVITY, "com.kingzcheung.xime.CustomLayoutActivity",
+                     "com.kingzcheung.xime.service.AsrInferenceService",
+                     "com.kingzcheung.xime.service.DevLearningReceiver",
+                     "com.kingzcheung.xime.service.InferenceService",
+                     "com.kingzcheung.xime.clipboard.VerificationCodeSmsReceiver",
+                     "com.kingzcheung.xime.clipboard.ImageAccessActivity"}
+                or name.startswith(("com.kingzcheung.xime.ocr.", "com.kingzcheung.xime.ui.caption."))
+                or target == UPSTREAM_ACTIVITY):
+            app.remove(component)
+            continue
+        for intent in component.findall("intent-filter"):
+            if intent.find(f"category[@{A}name='{LAUNCHER_CATEGORY}']") is not None:
+                component.remove(intent)
     service = next(item for item in app.findall("service") if item.get(A + "name") == UPSTREAM_IME)
     service.set(A + "name", YANMO_SERVICE)
-    service.set(A + "label", "言墨")
+    service.set(A + "label", "@string/app_name")
     launcher = ET.SubElement(app, "activity", {
         A + "name": YANMO_ACTIVITY,
         A + "exported": "true",
     })
     intent = ET.SubElement(launcher, "intent-filter")
     ET.SubElement(intent, "action", {A + "name": "android.intent.action.MAIN"})
-    ET.SubElement(intent, "category", {A + "name": "android.intent.category.LAUNCHER"})
-    ET.SubElement(app, "service", {
-        A + "name": "dev.yanmo.ime.ScreenCapture",
-        A + "exported": "false",
-        A + "foregroundServiceType": "mediaProjection",
+    ET.SubElement(intent, "category", {A + "name": LAUNCHER_CATEGORY})
+    ET.SubElement(app, "activity-alias", {
+        A + "name": YANMO_SETTINGS_ENTRY,
+        A + "targetActivity": YANMO_ACTIVITY,
+        A + "exported": "true",
     })
-    for permission in (
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION",
-        speech_package + ".permission.SPEECH",
-    ):
-        if not any(item.get(A + "name") == permission for item in root.findall("uses-permission")):
-            root.insert(0, ET.Element("uses-permission", {A + "name": permission}))
+    screenshot_service = ET.SubElement(app, "service", {
+        A + "name": "dev.yanmo.ime.ScreenCapture",
+        A + "label": "@string/yanmo_screenshot_service_label",
+        A + "enabled": "@bool/yanmo_screenshot_service_supported",
+        A + "exported": "true",
+        A + "permission": "android.permission.BIND_ACCESSIBILITY_SERVICE",
+    })
+    screenshot_filter = ET.SubElement(screenshot_service, "intent-filter")
+    ET.SubElement(screenshot_filter, "action", {A + "name": "android.accessibilityservice.AccessibilityService"})
+    ET.SubElement(screenshot_service, "meta-data", {
+        A + "name": "android.accessibilityservice",
+        A + "resource": "@xml/yanmo_screenshot_service",
+    })
+    permission = speech_package + ".permission.SPEECH"
+    if not any(item.get(A + "name") == permission for item in root.findall("uses-permission")):
+        root.insert(0, ET.Element("uses-permission", {A + "name": permission}))
     ET.SubElement(root.find("queries"), "package", {A + "name": speech_package})
     ET.indent(xml, space="    ")
     xml.write(path, encoding="utf-8", xml_declaration=True)
@@ -72,25 +108,30 @@ def write_manifest(path, speech_package):
 def source_ime(java):
     service = java / "service/XimeInputMethodService.kt"
     replace_once(service, "class XimeInputMethodService :", "open class XimeInputMethodService :")
-    handlers = java / "service/ImeKeyboardCallbacks.kt"
-    replace_once(handlers, """            onVoiceStickyToggle = {
-                val state = service.uiState.value
-                if (state.isVoiceMode""", """            onVoiceStickyToggle = {
-                val state = service.uiState.value
-                if (service is dev.yanmo.ime.YanmoInputMethodService) {
-                    service.onDictationHoldStart()
-                } else if (state.isVoiceMode""")
-    replace_once(handlers, """                if (state.isVoiceMode && state.voiceSticky) service.endVoiceSession()
-            },""", """                if (service is dev.yanmo.ime.YanmoInputMethodService) service.onDictationHoldEnd()
-                else if (state.isVoiceMode && state.voiceSticky) service.endVoiceSession()
-            },""")
-    replace_once(handlers, """                if (state.isVoiceMode && state.voiceSticky) service.cancelVoiceSession()
-            },""", """                if (service is dev.yanmo.ime.YanmoInputMethodService) service.onDictationHoldCancel()
-                else if (state.isVoiceMode && state.voiceSticky) service.cancelVoiceSession()
-            },""")
     replace_once(java / "ui/theme/TonalThemes.kt",
                  "longArrayOf(0xF7E1D9, 0xFFFBF9, 0xE6C8BD, 0x34211A, 0xD1AFA3, 0x62453B, 0x534B49, 0xD8CFCC, 0xEFD9D1)",
                  "longArrayOf(0xF2EDE3, 0xFCFAF4, 0xE6DED1, 0x29251F, 0xE6B2A5, 0x992D24, 0x302B23, 0xDDD4C4, 0xF1D4CA)")
+    replace_once(java / "ui/theme/TonalThemes.kt",
+                 "longArrayOf(0x1E110C, 0x42332D, 0x32201A, 0xF6EEEB, 0x8E6F64, 0xEBC8BC, 0xBEB5B2, 0x332C2A, 0x30201A)",
+                 "longArrayOf(0x24211F, 0x38332F, 0x302B27, 0xF3EBDF, 0x8E3D30, 0xF0BEAE, 0xE6DACE, 0x494039, 0x50322B)")
+
+
+def wire_correction_learning(java):
+    service = java / "service/XimeInputMethodService.kt"
+    replace_once(service, "    internal val uiState = mutableStateOf(InputUIState())",
+                 """    internal val uiState = mutableStateOf(InputUIState())
+
+    protected open fun onYanmoManualCommit(editor: InputConnection, text: String) {}
+    open fun onYanmoEditorAction(editor: InputConnection) {}
+    protected fun yanmoComposing(): Boolean = inlineComposition.text != null || candidateState.value.isComposing
+""")
+    replace_once(service, "        if (isSensitive || isSecretEditor()) return TextCommitResult.ACCEPTED_HOST",
+                 """        if (isSensitive || isSecretEditor()) return TextCommitResult.ACCEPTED_HOST
+        if (!isPaste) onYanmoManualCommit(connection, delivered)""")
+    router = java / "service/ImeKeyRouter.kt"
+    replace_once(router, "        // Ctrl+回车在没声明动作的框里执行",
+                 """        if (plan != EnterKeyAction.Newline) service.onYanmoEditorAction(ic)
+        // Ctrl+回车在没声明动作的框里执行""")
 
 
 def use_bundled_onnx_headers(path):
@@ -106,15 +147,16 @@ def use_bundled_onnx_headers(path):
 """ + text[end:])
 
 
-def use_external_speech(app):
-    speech = app / "build-logic/tasks-speech.gradle.kts"
-    replace_once(speech, """        fetch("https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx",
-            File(speechAssets.get().asFile, "speech/silero_vad.onnx"),
-            "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6")""",
-                 """        // Legacy sources still compile against the AAR. Yanmo does not use its VAD model.
-        speechAssets.get().asFile.mkdirs()""")
-    replace_once(app / "build.gradle.kts",
-                 'apply(from = "build-logic/tasks-offline-translate.gradle.kts")\n', '')
+def prune_legacy_sources(checkout, patches):
+    subprocess.run(["git", "-C", str(checkout), "apply", str(patches / "yanmo-legacy-cleanup.patch")], check=True)
+    for name in (patches / "yanmo-unused-source.txt").read_text().splitlines():
+        if name and not name.startswith("#"):
+            (checkout / name).unlink()
+    assets = checkout / "app/src/main/assets"
+    for name in ("handwriting", "ocr", "plugins", "licenses/ocr"):
+        path = assets / name
+        if path.is_dir():
+            shutil.rmtree(path)
 
 
 def main():
@@ -139,27 +181,32 @@ def main():
             if file_digest(apk, "sha256").hexdigest() != FULL_SHA:
                 parser.error("Unexpected checksum for the upstream full APK")
 
+    subprocess.run(status + ["apply", str(android / "patches/yanmo-keyboard-ui.patch")], check=True)
     source_ime(src / "java/com/kingzcheung/xime")
     replace_once(app / "build.gradle.kts", 'applicationId = "com.cyletix.cyime"', 'applicationId = "dev.yanmo.ime"')
     write_manifest(src / "AndroidManifest.xml", args.speech_package)
     use_bundled_onnx_headers(app / "build-logic/tasks-native.gradle.kts")
-    use_external_speech(app)
-    replace_once(src / "res/values/strings.xml",
-                 '<string name="app_name" translatable="false">CyIME</string>',
-                 '<string name="app_name" translatable="false">言墨</string>')
-    icon_variants = list((src / "res").glob("mipmap*/cyime_launcher_facet.xml"))
-    for icon in icon_variants:
-        icon.unlink()
-    icon = src / "res/mipmap-xxxhdpi/cyime_launcher_facet.png"
+    prune_legacy_sources(args.checkout, android / "patches")
+    wire_correction_learning(src / "java/com/kingzcheung/xime")
+    for strings in (src / "res").glob("values*/strings.xml"):
+        content = strings.read_text()
+        branded = re.sub(r">([^<>]*?)</string>",
+                         lambda match: match.group(0).replace("CyIME", "言墨"), content)
+        if content != branded:
+            strings.write_text(branded)
+    icon = src / "res/drawable-nodpi/yanmo_mark.png"
     icon.parent.mkdir(exist_ok=True)
     shutil.copyfile(android.parent / "site/assets/logo.png", icon)
-    shutil.copyfile(android.parent / "engine/polish.txt", src / "assets/polish.txt")
+    shutil.copytree(android / "src/main/res", src / "res", dirs_exist_ok=True)
+    for name in ("polish.txt", "correction-terms.txt"):
+        shutil.copyfile(android.parent / "engine" / name, src / "assets" / name)
     java = src / "java/dev/yanmo/ime"
     shutil.copytree(android / "src/main/java/dev/yanmo/ime", java)
+    shutil.copytree(android / "src/main/kotlin/dev/yanmo/ime", java, dirs_exist_ok=True)
     (java / "PrototypeBuild.java").write_text(
         'package dev.yanmo.ime;\nfinal class PrototypeBuild {\n'
         f'    static final String SPEECH_PACKAGE = "{args.speech_package}";\n'
-        '    static final boolean SOURCE_HOOK = true;\n}\n')
+        '}\n')
     if args.keyboard_assets:
         target = src / "assets/rime_chinese/t9_ngram.lm"
         with ZipFile(args.keyboard_assets) as full, full.open("assets/rime_chinese/t9_ngram.lm") as data, \

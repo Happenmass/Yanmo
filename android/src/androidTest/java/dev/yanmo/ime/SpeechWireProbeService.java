@@ -50,12 +50,26 @@ public final class SpeechWireProbeService extends Service {
                     require(!ready, "duplicate status request");
                     ready = true;
                     response.putString("asr", "READY");
+                    response.putBoolean("asrHints", true);
                     break;
                 case 2: // ASR
                     try (ParcelFileDescriptor audio = data.getParcelable("audio")) {
                         require(ready && windows < 2 && audio != null, "unexpected ASR request");
+                        require(java.util.Arrays.asList("Kai Chen", "项目晨星").equals(data.getStringArrayList("hotwords")),
+                                "wrong ASR term scope or order");
+                        String before = data.getString("textBeforeCursor");
+                        String after = data.getString("textAfterCursor");
+                        require(before != null && after != null && before.length() == 300 && after.length() == 300
+                                        && before.charAt(0) == '前' && after.charAt(299) == '后',
+                                "wrong ASR cursor context");
                         validate(audio, windows);
                         response.putString("text", TEXT[windows++]);
+                        response.putDouble("prepareMs", 3);
+                        response.putDouble("audioTransferMs", 4);
+                        response.putDouble("inferenceMs", 50);
+                        response.putDouble("modelLoadMs", 18);
+                        response.putDouble("frontendMs", 11);
+                        response.putDouble("decodeMs", 20);
                     }
                     break;
                 default:

@@ -9,14 +9,17 @@ keystore="${YANMO_ANDROID_DEBUG_KEYSTORE:-$HOME/.android/debug.keystore}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/classes" "$work/dex" "$work/assets"
-cp "$repo/engine/polish.txt" "$work/assets/"
+cp "$repo/engine/"{polish,correction-terms}.txt "$work/assets/"
 cat > "$work/AndroidManifest.xml" <<'XML'
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.yanmo.ime.voiceprobe">
   <uses-permission android:name="android.permission.INTERNET"/>
+  <permission android:name="dev.yanmo.ime.voiceprobe.permission.SPEECH" android:protectionLevel="signature"/>
+  <uses-permission android:name="dev.yanmo.ime.voiceprobe.permission.SPEECH"/>
   <uses-permission android:name="dev.androidagent.sample.fixture.permission.SPEECH"/>
   <queries><package android:name="dev.androidagent.sample.fixture"/></queries>
   <application android:debuggable="true">
-    <service android:name="dev.yanmo.ime.SpeechWireProbeService" android:exported="false"
+    <service android:name="dev.yanmo.ime.SpeechWireProbeService" android:exported="true"
+        android:permission="dev.yanmo.ime.voiceprobe.permission.SPEECH"
         android:process=":speechwire" android:isolatedProcess="true">
       <intent-filter><action android:name="dev.androidagent.action.SPEECH_SERVICE_V1"/></intent-filter>
     </service>
@@ -26,7 +29,7 @@ cat > "$work/AndroidManifest.xml" <<'XML'
 XML
 main="$repo/android/src/main/java/dev/yanmo/ime"
 javac --release 8 -cp "$platform" -d "$work/classes" \
-    "$main"/{VoiceSession,LocalAsr,Manuscripts,Polish,ScreenCapture}.java \
+    "$main"/{VoiceSession,LocalAsr,Manuscripts,Lexicon,Polish,ScreenCapture,CorrectionWindow,EditorContext}.java \
     "$repo"/android/src/androidTest/java/dev/yanmo/ime/{VoiceSessionProbe,ManuscriptStoreProbe,SpeechWireProbeService}.java
 jar cf "$work/classes.jar" -C "$work/classes" .
 "$tools/d8" --lib "$platform" --min-api 28 --output "$work/dex" "$work/classes.jar"

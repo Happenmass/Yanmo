@@ -1,0 +1,1498 @@
+diff --git a/app/src/main/assets/xime.yaml b/app/src/main/assets/xime.yaml
+index edad042..59dc06e 100644
+--- a/app/src/main/assets/xime.yaml
++++ b/app/src/main/assets/xime.yaml
+@@ -83,7 +83,6 @@ color_schemes:
+ #             paste, line_start, line_end, undo, none, repeat
+ #     command 可用命令：
+ #       clear_composition - 清空当前输入编码和候选词
+-#       show_ime_picker   - 弹出系统输入法选择框
+ #     value:  上屏时的输出文本（不指定则用 label）
+ #
+ # long_press 示例（弹出多个选项供滑动选择）：
+@@ -193,7 +192,7 @@ keyboard:
+       #  逗号键，label 为中文显示，value 为英文显示+提交值
+       "'": { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
+       # 中/英切换键，label 为按键显示文字
+-      earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
++      earth: { tap: { label: "@language", action: "toggle_ascii" } }
+     
+   # 英文键盘布局
+   qwerty_en:
+@@ -243,7 +242,7 @@ keyboard:
+       #  逗号键，label 为中文显示，value 为英文显示+提交值
+       "'": { tap: { label: ",", value: "," }, swipe_up: { label: ".", value: "." } }
+       # 中/英切换键，label 为按键显示文字
+-      earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
++      earth: { tap: { label: "@language", action: "toggle_ascii" } }
+ 
+   # ── 合并键布局（14/17/18 键）──
+   # rows 支持子数组：[[q, w], [e, r], ...] 表示 q/w 合并在同一个键，每行键数变少键自然更宽（行内等宽）。
+@@ -283,7 +282,7 @@ keyboard:
+       bn: { tap: { label: "bn", value: "b" }, long_press: { display: "bubble", values: ["b", "n", "B", "N"] } }
+       m:  { tap: { label: "m", value: "m" }, long_press: { display: "bubble", values: ["m", "M"] } }
+       "'": { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
+-      earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
++      earth: { tap: { label: "@language", action: "toggle_ascii" } }
+ 
+   # 拼音 17 键：we/rt/yu/op、sd/fg/jk、xc/bn（对应方案 pinyin_17jian）
+   qwerty_17:
+@@ -315,7 +314,7 @@ keyboard:
+       bn: { tap: { label: "bn", value: "b" }, long_press: { display: "bubble", values: ["b", "n", "B", "N"] } }
+       m:  { tap: { label: "m", value: "m" }, long_press: { display: "bubble", values: ["m", "M"] } }
+       "'": { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
+-      earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
++      earth: { tap: { label: "@language", action: "toggle_ascii" } }
+ 
+   # 拼音 18 键：we/rt/io、sd/fg/jk、xc/bn（对应方案 pinyin_18jian）
+   qwerty_18:
+@@ -348,7 +347,7 @@ keyboard:
+       bn: { tap: { label: "bn", value: "b" }, long_press: { display: "bubble", values: ["b", "n", "B", "N"] } }
+       m:  { tap: { label: "m", value: "m" }, long_press: { display: "bubble", values: ["m", "M"] } }
+       "'": { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
+-      earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
++      earth: { tap: { label: "@language", action: "toggle_ascii" } }
+ 
+   # 注音（大千式，对应方案 cyime_zhuyin，默认不启用）：键帽是注音符号，同电脑大千键盘的列，
+   # 第一行 11 键，第二三行 10 键缩进半键，第四行 10 键加一键半宽的删除键（KeyboardLayout 按 LayoutKind.ZHUYIN 排）。
+@@ -377,7 +376,7 @@ keyboard:
+       ㄢ: { swipe_up: "0" }
+       ㄦ: { swipe_up: "-" }
+       "'": { tap: { label: "，", value: "，" }, swipe_up: { label: "。", value: "。" } , long_press: { display: "bubble", values: [ "，", "。"] }}
+-      earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
++      earth: { tap: { label: "@language", action: "toggle_ascii" } }
+ 
+   # 仓颉五代（对应方案 cyime_cangjie，默认不启用）：同 26 键排列，键帽是仓颉字根，点按送字母码。
+   # 字根同方案 preedit_format 的 xlit（z 在五仓里是符号码，键帽「符」）。上下角标同 26 键（QwertySwipeSymbols），这里不配。
+@@ -417,7 +416,7 @@ keyboard:
+       n: { tap: { label: "弓", value: "n" }, long_press: { display: "bubble", values: ["n", "N"] } }
+       m: { tap: { label: "一", value: "m" }, long_press: { display: "bubble", values: ["m", "M"] } }
+       "'": { tap: { label: "，", value: "," }, swipe_up: { label: "。", value: "." } , long_press: { display: "bubble", values: [ ",","."] }}
+-      earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
++      earth: { tap: { label: "@language", action: "toggle_ascii" } }
+ 
+   # 日语：26 键用成熟 jaroomaji 罗马音转换，九宫格将假名读音交给同一引擎。
+   japanese_kana:
+@@ -503,7 +502,7 @@ keyboard:
+       n: { tap: { label: "n", value: "n" }, long_press: { display: "bubble", values: ["ñ"] } }
+       m: { tap: { label: "m", value: "m" } }
+       "'": { tap: { label: ",", value: "," }, swipe_up: { label: ".", value: "." }, long_press: { display: "bubble", values: [",", ".", "¿", "¡", "?", "!"] } }
+-      earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
++      earth: { tap: { label: "@language", action: "toggle_ascii" } }
+ 
+   # 德语：26 键（QWERTY），字母逐字上屏，补全不用打变音。长按 a o u 出 ä ö ü、长按 s 出 ß
+   # （不受「长按弹出字母气泡」开关影响）。字母键的上下角标和英文键盘同一规则（QwertySwipeSymbols），这里不配。
+@@ -543,7 +542,7 @@ keyboard:
+       n: { tap: { label: "n", value: "n" } }
+       m: { tap: { label: "m", value: "m" } }
+       "'": { tap: { label: ",", value: "," }, swipe_up: { label: ".", value: "." }, long_press: { display: "bubble", values: [",", ".", "„", "“", "?", "!"] } }
+-      earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
++      earth: { tap: { label: "@language", action: "toggle_ascii" } }
+ 
+   # 法语：26 键（QWERTY），字母逐字上屏，补全不用打重音。长按元音、c、y 出 é è ê ë à â æ î ï ô œ ù û ü ç ÿ。
+   # 字母键的上下角标和英文键盘同一规则，这里不配；' « » 在逗号键长按里。
+@@ -583,7 +582,7 @@ keyboard:
+       n: { tap: { label: "n", value: "n" } }
+       m: { tap: { label: "m", value: "m" } }
+       "'": { tap: { label: ",", value: "," }, swipe_up: { label: ".", value: "." }, long_press: { display: "bubble", values: [",", ".", "'", "«", "»", "?", "!"] } }
+-      earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
++      earth: { tap: { label: "@language", action: "toggle_ascii" } }
+ 
+   # 意大利语：26 键（QWERTY），字母逐字上屏，补全不用打重音。长按元音出 à è é ì í ò ó ù ú。
+   # 字母键的上下角标和英文键盘同一规则，这里不配；' « » 在逗号键长按里。
+@@ -623,7 +622,7 @@ keyboard:
+       n: { tap: { label: "n", value: "n" } }
+       m: { tap: { label: "m", value: "m" } }
+       "'": { tap: { label: ",", value: "," }, swipe_up: { label: ".", value: "." }, long_press: { display: "bubble", values: [",", ".", "'", "«", "»", "?", "!"] } }
+-      earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
++      earth: { tap: { label: "@language", action: "toggle_ascii" } }
+ 
+   # 俄语：ЙЦУКЕН，字母逐字上屏，补全不用打 ё。长按 е 出 ё、长按 ь 出 ъ。
+   # 上下角标跟着位置走：同一行同一格取 26 键那个字母的角标（第一排 й…з 是 1…0），超出 26 键的格不带。
+@@ -668,7 +667,7 @@ keyboard:
+       "б": { tap: { label: "б", value: "б" } }
+       "ю": { tap: { label: "ю", value: "ю" } }
+       "'": { tap: { label: ",", value: "," }, swipe_up: { label: ".", value: "." }, long_press: { display: "bubble", values: [",", ".", "«", "»", "?", "!"] } }
+-      earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
++      earth: { tap: { label: "@language", action: "toggle_ascii" } }
+ 
+   # 韩语：两벌식，字母由应用拼成音节（ㅎ ㅏ ㄴ → 한）。Shift 或长按出双辅音和 ㅒ ㅖ（ㄱ → ㄲ）。
+   # 上下角标同俄语，跟着位置走。
+@@ -708,7 +707,7 @@ keyboard:
+       "ㅜ": { tap: { label: "ㅜ", value: "ㅜ" } }
+       "ㅡ": { tap: { label: "ㅡ", value: "ㅡ" } }
+       "'": { tap: { label: ",", value: "," }, swipe_up: { label: ".", value: "." }, long_press: { display: "bubble", values: [",", ".", "?", "!", "~"] } }
+-      earth: { tap: { label: "@language", action: "toggle_ascii" }, long_press: { display: "bubble", values: [ { label: "选择输入法", action: "command", value: "show_ime_picker" } ] } }
++      earth: { tap: { label: "@language", action: "toggle_ascii" } }
+ 
+   # 九键（T9）键盘配置
+   # 注意：本键盘不支持 button_layout（按键布局模式），固定 standard 键面布局；
+diff --git a/app/src/main/java/com/kingzcheung/xime/MainActivity.kt b/app/src/main/java/com/kingzcheung/xime/MainActivity.kt
+index 8cbcfb0..b209ffd 100644
+--- a/app/src/main/java/com/kingzcheung/xime/MainActivity.kt
++++ b/app/src/main/java/com/kingzcheung/xime/MainActivity.kt
+@@ -82,23 +82,12 @@ class MainActivity : ComponentActivity() {
+ 
+         /** 构造跳转到指定插件那一页的 Intent（联网被拦时，IME 等后台场景调用）。 */
+         fun buildPluginAuthIntent(context: android.content.Context, pluginId: String): Intent {
+-            return Intent(context, MainActivity::class.java).apply {
+-                putExtra("open_fragment", "plugins")
+-                putExtra("open_plugin_id", pluginId)
+-                // 设置已打开时只带 NEW_TASK 不会调 onNewIntent，停在旧页面；和 settingsActivityIntent 一样复用。
+-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+-            }
++            return dev.yanmo.ime.YanmoActivity.settingsIntent(context)
+         }
+ 
+         /** 构造直接打开指定插件设置页的 Intent（键盘里插件面板的「设置」）。 */
+         fun buildPluginSettingsIntent(context: android.content.Context, pluginId: String): Intent {
+-            return Intent(context, MainActivity::class.java).apply {
+-                putExtra("open_fragment", "plugins")
+-                putExtra("open_plugin_id", pluginId)
+-                putExtra(EXTRA_OPEN_PLUGIN_SETTINGS, true)
+-                // 设置已打开时只带 NEW_TASK 不会调 onNewIntent，停在旧页面；和 settingsActivityIntent 一样复用。
+-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+-            }
++            return dev.yanmo.ime.YanmoActivity.settingsIntent(context)
+         }
+     }
+ 
+@@ -274,7 +263,6 @@ class MainActivity : ComponentActivity() {
+                     }
+ 
+                     // 装的不是作者签名的包就提示（每次打开设置一次）。
+-                    com.kingzcheung.xime.security.InstallIntegrityWarning()
+ 
+                     Box(
+                         modifier = Modifier
+diff --git a/app/src/main/java/com/kingzcheung/xime/XimeApplication.kt b/app/src/main/java/com/kingzcheung/xime/XimeApplication.kt
+index 309fa5a..857ee7f 100644
+--- a/app/src/main/java/com/kingzcheung/xime/XimeApplication.kt
++++ b/app/src/main/java/com/kingzcheung/xime/XimeApplication.kt
+@@ -66,7 +66,6 @@ class XimeApplication : Application(), ImageLoaderFactory {
+         // same Rime directory or load the keyboard/plugin runtime a second time.
+         val processName = getProcessName()
+         if (processName != packageName) return
+-        SettingsPreferences.initializeIncognitoForVersion(this, BuildConfig.VERSION_CODE)
+         // 先于任何下载、导入和词库准备列出上次中断的残留，后台删除。
+         com.kingzcheung.xime.settings.StorageHousekeeping.sweepAtStartup(this, applicationScope)
+         com.kingzcheung.xime.model.DeviceDefaults.initialize(this)
+@@ -74,13 +73,6 @@ class XimeApplication : Application(), ImageLoaderFactory {
+         com.kingzcheung.xime.update.AppUpdater.init(this)
+         com.kingzcheung.xime.ui.theme.VisualStyles.current = SettingsPreferences.getVisualStyle(this)
+         com.kingzcheung.xime.ui.theme.KeyShapes.current = SettingsPreferences.getKeyShape(this)
+-        com.kingzcheung.xime.ui.theme.IconAppearance.reload(this)
+-        try {
+-            com.kingzcheung.xime.ui.theme.LauncherIcons.apply(this, com.kingzcheung.xime.ui.theme.IconAppearance.effective)
+-        } catch (e: RuntimeException) {
+-            // A launcher failure must not prevent typing. The explicit settings action reports it too.
+-            FileLogger.e(TAG, "Unable to synchronize launcher icon", e)
+-        }
+         AppFonts.initialize(this)
+ 
+         val isDebug = BuildConfig.DEBUG
+@@ -122,8 +114,6 @@ class XimeApplication : Application(), ImageLoaderFactory {
+             PluginManager.loadEnabledPlugins()
+             // 装着的翻译、字幕这些随包插件比安装包里的旧：直接用包里的升级。
+             com.kingzcheung.xime.settings.XimeIndexSource.updateBundledPlugins(this@XimeApplication)
+-            // 字幕是插件：用过字幕的老用户升级时自动装上；每次启动按插件状态放出或收起字幕的入口。
+-            com.kingzcheung.xime.ui.caption.CaptionPlugin.migrateOnce(this@XimeApplication)
+             // 日语也是插件（11-11）：开着日语的老用户升级时自动装上，轻量版缺的引擎马上补下载。
+             com.kingzcheung.xime.settings.JapanesePlugin.migrateOnce(this@XimeApplication)
+         }
+diff --git a/app/src/main/java/com/kingzcheung/xime/service/ImeKeyboardCallbacks.kt b/app/src/main/java/com/kingzcheung/xime/service/ImeKeyboardCallbacks.kt
+index 817961d..68fe011 100644
+--- a/app/src/main/java/com/kingzcheung/xime/service/ImeKeyboardCallbacks.kt
++++ b/app/src/main/java/com/kingzcheung/xime/service/ImeKeyboardCallbacks.kt
+@@ -305,7 +305,6 @@ internal fun rememberImeKeyboardCallbacks(
+             },
+             onReloadConfig = { service.schemaController.reloadConfig() },
+             onSettings = { service.schemaController.openSettings() },
+-            onSettingsPage = { service.schemaController.openSettings(it) },
+             onSwitchSchema = { schemaId -> if (service.inputReadiness.ticket() != null) service.schemaController.switchSchema(schemaId) },
+             onSwitchSchemaForLayout = { schemaId ->
+                 if (service.inputReadiness.ticket() != null) service.schemaController.switchSchema(schemaId, stayInHandwriting = false)
+@@ -314,14 +313,8 @@ internal fun rememberImeKeyboardCallbacks(
+                 com.kingzcheung.xime.ui.keyboard.HandwritingFullscreenMemory.write(service, expanded)
+                 service.uiState.value = service.uiState.value.copy(handwritingExpanded = expanded, handwritingRestored = false)
+             },
+-            onHandwritingToggle = { service.schemaController.toggleHandwriting() },
+             onToggleSchemaSwitch = { sw -> service.sessionController.toggleSchemaSwitch(sw) },
+             onHideKeyboard = { service.hideKeyboard() },
+-            onSwitchKeyboard = {
+-                val imm = service.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+-                @Suppress("DEPRECATION")
+-                imm.showInputMethodPicker()
+-            },
+             onToolbarEditingAction = { action -> service.schemaController.handleToolbarEditingAction(action) },
+             onCommitImage = { imagePath ->
+                 val success = service.textCommit.commitImage(imagePath)
+@@ -361,7 +354,9 @@ internal fun rememberImeKeyboardCallbacks(
+             },
+             onVoiceStickyToggle = {
+                 val state = service.uiState.value
+-                if (state.isVoiceMode && state.voiceSticky) {
++                if (service is dev.yanmo.ime.YanmoInputMethodService) {
++                    service.onDictationHoldStart()
++                } else if (state.isVoiceMode && state.voiceSticky) {
+                     // 再次点击麦克风：停止录音并提交转录。
+                     service.endVoiceSession()
+                 } else if (!state.isVoiceMode && !state.isSttEnabled) {
+@@ -384,12 +379,14 @@ internal fun rememberImeKeyboardCallbacks(
+             onVoiceHoldEnd = {
+                 // 按住空格说话松手：结束并上屏。只收尾工具栏同一条语音路径，没开起来（输入框不许语音等）时不开麦。
+                 val state = service.uiState.value
+-                if (state.isVoiceMode && state.voiceSticky) service.endVoiceSession()
++                if (service is dev.yanmo.ime.YanmoInputMethodService) service.onDictationHoldEnd()
++                else if (state.isVoiceMode && state.voiceSticky) service.endVoiceSession()
+             },
+             onVoiceHoldCancel = {
+                 // 按住空格说话上滑后松手：停麦，这次说的字撤掉，不上屏。
+                 val state = service.uiState.value
+-                if (state.isVoiceMode && state.voiceSticky) service.cancelVoiceSession()
++                if (service is dev.yanmo.ime.YanmoInputMethodService) service.onDictationHoldCancel()
++                else if (state.isVoiceMode && state.voiceSticky) service.cancelVoiceSession()
+             },
+             onPageDown = { service.keyRouter.pageDown() },
+             onPageUp = { service.keyRouter.pageUp() },
+diff --git a/app/src/main/java/com/kingzcheung/xime/service/ImeSchemaController.kt b/app/src/main/java/com/kingzcheung/xime/service/ImeSchemaController.kt
+index 031d2d0..0e0aa37 100644
+--- a/app/src/main/java/com/kingzcheung/xime/service/ImeSchemaController.kt
++++ b/app/src/main/java/com/kingzcheung/xime/service/ImeSchemaController.kt
+@@ -1,12 +1,11 @@
+ package com.kingzcheung.xime.service
+ 
+-import android.content.Intent
+ import android.os.SystemClock
+ import android.util.Log
+ import android.view.KeyEvent
+ import android.view.inputmethod.InputConnection
+ import android.widget.Toast
+-import com.kingzcheung.xime.MainActivity
++import dev.yanmo.ime.YanmoActivity
+ import com.kingzcheung.xime.ui.keyboard.isHandwritingSchema
+ import com.kingzcheung.xime.ui.keyboard.isT9Schema
+ import com.kingzcheung.xime.ui.keyboard.JapaneseKanaAction
+@@ -33,15 +32,8 @@ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.launch
+ import kotlinx.coroutines.withContext
+ 
+-/** 缺手写模型时打开的下载页（HandwritingEngine.hasModel 认的是 ochwpro）。 */
+-internal const val HANDWRITING_MODEL_DOWNLOAD_ROUTE = "model_market_detail/ochwpro"
+-
+-/** Reuse the settings activity; onNewIntent handles explicit destinations without recreating it. */
+-internal fun settingsActivityIntent(context: android.content.Context, route: String? = null) =
+-    Intent(context, MainActivity::class.java).apply {
+-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+-        route?.let { putExtra("open_fragment", it) }
+-    }
++internal fun settingsActivityIntent(context: android.content.Context, @Suppress("UNUSED_PARAMETER") route: String) =
++    YanmoActivity.settingsIntent(context)
+ 
+ /**
+  * 方案管理与输入模式切换。
+@@ -316,11 +308,9 @@ internal class ImeSchemaController(private val service: XimeInputMethodService)
+         }
+     }
+     
+-    internal fun openSettings(route: String? = null) {
+-        // 菜单「设置」不带页面时进设置首页：在设置自己的测试框里点也照样跳（以前直接 return，菜单一关什么也没有），
+-        // 设置已经开着时也不停在上次那一页（11-03 平板）。
++    internal fun openSettings() {
+         try {
+-            service.startActivity(settingsActivityIntent(service, route ?: com.kingzcheung.xime.ui.settings.SettingsRoutes.Main))
++            service.startActivity(YanmoActivity.settingsIntent(service))
+         } catch (e: Exception) {
+             FileLogger.e(XimeInputMethodService.TAG, "Failed to open settings", e)
+         }
+@@ -628,36 +618,6 @@ internal class ImeSchemaController(private val service: XimeInputMethodService)
+         }
+     }
+ 
+-    internal fun toggleHandwriting() {
+-        if (service.editorInputPolicy.locksNativeInput) return
+-        val model = service.keyboardViewModel
+-        if (model.exitTemporaryHandwriting()) {
+-            com.kingzcheung.xime.handwriting.HandwritingEngine.release()
+-            return
+-        }
+-        if (model.page.value == com.kingzcheung.xime.keyboard.KeyboardPage.Main(com.kingzcheung.xime.keyboard.MainType.HANDWRITING)) {
+-            switchSchema(service.previousSchemaId.ifEmpty { service.rimeEngine.getCurrentSchema() }.ifEmpty { "pinyin_simp" })
+-            return
+-        }
+-        val language = service.uiState.value.inputProfile.language
+-        // 中文、英文、日语都由内置汉字手写模型服务（英文取其中字母，假名拿它的输出比对模板），不需要公式模型
+-        val templateHandwriting = com.kingzcheung.xime.handwriting.HandwritingTemplates.Script.forLanguage(language)
+-            ?.available(service) == true
+-        val recognitionLanguage = com.kingzcheung.xime.handwriting.HandwritingLanguages.recognitionLanguageForKeyboard(language)
+-        if (recognitionLanguage == null && !templateHandwriting) {
+-            Toast.makeText(service, com.kingzcheung.xime.handwriting.HandwritingLanguages.unavailableMessage(language), Toast.LENGTH_SHORT).show()
+-            return
+-        }
+-        if (!templateHandwriting && !com.kingzcheung.xime.handwriting.HandwritingEngine.hasModel(service, recognitionLanguage!!)) {
+-            Toast.makeText(service, "请先下载手写模型", Toast.LENGTH_SHORT).show()
+-            // 直接打开手写模型的下载页；「模型管理」只列已安装的，没装时那里没有下载入口。
+-            service.startActivity(settingsActivityIntent(service, HANDWRITING_MODEL_DOWNLOAD_ROUTE))
+-            return
+-        }
+-        service.editorInputPolicy.choose(false)
+-        model.enterTemporaryHandwriting()
+-    }
+-
+     /**
+      * [stayInHandwriting]：手写开着时换方案，新语言能手写就留在手写（换语言的老规矩）；
+      * 从布局选择里点了布局时为 false，回到所选键盘（平板复现：手写时点 26 键仍停在手写）。
+@@ -691,28 +651,7 @@ internal class ImeSchemaController(private val service: XimeInputMethodService)
+         }
+         if (com.kingzcheung.xime.settings.InputModes.languageOf(schemaId, service.uiState.value.schemas) !in
+             com.kingzcheung.xime.settings.LanguagePreferences.enabled(service)) return
+-        if (isHandwritingSchema(schemaId)) {
+-            // 检查手写模型文件是否已下载
+-            if (!com.kingzcheung.xime.handwriting.HandwritingEngine.hasModel(service)) {
+-                FileLogger.w(XimeInputMethodService.TAG, "Handwriting model not found, redirecting to download")
+-                android.widget.Toast.makeText(
+-                    service, "请先下载手写模型", android.widget.Toast.LENGTH_LONG
+-                ).show()
+-                service.startActivity(settingsActivityIntent(service, HANDWRITING_MODEL_DOWNLOAD_ROUTE))
+-                return
+-            }
+-            service.keyboardViewModel.discardTemporaryHandwriting()
+-            service.previousSchemaId = service.rimeEngine.getCurrentSchema()
+-            if (!service.editorInputPolicy.scoped) SettingsPreferences.setCurrentSchema(service, schemaId,
+-                        com.kingzcheung.xime.settings.InputModes.languageOf(schemaId, service.uiState.value.schemas))
+-            service.editorInputPolicy.choose(false, schemaId)
+-            service.keyboardViewModel.switchMain(com.kingzcheung.xime.keyboard.MainType.HANDWRITING)
+-            // 手写模型按"用键盘时加载"管理：切到手写方案即展示手写键盘，
+-            // 由 HandwritingKeyboardLayout 创建时（LaunchedEffect）负责加载，
+-            // 此处不重复加载（避免与布局初始化并发双 bind/load）
+-            service.sessionController.updateSchemaName()
+-            return
+-        }
++        if (isHandwritingSchema(schemaId)) return
+         // 显式选择语言方案与普通按键串行，成功后一次性更新引擎、页面和模式记忆。
+         service.keyRouter.postRimeJob {
+             try {
+diff --git a/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt b/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
+index e819227..b87a4b9 100644
+--- a/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
++++ b/app/src/main/java/com/kingzcheung/xime/service/XimeInputMethodService.kt
+@@ -319,6 +319,11 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
+     internal val mainHandler = Handler(Looper.getMainLooper())
+     
+     internal val uiState = mutableStateOf(InputUIState())
++    private val yanmoDictationStage = mutableIntStateOf(0)
++
++    fun updateYanmoDictationStage(stage: Int) {
++        yanmoDictationStage.intValue = stage
++    }
+     internal val candidateState = mutableStateOf(CandidateState())
+     internal val glideCandidatePreview = mutableStateOf("")
+     internal val glideRimePreview = mutableStateOf<com.kingzcheung.xime.rime.RimeProcessResult?>(null)
+@@ -1118,12 +1123,12 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
+         saveDarkModePreference(newMode)
+     }
+     
+-    fun isDarkTheme(): Boolean {
++    fun isDarkTheme(configuration: android.content.res.Configuration = resources.configuration): Boolean {
+         com.kingzcheung.xime.ui.theme.VisualStyles.current.dark?.let { return it }
+         return when (uiState.value.darkMode) {
+             DARK_MODE_DARK -> true
+             DARK_MODE_SYSTEM -> {
+-                val nightModeFlags = resources.configuration.uiMode and
++                val nightModeFlags = configuration.uiMode and
+                         android.content.res.Configuration.UI_MODE_NIGHT_MASK
+                 nightModeFlags == android.content.res.Configuration.UI_MODE_NIGHT_YES
+             }
+@@ -1144,15 +1149,6 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
+             delay(5_000)
+             runCatching { FileLogger.w("InputInventory", InputInventory.describe(this@XimeInputMethodService)) }
+         }
+-        // 安装包不是作者签名的就提示一次（每个进程一次）；读签名放后台，不拖慢键盘启动。
+-        serviceScope.launch {
+-            val integrity = withContext(Dispatchers.IO) {
+-                com.kingzcheung.xime.security.InstallIntegrity.check(this@XimeInputMethodService)
+-            }
+-            if (integrity == com.kingzcheung.xime.security.InstallIntegrity.Result.FOREIGN) {
+-                Toast.makeText(this@XimeInputMethodService, "CyIME 不是官方安装包，可能被人改过，请从官方下载页重装", Toast.LENGTH_LONG).show()
+-            }
+-        }
+         // 允许 IME 窗口绘制到摄像头挖孔/刘海区域（横屏时背景覆盖全屏）
+         window.window?.attributes?.layoutInDisplayCutoutMode =
+             android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+@@ -2221,7 +2217,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
+                     // 切回手写、从工具栏或语音悬浮条回到键盘时按上次的全屏/半屏打开；收起状态下不动。
+                     else if (isInputViewShown) restoreHandwritingFullscreen()
+                 }
+-                val isDarkTheme = isDarkTheme()
++                val isDarkTheme = isDarkTheme(androidx.compose.ui.platform.LocalConfiguration.current)
+                 val roundedKeyboardBottom = com.kingzcheung.xime.ui.keyboard.rememberRoundedKeyboardBottom()
+                 // 「柔化顶部边缘」只给固定键盘、顶部直角时（顶部圆角的缺口里没法渐变；设置页两者互锁）。
+                 val softTopEdge = com.kingzcheung.xime.ui.keyboard.rememberGlassSoftTopEdge()
+@@ -2946,6 +2942,7 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
+                                 dockTarget = if (state.isFloatingMode && !state.showKeyboardResize && !handwritingExpanded)
+                                     resolveKeyboardDockTarget(inputWindowWidthDp, state) else null,
+                                 viewModel = keyboardViewModel,
++                                yanmoDictationStage = yanmoDictationStage.intValue,
+                                 state = if (sampleLayout == null) kbState else kbState.copy(currentSchemaId = sampleLayout,
+                                     isAsciiMode = sampleLayout == com.kingzcheung.xime.settings.InputModes.ENGLISH ||
+                                         (settingsExample == KeyboardPanelLaunch.Example.Letters && sampleLayout == kbState.currentSchemaId && kbState.isAsciiMode)),
+@@ -3672,11 +3669,6 @@ class XimeInputMethodService : InputMethodService(), LifecycleOwner, SavedStateR
+                     }
+                 }
+             }
+-            "show_ime_picker" -> {
+-                val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+-                @Suppress("DEPRECATION")
+-                imm.showInputMethodPicker()
+-            }
+             com.kingzcheung.xime.keyboard.CtrlShortcuts.ENTER_COMMAND -> ctrlEnter()
+             com.kingzcheung.xime.keyboard.CtrlShortcuts.BACKSPACE_COMMAND -> ctrlBackspace()
+             com.kingzcheung.xime.keyboard.CtrlShortcuts.SHIFT_ENTER_COMMAND -> shiftEnter()
+diff --git a/app/src/main/java/com/kingzcheung/xime/settings/InputModes.kt b/app/src/main/java/com/kingzcheung/xime/settings/InputModes.kt
+index bb9759d..74e3f95 100644
+--- a/app/src/main/java/com/kingzcheung/xime/settings/InputModes.kt
++++ b/app/src/main/java/com/kingzcheung/xime/settings/InputModes.kt
+@@ -1,6 +1,7 @@
+ package com.kingzcheung.xime.settings
+ 
+ import android.content.Context
++import com.kingzcheung.xime.ui.keyboard.isHandwritingSchema
+ 
+ /** Legacy backend-entry ordering/storage. Product semantics live in [InputProfile]. */
+ object InputModes {
+@@ -46,7 +47,9 @@ object InputModes {
+ 
+     fun available(schemas: List<SchemaInfo>, order: List<String> = emptyList()): List<SchemaInfo> {
+         val available = schemas.map { it.schemaId }.toSet()
+-        val visible = schemas.filter { it.schemaId == ENGLISH || CyimeInputDefaults.visibleSchema(it.schemaId, available) }
++        val visible = schemas.filter {
++            !isHandwritingSchema(it.schemaId) && (it.schemaId == ENGLISH || CyimeInputDefaults.visibleSchema(it.schemaId, available))
++        }
+             .map { it.copy(name = ChineseSchemas.displayName(it.schemaId, it.name)) }
+         val unique = (visible + english).distinctBy { it.schemaId }
+         val byId = unique.associateBy { it.schemaId }
+diff --git a/app/src/main/java/com/kingzcheung/xime/settings/SettingsPreferences.kt b/app/src/main/java/com/kingzcheung/xime/settings/SettingsPreferences.kt
+index c5f0a97..e26fa52 100644
+--- a/app/src/main/java/com/kingzcheung/xime/settings/SettingsPreferences.kt
++++ b/app/src/main/java/com/kingzcheung/xime/settings/SettingsPreferences.kt
+@@ -259,7 +259,7 @@ object SettingsPreferences {
+     
+     private const val KEY_KEYBOARD_HEIGHT_DP = "keyboard_height_dp"
+     private const val KEY_KEYBOARD_HEIGHT_DP_LANDSCAPE = "keyboard_height_dp_landscape"
+-    const val DEFAULT_KEYBOARD_HEIGHT_PERCENT = 35
++    const val DEFAULT_KEYBOARD_HEIGHT_PERCENT = 32
+     /** 横屏默认高度 = 竖屏高度（长边）× 此百分比。约等于旧值（横屏短边 × 49%），但基数稳定、与竖屏语义统一 */
+     const val DEFAULT_KEYBOARD_HEIGHT_PERCENT_LANDSCAPE = 25
+ 
+@@ -926,9 +926,8 @@ object SettingsPreferences {
+         getPrefs(context).edit().putBoolean(KEY_UNLEARN_REJECTED_COMMIT, enabled).apply()
+     }
+     
+-    fun isSttEnabled(context: Context): Boolean {
+-        return getPrefs(context).getBoolean(KEY_STT_ENABLED, true)
+-    }
++    // Yanmo's space-key callbacks handle dictation independently of the upstream speech path.
++    fun isSttEnabled(@Suppress("UNUSED_PARAMETER") context: Context): Boolean = false
+     
+     fun setSttEnabled(context: Context, enabled: Boolean) {
+         getPrefs(context).edit().putBoolean(KEY_STT_ENABLED, enabled).apply()
+diff --git a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/CandidateBar.kt b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/CandidateBar.kt
+index 496270c..885e6e6 100644
+--- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/CandidateBar.kt
++++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/CandidateBar.kt
+@@ -68,7 +68,6 @@ import androidx.compose.material.icons.filled.ContentPaste
+ import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
+ import androidx.compose.material.icons.filled.KeyboardArrowDown
+ import androidx.compose.material.icons.filled.KeyboardDoubleArrowDown
+-import androidx.compose.material.icons.outlined.HighlightOff
+ import androidx.compose.material3.Icon
+ import androidx.compose.material3.MaterialTheme
+ import androidx.compose.material3.LocalTextStyle
+@@ -297,9 +296,6 @@ fun CandidateBar(
+     var showCancelButton by remember(preferences) {
+         mutableStateOf(SettingsPreferences.shouldShowCandidateCancelButton(context))
+     }
+-    var associationCancelCross by remember(preferences) {
+-        mutableStateOf(SettingsPreferences.isAssociationCancelCross(context))
+-    }
+     var pressHighlight by remember(preferences) {
+         mutableStateOf(preferences.getBoolean(SettingsPreferences.KEY_CANDIDATE_PRESS_HIGHLIGHT, false))
+     }
+@@ -309,9 +305,6 @@ fun CandidateBar(
+             if (key == SettingsPreferences.KEY_SHOW_CANDIDATE_CANCEL_BUTTON || key == null) {
+                 showCancelButton = SettingsPreferences.shouldShowCandidateCancelButton(context)
+             }
+-            if (key == SettingsPreferences.KEY_ASSOCIATION_CANCEL_CROSS || key == null) {
+-                associationCancelCross = SettingsPreferences.isAssociationCancelCross(context)
+-            }
+             if (key == SettingsPreferences.KEY_CANDIDATE_PRESS_HIGHLIGHT || key == null) {
+                 pressHighlight = preferences.getBoolean(SettingsPreferences.KEY_CANDIDATE_PRESS_HIGHLIGHT, false)
+             }
+@@ -319,12 +312,10 @@ fun CandidateBar(
+         preferences.registerOnSharedPreferenceChangeListener(listener)
+         onDispose { preferences.unregisterOnSharedPreferenceChangeListener(listener) }
+     }
+-    val showCompositionCancel = showCancelButton && state !is CandidateBarState.Idle && callbacks.onCancelInput != null
+-    // 候选栏两端最多两个按钮（用户 11-03）：左边取消，最右展开候选，位置固定。左边打字和联想都是「<」，
+-    // 设置「联想关闭键用叉号」打开后联想时才是 ⊗（用户 11-03：两种状态图标不一样）；
+-    // 收起键盘只在空闲（没有候选）时有。手写候选也是纯联想态，但那里的取消是撤销当前字，仍用「<」。
+-    val closesAssociation = state is CandidateBarState.AssociationOnly &&
+-        !(page is KeyboardPage.Main && page.type == MainType.HANDWRITING)
++    // 普通候选从左边开始；手写的取消按钮用于撤销当前笔迹。
++    val handwriting = page is KeyboardPage.Main && page.type == MainType.HANDWRITING
++    val showCompositionCancel = showCancelButton && handwriting && state !is CandidateBarState.Idle &&
++        callbacks.onCancelInput != null
+     // 手写候选的注释是读音，单字也放得下：「自动」在手写里照样显示，只有「隐藏」才不显示
+     // （用户 10-31：手机竖屏「自动」把手写读音藏掉了，忘了读音的字正要靠它）。
+     val commentsAllowed = rememberCandidateCommentsAllowed().let {
+@@ -533,19 +524,9 @@ fun CandidateBar(
+                 .cySwapFadeIn(state is CandidateBarState.Idle),
+             verticalAlignment = Alignment.CenterVertically
+         ) {
+-            if (showCompositionCancel && closesAssociation && associationCancelCross) {
+-                KeyboardToolbarButton({ callbacks.onCancelInput?.invoke() }, edgePressedFill,
+-                    modifier = Modifier.testTag("association-cancel-cross"), restingFill = edgeButtonFill,
+-                    slotWidth = edgeSlot, cornerRadius = edgeCorner, continuousPill = true) {
+-                    Icon(Icons.Outlined.HighlightOff, contentDescription = "关闭联想",
+-                        tint = protectedVisuals.textColor, modifier = Modifier.size(22.dp * LocalCandidateSizeFactor.current))
+-                }
+-                // 这 4dp 铺满栏高、自己接点按，免得点在第一个候选左边被这个键放大的触摸范围接走（#274）。
+-                Spacer(Modifier.width(4.dp).fillMaxHeight().candidateGapTaps())
+-            } else if (showCompositionCancel) {
++            if (showCompositionCancel) {
+                 KeyboardBackButton({ callbacks.onCancelInput?.invoke() }, edgePressedFill, protectedVisuals.textColor,
+-                    label = if (closesAssociation) "关闭联想" else "取消输入",
+-                    modifier = if (closesAssociation) Modifier.testTag("association-cancel") else Modifier,
++                    label = "取消输入",
+                     restingFill = edgeButtonFill, slotWidth = edgeSlot, cornerRadius = edgeCorner, continuousPill = true)
+                 // 同上：点在「<」和第一个候选之间算点候选，不算取消输入（#274）。
+                 Spacer(Modifier.width(4.dp).fillMaxHeight().candidateGapTaps())
+@@ -572,9 +553,8 @@ fun CandidateBar(
+                         } else {
+                             KeyboardToolbarButton({ callbacks.onLogoClick?.invoke() }, iconButtonContainer,
+                                 modifier = Modifier.testTag("toolbar-leading"), slotWidth = toolbarSlot) {
+-                                // 图标照旧用 CyIME 标志，只把读屏说明改成它的作用「展开菜单」。
+-                                Icon(painterResource(R.drawable.cyime_toolbar_mark), contentDescription = "展开菜单",
+-                                    tint = iconButtonTint, modifier = Modifier.size(22.dp * LocalCandidateSizeFactor.current))
++                                Icon(painterResource(R.drawable.yanmo_mark), contentDescription = "展开菜单",
++                                    tint = Color.Unspecified, modifier = Modifier.size(22.dp * LocalCandidateSizeFactor.current))
+                             }
+                         }
+                         Spacer(modifier = Modifier.width(4.dp))
+diff --git a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/CandidatePage.kt b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/CandidatePage.kt
+index 6f5aabd..546fd26 100644
+--- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/CandidatePage.kt
++++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/CandidatePage.kt
+@@ -183,9 +183,10 @@ fun CandidatePage(
+     val spacing = com.kingzcheung.xime.settings.KeysConfigHelper.getKeyboardKeyConfig()
+         .spacingFor(if (qwerty != null) "qwerty" else "t9")
+     Column(modifier.fillMaxSize().keyboardPanelBackground(state.backgroundColor)) {
+-        KeyboardKeySpacingScope(Modifier.weight(1f).fillMaxWidth(), columns = qwerty?.columns ?: (5f * 3f / 3.4f),
++        KeyboardKeySpacingScope(Modifier.weight(1f).fillMaxWidth(), columns = qwerty?.columns ?: KeyVisualPolicy.T9Columns,
++            horizontalInset = if (qwerty != null) 8.dp else KeyVisualPolicy.WideKeysGutter.dp,
+             widthFraction = qwerty?.widthFraction ?: 1f,
+-            policy = if (qwerty != null) KeyVisualPolicy.Qwerty else KeyVisualPolicy.T9,
++            policy = if (qwerty != null) KeyVisualPolicy.Qwerty else KeyVisualPolicy.T9Pinyin,
+             allowShrink = state.floating, applyGutter = true,
+             growthSpacing = spacing,
+             // 和身后的键盘同一网格：分体时键盘不加宽，这里也不加宽。
+@@ -260,12 +261,12 @@ private fun CandidatePageContent(
+             val matchKeyboard = t9 || qwerty != null
+             val compactRail = matchKeyboard || isLandscape || maxHeight < 226.dp
+             val leftWidth = qwerty?.let { maxWidth * it.modeFraction }
+-                ?: if (t9) maxWidth * (0.8f / 5f) else leftRailWidth
++                ?: if (t9) maxWidth * KeyVisualPolicy.T9RailFraction else leftRailWidth
+             val deleteWidth = qwerty?.deleteWidth(maxWidth.value)?.dp
+             val enterWidth = qwerty?.let { maxWidth * it.enterFraction }
+             val rightWidth = qwerty?.let {
+                 maxOf(maxWidth * it.enterFraction, it.deleteWidth(maxWidth.value).dp + it.deleteEndInsetDp.dp)
+-            } ?: if (t9) maxWidth * (0.8f / 5f) else rightRailWidth
++            } ?: if (t9) maxWidth * KeyVisualPolicy.T9RailFraction else rightRailWidth
+             Row(
+                 modifier = Modifier
+                     .fillMaxSize()
+diff --git a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyButton.kt b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyButton.kt
+index 049d23e..99c52ab 100644
+--- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyButton.kt
++++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyButton.kt
+@@ -157,6 +157,7 @@ fun KeyButton(
+     shadowShapeRadius: Dp = 8.dp,
+     /** 手势由外层接管时（符号键按住当 Ctrl），按下的样子由外层给。 */
+     externalPressed: Boolean = false,
++    labelContent: (@Composable (Float) -> Unit)? = null,
+ ) {
+     var ownPressed by remember { mutableStateOf(false) }
+     val isPressed = ownPressed || externalPressed
+@@ -246,7 +247,8 @@ fun KeyButton(
+         Box(Modifier.fillMaxSize().graphicsLayer {
+             alpha = 1f - (flickPreview?.progress ?: 0f)
+         }, contentAlignment = Alignment.Center) {
+-            Text(
++            if (labelContent != null) labelContent(labelSize)
++            else Text(
+                 text = punctuationKeyLabel(text),
+                 modifier = Modifier.fillMaxWidth().offset(y = if (!swipeText.isNullOrEmpty() && keyHeight >= 40.dp) 2.dp else 0.dp),
+                 color = textColor,
+diff --git a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyVisualPolicy.kt b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyVisualPolicy.kt
+index e2828e3..672d2e0 100644
+--- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyVisualPolicy.kt
++++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyVisualPolicy.kt
+@@ -75,6 +75,13 @@ internal data class KeyVisualPolicy(
+         const val WideKeysGapFactor = 2f / 3f
+         /** [referenceCellWidth] 所用的手机宽度（dp）。 */
+         const val PhoneReferenceWidth = 360f
++
++        const val T9RailFraction = 0.14f
++        const val T9LetterFraction = 1f - 2f * T9RailFraction
++        const val T9Columns = 3f / T9LetterFraction
++        val T9Pinyin = T9.widened().copy(
++            referenceCellWidth = (PhoneReferenceWidth - 2f * WideKeysGutter) / T9Columns,
++        )
+     }
+ 
+     /**
+diff --git a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt
+index 97f57b7..7142ffa 100644
+--- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt
++++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardLayout.kt
+@@ -1064,10 +1064,12 @@ fun KeyboardLayout(
+                     // 底排保留共用权重及逗号/地球等宽；宽屏实体字母错位不移动底排。
+                     // 注音的底排同 26 键的比例（首行 11 键不是旧式布局）。
+                     val bottom = letterKeyboardBottomRow(keyRows, fourteenKey || zhuyin)
++                    val yanmoThumbRow = !splitKeyboard && !fourteenKey && !zhuyin &&
++                        (isAsciiMode || uiState.inputProfile.language == com.kingzcheung.xime.settings.InputLanguage.CHINESE)
+                     // 空格左侧逗号、右侧句号；只开逗号时沿用原配置的逗号键。
+                     val bottomPrefs = LocalKeyboardInputPreferences.current
+-                    val commaOnLeft = bottomPrefs.qwertyCommaKey
+-                    val periodOnRight = bottomPrefs.qwertyPeriodKey
++                    val commaOnLeft = !yanmoThumbRow && bottomPrefs.qwertyCommaKey
++                    val periodOnRight = !yanmoThumbRow && bottomPrefs.qwertyPeriodKey
+                     val punctuationFull = LocalKeyboardPunctuation.current?.full ?: !isAsciiMode
+                     val (leftPunctuation, rightPunctuation) = spacePunctuationKeys(commaOnLeft, periodOnRight,
+                         punctuationFull, english = isAsciiMode || uiState.inputProfile.language.typesLettersDirectly,
+@@ -1126,7 +1128,7 @@ fun KeyboardLayout(
+                                 modifier = Modifier.weight(bottom.punctuation)
+                             )
+                         } else {
+-                            for (slot in 1..2) {
++                            for (slot in 1..(if (yanmoThumbRow) 1 else 2)) {
+                                 KeyboardModeKey(
+                                     slot = slot, onKeyPress = onKeyPress,
+                                     backgroundColor = specialKeyBackgroundColor,
+@@ -1142,7 +1144,16 @@ fun KeyboardLayout(
+                                 )
+                             }
+ 
+-                            if (leftPunctuation != null) PunctuationKey(leftPunctuation, "qwerty-punctuation-key", leftSplit)
++                            if (yanmoThumbRow) {
++                                dev.yanmo.ime.YanmoLanguageKey(
++                                    english = isAsciiMode, switchLanguage = { onKeyPress("ime_switch") },
++                                    backgroundColor = specialKeyBackgroundColor, textColor = specialKeyTextColor,
++                                    modifier = Modifier.weight(bottom.language),
++                                    onPress = { onKeyPressDown?.invoke("ime_switch") },
++                                    onRelease = { onKeyRelease?.invoke("ime_switch") },
++                                    shadowEnabled = shadowEnabled, shadowElevation = shadowElevation, shadowShapeRadius = shadowShapeRadius,
++                                )
++                            } else if (leftPunctuation != null) PunctuationKey(leftPunctuation, "qwerty-punctuation-key", leftSplit)
+                             else if (commaOnLeft) {
+                             // 逗号 — 从配置读取 "'"
+                             val k2KeyGesture = KeysConfigHelper.getKeyGesture("'", isAsciiMode)
+@@ -1300,125 +1311,134 @@ fun KeyboardLayout(
+                                 modifier = Modifier.weight(bottom.enter)
+                             )
+                         } else {
+-                            // earth — 从配置读取
+-                            val k4KeyGesture = KeysConfigHelper.getKeyGesture("earth", isAsciiMode)
+-                            val k4TapAction = k4KeyGesture?.tap?.action
+-                            // 无 tap 手势配置时回退地球键默认语义：地球图标 + 中英切换。
+-                            // 否则键面空白（label=""/icon=null）且点击发出空键值——空键值在
+-                            // 中文模式会触发 ImeKeyRouter lowercase()[0] 越界崩溃（2026-09-14 实证）。
+-                            val isEarthDefaultTap = k4KeyGesture?.tap == null
+-                            val k4TapValue = k4KeyGesture?.tap?.value?.takeIf { it.isNotEmpty() } ?: "ime_switch"
+-                            val k4TapLabel = k4KeyGesture?.tap?.label?.takeIf { it.isNotEmpty() } ?: "中"
+-                            val k4Icon: Painter? = k4KeyGesture?.tap?.icon?.takeIf { it.isNotEmpty() }?.let { iconName ->
+-                                val iv = when (iconName) {
+-                                    "language", "globe" -> Icons.Default.Language
+-                                    else -> null
+-                                }
+-                                iv?.let { rememberVectorPainter(it) }
+-                            } ?: if (isEarthDefaultTap) rememberVectorPainter(Icons.Default.Language) else null
+-                            val k4SwipeUpRaw = k4KeyGesture?.swipeUp
+-                            val k4SwipeUpLabel = if (isAsciiMode)
+-                                (k4SwipeUpRaw?.value?.takeIf { it.isNotEmpty() } ?: "")
+-                                else (k4SwipeUpRaw?.label?.takeIf { it.isNotEmpty() } ?: k4SwipeUpRaw?.value?.takeIf { it.isNotEmpty() } ?: "")
+-                            val k4SwipeUpValue = k4SwipeUpRaw?.value?.takeIf { it.isNotEmpty() }
+-                                ?: k4SwipeUpRaw?.label?.takeIf { it.isNotEmpty() }
+-                            val k4SwipeUpAction = k4SwipeUpRaw?.action
+-                            val k4SwipeDownRaw = k4KeyGesture?.swipeDown
+-                            val k4SwipeDownLabel = k4SwipeDownRaw?.label?.takeIf { it.isNotEmpty() }
+-                            val k4SwipeDownAction = k4SwipeDownRaw?.action
+-                            val k4SwipeDownValue = k4SwipeDownRaw?.value
+-                            val k4SwipeDownDisplay = k4SwipeDownRaw?.display ?: DisplayMode.BOTH
+-                            val k4SwipeDownBubbleText = if (k4SwipeDownDisplay != DisplayMode.KEY) k4SwipeDownLabel else null
+-                            val k4LongPressConfig = k4KeyGesture?.longPress
+-                            val k4LongPressDisplay = k4LongPressConfig?.display ?: "key"
+-                            val k4LongPressLabels = if (k4LongPressDisplay == "bubble") {
+-                                k4LongPressConfig?.values?.map { it.label }?.filter { it.isNotEmpty() }
+-                                    ?.ifEmpty { null }
+-                            } else null
+-                            val k4LongPressGestureMap = if (k4LongPressDisplay == "bubble") {
+-                                k4LongPressConfig?.values?.associateBy { it.label }
+-                            } else null
+-                            val k4OnClick: () -> Unit = remember(k4TapAction, k4TapValue, onKeyPress, onGestureAction) {
+-                                {
+-                                    if (k4TapAction != null && k4TapAction != GestureAction.COMMIT) {
+-                                        onGestureAction?.invoke(k4TapAction, k4TapValue)
+-                                    } else {
+-                                        onKeyPress(k4TapValue)
++                            if (yanmoThumbRow) {
++                                KeyboardModeKey(
++                                    slot = 2, onKeyPress = onKeyPress,
++                                    backgroundColor = specialKeyBackgroundColor, textColor = specialKeyTextColor,
++                                    modifier = Modifier.weight(bottom.mode), onKeyPressDown = onKeyPressDown,
++                                    shadowEnabled = shadowEnabled, shadowElevation = shadowElevation, shadowShapeRadius = shadowShapeRadius,
++                                )
++                            } else {
++                                // earth — 从配置读取
++                                val k4KeyGesture = KeysConfigHelper.getKeyGesture("earth", isAsciiMode)
++                                val k4TapAction = k4KeyGesture?.tap?.action
++                                // 无 tap 手势配置时回退地球键默认语义：地球图标 + 中英切换。
++                                // 否则键面空白（label=""/icon=null）且点击发出空键值——空键值在
++                                // 中文模式会触发 ImeKeyRouter lowercase()[0] 越界崩溃（2026-09-14 实证）。
++                                val isEarthDefaultTap = k4KeyGesture?.tap == null
++                                val k4TapValue = k4KeyGesture?.tap?.value?.takeIf { it.isNotEmpty() } ?: "ime_switch"
++                                val k4TapLabel = k4KeyGesture?.tap?.label?.takeIf { it.isNotEmpty() } ?: "中"
++                                val k4Icon: Painter? = k4KeyGesture?.tap?.icon?.takeIf { it.isNotEmpty() }?.let { iconName ->
++                                    val iv = when (iconName) {
++                                        "language", "globe" -> Icons.Default.Language
++                                        else -> null
++                                    }
++                                    iv?.let { rememberVectorPainter(it) }
++                                } ?: if (isEarthDefaultTap) rememberVectorPainter(Icons.Default.Language) else null
++                                val k4SwipeUpRaw = k4KeyGesture?.swipeUp
++                                val k4SwipeUpLabel = if (isAsciiMode)
++                                    (k4SwipeUpRaw?.value?.takeIf { it.isNotEmpty() } ?: "")
++                                    else (k4SwipeUpRaw?.label?.takeIf { it.isNotEmpty() } ?: k4SwipeUpRaw?.value?.takeIf { it.isNotEmpty() } ?: "")
++                                val k4SwipeUpValue = k4SwipeUpRaw?.value?.takeIf { it.isNotEmpty() }
++                                    ?: k4SwipeUpRaw?.label?.takeIf { it.isNotEmpty() }
++                                val k4SwipeUpAction = k4SwipeUpRaw?.action
++                                val k4SwipeDownRaw = k4KeyGesture?.swipeDown
++                                val k4SwipeDownLabel = k4SwipeDownRaw?.label?.takeIf { it.isNotEmpty() }
++                                val k4SwipeDownAction = k4SwipeDownRaw?.action
++                                val k4SwipeDownValue = k4SwipeDownRaw?.value
++                                val k4SwipeDownDisplay = k4SwipeDownRaw?.display ?: DisplayMode.BOTH
++                                val k4SwipeDownBubbleText = if (k4SwipeDownDisplay != DisplayMode.KEY) k4SwipeDownLabel else null
++                                val k4LongPressConfig = k4KeyGesture?.longPress
++                                val k4LongPressDisplay = k4LongPressConfig?.display ?: "key"
++                                val k4LongPressLabels = if (k4LongPressDisplay == "bubble") {
++                                    k4LongPressConfig?.values?.map { it.label }?.filter { it.isNotEmpty() }
++                                        ?.ifEmpty { null }
++                                } else null
++                                val k4LongPressGestureMap = if (k4LongPressDisplay == "bubble") {
++                                    k4LongPressConfig?.values?.associateBy { it.label }
++                                } else null
++                                val k4OnClick: () -> Unit = remember(k4TapAction, k4TapValue, onKeyPress, onGestureAction) {
++                                    {
++                                        if (k4TapAction != null && k4TapAction != GestureAction.COMMIT) {
++                                            onGestureAction?.invoke(k4TapAction, k4TapValue)
++                                        } else {
++                                            onKeyPress(k4TapValue)
++                                        }
+                                     }
+                                 }
+-                            }
+-                            val k4OnSwipe: ((String) -> Unit)? = if (k4SwipeUpValue != null && k4SwipeUpAction != GestureAction.NONE) {
+-                                remember(k4SwipeUpValue, onKeyPress) { { onKeyPress(k4SwipeUpValue) } }
+-                            } else null
+-                            val k4OnSwipeDown: ((String) -> Unit)? = if (k4SwipeDownAction != null && k4SwipeDownLabel != null) {
+-                                remember(k4SwipeDownAction, k4SwipeDownValue, k4SwipeDownLabel, onKeyPress, onGestureAction, onCommitText) {
+-                                    val label = k4SwipeDownLabel
+-                                    { _: String ->
+-                                        if (k4SwipeDownAction == GestureAction.COMMIT) {
+-                                            (onCommitText ?: onKeyPress)(k4SwipeDownValue?.ifEmpty { label } ?: label)
++                                val k4OnSwipe: ((String) -> Unit)? = if (k4SwipeUpValue != null && k4SwipeUpAction != GestureAction.NONE) {
++                                    remember(k4SwipeUpValue, onKeyPress) { { onKeyPress(k4SwipeUpValue) } }
++                                } else null
++                                val k4OnSwipeDown: ((String) -> Unit)? = if (k4SwipeDownAction != null && k4SwipeDownLabel != null) {
++                                    remember(k4SwipeDownAction, k4SwipeDownValue, k4SwipeDownLabel, onKeyPress, onGestureAction, onCommitText) {
++                                        val label = k4SwipeDownLabel
++                                        { _: String ->
++                                            if (k4SwipeDownAction == GestureAction.COMMIT) {
++                                                (onCommitText ?: onKeyPress)(k4SwipeDownValue?.ifEmpty { label } ?: label)
++                                            } else {
++                                                onGestureAction.invoke(k4SwipeDownAction, k4SwipeDownValue?.ifEmpty { label } ?: label)
++                                            }
++                                            Unit
++                                        }
++                                    }
++                                } else null
++                                val k4OnLongPressSelect: ((String) -> Unit)? = remember(k4LongPressGestureMap, onGestureAction, onCommitText, onKeyPress) {
++                                    { selectedLabel: String ->
++                                        val gesture = k4LongPressGestureMap?.get(selectedLabel)
++                                        if (gesture != null && gesture.action != GestureAction.COMMIT) {
++                                            onGestureAction.invoke(gesture.action!!, gesture.value.ifEmpty { selectedLabel })
+                                         } else {
+-                                            onGestureAction.invoke(k4SwipeDownAction, k4SwipeDownValue?.ifEmpty { label } ?: label)
++                                            commitLongPressChoice(selectedLabel, onCommitText, onKeyPress)
+                                         }
+                                         Unit
+                                     }
+                                 }
+-                            } else null
+-                            val k4OnLongPressSelect: ((String) -> Unit)? = remember(k4LongPressGestureMap, onGestureAction, onCommitText, onKeyPress) {
+-                                { selectedLabel: String ->
+-                                    val gesture = k4LongPressGestureMap?.get(selectedLabel)
+-                                    if (gesture != null && gesture.action != GestureAction.COMMIT) {
+-                                        onGestureAction.invoke(gesture.action!!, gesture.value.ifEmpty { selectedLabel })
+-                                    } else {
+-                                        commitLongPressChoice(selectedLabel, onCommitText, onKeyPress)
+-                                    }
+-                                    Unit
++                                if ((k4TapAction == GestureAction.TOGGLE_ASCII && k4Icon != null || isEarthDefaultTap) && k4LongPressLabels == null) {
++                                    LanguageKeyButton(
++                                        icon = k4Icon ?: rememberVectorPainter(Icons.Default.Language),
++                                        onClick = k4OnClick,
++                                        backgroundColor = specialKeyBackgroundColor,
++                                        iconColor = specialKeyTextColor,
++                                        modifier = Modifier.weight(bottom.language),
++                                        onPress = { onKeyPressDown?.invoke(k4TapValue) },
++                                        onRelease = { onKeyRelease?.invoke(k4TapValue) },
++                                        swipeText = k4SwipeUpLabel.takeIf { it.isNotEmpty() },
++                                        swipeDownText = k4SwipeDownBubbleText,
++                                        swipeDownKeyLabel = if (k4SwipeDownDisplay != DisplayMode.BUBBLE) k4SwipeDownLabel else null,
++                                        onSwipe = k4OnSwipe,
++                                        onSwipeDown = k4OnSwipeDown,
++                                        onSwipeStateChange = { state, bounds -> processSwipeState(state, bounds) },
++                                        shadowEnabled = shadowEnabled,
++                                        shadowElevation = shadowElevation,
++                                        shadowShapeRadius = shadowShapeRadius,
++                                    )
++                                } else {
++                                    LanguageKeyButton(
++                                        layoutMode = KeysConfigHelper.getButtonLayout(isAsciiMode),
++                                        text = k4TapLabel,
++                                        onClick = k4OnClick,
++                                        backgroundColor = specialKeyBackgroundColor,
++                                        textColor = specialKeyTextColor,
++                                        modifier = Modifier.weight(bottom.language),
++                                        icon = k4Icon,
++                                        swipeText = k4SwipeUpLabel.takeIf { it.isNotEmpty() },
++                                        swipeDownText = k4SwipeDownBubbleText,
++                                        swipeDownKeyLabel = if ((k4SwipeDownDisplay == DisplayMode.KEY || k4SwipeDownDisplay == DisplayMode.BOTH)) k4SwipeDownLabel else null,
++                                        onSwipe = k4OnSwipe,
++                                        onSwipeDown = k4OnSwipeDown,
++                                        onSwipeStateChange = { state, bounds ->
++                                            processSwipeState(state, bounds)
++                                        },
++                                        onPress = { onKeyPressDown?.invoke(k4TapValue) },
++                                        onRelease = { onKeyRelease?.invoke(k4TapValue) },
++                                        onLongPressSelect = k4OnLongPressSelect,
++                                        longPressItems = k4LongPressLabels,
++                                        shadowEnabled = shadowEnabled,
++                                        shadowElevation = shadowElevation,
++                                        shadowShapeRadius = shadowShapeRadius,
++                                    )
+                                 }
+                             }
+-                            if ((k4TapAction == GestureAction.TOGGLE_ASCII && k4Icon != null || isEarthDefaultTap) && k4LongPressLabels == null) {
+-                                LanguageKeyButton(
+-                                    icon = k4Icon ?: rememberVectorPainter(Icons.Default.Language),
+-                                    onClick = k4OnClick,
+-                                    backgroundColor = specialKeyBackgroundColor,
+-                                    iconColor = specialKeyTextColor,
+-                                    modifier = Modifier.weight(bottom.language),
+-                                    onPress = { onKeyPressDown?.invoke(k4TapValue) },
+-                                    onRelease = { onKeyRelease?.invoke(k4TapValue) },
+-                                    swipeText = k4SwipeUpLabel.takeIf { it.isNotEmpty() },
+-                                    swipeDownText = k4SwipeDownBubbleText,
+-                                    swipeDownKeyLabel = if (k4SwipeDownDisplay != DisplayMode.BUBBLE) k4SwipeDownLabel else null,
+-                                    onSwipe = k4OnSwipe,
+-                                    onSwipeDown = k4OnSwipeDown,
+-                                    onSwipeStateChange = { state, bounds -> processSwipeState(state, bounds) },
+-                                    shadowEnabled = shadowEnabled,
+-                                    shadowElevation = shadowElevation,
+-                                    shadowShapeRadius = shadowShapeRadius,
+-                                )
+-                            } else {
+-                                LanguageKeyButton(
+-                                    layoutMode = KeysConfigHelper.getButtonLayout(isAsciiMode),
+-                                    text = k4TapLabel,
+-                                    onClick = k4OnClick,
+-                                    backgroundColor = specialKeyBackgroundColor,
+-                                    textColor = specialKeyTextColor,
+-                                    modifier = Modifier.weight(bottom.language),
+-                                    icon = k4Icon,
+-                                    swipeText = k4SwipeUpLabel.takeIf { it.isNotEmpty() },
+-                                    swipeDownText = k4SwipeDownBubbleText,
+-                                    swipeDownKeyLabel = if ((k4SwipeDownDisplay == DisplayMode.KEY || k4SwipeDownDisplay == DisplayMode.BOTH)) k4SwipeDownLabel else null,
+-                                    onSwipe = k4OnSwipe,
+-                                    onSwipeDown = k4OnSwipeDown,
+-                                    onSwipeStateChange = { state, bounds ->
+-                                        processSwipeState(state, bounds)
+-                                    },
+-                                    onPress = { onKeyPressDown?.invoke(k4TapValue) },
+-                                    onRelease = { onKeyRelease?.invoke(k4TapValue) },
+-                                    onLongPressSelect = k4OnLongPressSelect,
+-                                    longPressItems = k4LongPressLabels,
+-                                    shadowEnabled = shadowEnabled,
+-                                    shadowElevation = shadowElevation,
+-                                    shadowShapeRadius = shadowShapeRadius,
+-                                )
+-                            }
+ 
+                             // 回车 — 硬编码。按住 !@# 时另一根手指点回车、或从 !@# 拖到回车上松手：Ctrl+回车，发送（用户 11-03）。
+                             // 按住 Shift 点回车、或从 Shift 拖到回车上松手：Shift+回车，换行（用户 11-04）。
+diff --git a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardModeKey.kt b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardModeKey.kt
+index 91212c3..6909478 100644
+--- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardModeKey.kt
++++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardModeKey.kt
+@@ -34,9 +34,10 @@ internal fun KeyboardModeKey(
+     onCtrlShortcut: ((Char) -> Unit)? = null,
+ ) {
+     val target = modeSlotTarget(page, slot, LocalTextModeLabel.current)
++    val label = if (target.action == "symbol") "符" else target.label
+     androidx.compose.runtime.CompositionLocalProvider(LocalKeyboardPunctuation provides null) {
+     if (ctrlTargets != null && onCtrlShortcut != null && target.action == "symbol") CtrlSymbolKeyButton(
+-        text = target.label,
++        text = label,
+         targets = ctrlTargets,
+         holdMillis = LocalKeyboardInputPreferences.current.symbolKeyHoldMs,
+         onOpenSymbols = { onKeyPress(target.action) },
+@@ -49,7 +50,7 @@ internal fun KeyboardModeKey(
+         shadowElevation = shadowElevation,
+         shadowShapeRadius = shadowShapeRadius,
+     ) else KeyButton(
+-        text = target.label,
++        text = label,
+         fontSize = 16.sp,
+         onClick = { onKeyPress(target.action) },
+         onPress = { onKeyPressDown?.invoke("mode_change") },
+diff --git a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardView.kt b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardView.kt
+index c8e3659..fd62723 100644
+--- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardView.kt
++++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/KeyboardView.kt
+@@ -169,6 +169,7 @@ fun KeyboardView(
+     glideEnglishPreview: State<GlideEnglishPreview?> = remember { mutableStateOf(null) },
+     voiceAmplitudeState: State<Float> = remember { mutableFloatStateOf(0f) },
+     voiceSpectrumState: State<FloatArray> = remember { mutableStateOf(FloatArray(16)) },
++    yanmoDictationStage: Int = 0,
+     /**
+      * 非按键交互（符号/表情面板、菜单栏、候选栏按钮等）的振动钩子。
+      * 按键本身的反馈走 onKeyPressDown 回调（服务层 FeedbackManager），
+@@ -442,6 +443,7 @@ fun KeyboardView(
+             inputTextLocaleTag(state.inputProfile.language, state.inputProfile.scheme, inputPreferences.traditionalOutput)
+                 ?.let { base.copy(localeList = remember(it) { androidx.compose.ui.text.intl.LocaleList(it) }) } ?: base
+         },
++        dev.yanmo.ime.LocalYanmoDictationStage provides yanmoDictationStage,
+         LocalTextModeLabel provides when {
+             page.textMainType() == MainType.HANDWRITING -> state.inputProfile.language.displayName
+             textLayout is KeyboardLayoutState.English -> "ABC"
+@@ -967,130 +969,38 @@ fun KeyboardView(
+         val quickToggles = rememberQuickToggleStates()
+         // 开无痕前先确认：菜单里一碰就开，之后复制的内容不再进剪贴板，用户不知道为什么。关掉不用确认。
+         var incognitoConfirm by remember(state.inputSessionId) { mutableStateOf(false) }
+-        // 中文全拼、双拼 26 键：菜单里的「滑行输入」开关的是「中文滑行输入」（其他中文键盘不滑行，不出现）。
+-        val chineseGlideMenu = !state.isAsciiMode &&
+-            com.kingzcheung.xime.glide.chineseGlideSupported(state.inputProfile, state.currentSchemaId)
+-        // 九键：菜单里的「滑行输入」开关「九键滑行」（用户 11-09：开了以后键盘上找不到地方关）。
+-        val nineGlideMenu = state.inputProfile.layout.kind == com.kingzcheung.xime.settings.LayoutKind.T9
+         val traditionalSwitchApplies = !state.isAsciiMode && !state.isHandwritingMode &&
+             state.inputProfile.language == com.kingzcheung.xime.settings.InputLanguage.CHINESE &&
+             state.inputProfile.scheme in setOf(com.kingzcheung.xime.settings.InputScheme.PINYIN,
+                 com.kingzcheung.xime.settings.InputScheme.DOUBLE_PINYIN, com.kingzcheung.xime.settings.InputScheme.CANGJIE,
+                 com.kingzcheung.xime.settings.InputScheme.ZHUYIN)
+         fun quickAction(id: String): ToolbarAction? {
+-            val item = resolveToolbarButtonItem(id, state.toolbarPluginButtons) ?: return null
++            val item = resolveToolbarButtonItem(id, state.toolbarPluginButtons) as? ToolbarButtonItem.Builtin ?: return null
+             val widthSwitch = if (state.isAsciiMode) null else state.schemaSwitches.firstOrNull { it.name == "full_shape" }
+-            val onClick: () -> Unit = when (item) {
+-                is ToolbarButtonItem.Builtin -> when (item.button) {
+-                    ToolbarButton.EMOJI -> ({ viewModel.toggleOverlay(OverlayRoute.Emoji) })
+-                    ToolbarButton.CLIPBOARD -> ({ viewModel.toggleOverlay(OverlayRoute.Clipboard(0)) })
+-                    ToolbarButton.OCR -> ({
+-                        com.kingzcheung.xime.ocr.OcrGallerySelection.uri.value = null
+-                        viewModel.toggleOverlay(OverlayRoute.Ocr)
+-                    })
+-                    ToolbarButton.SCHEMA -> ({ viewModel.toggleOverlay(OverlayRoute.SchemaList) })
+-                    ToolbarButton.SYMBOL -> ({ viewModel.toggleOverlay(OverlayRoute.Symbol) })
+-                    ToolbarButton.FLOAT -> ({ viewModel.closeOverlay(); callbacks.onKeyboardResize?.invoke() })
+-                    ToolbarButton.HANDWRITING_LOOKUP -> ({
+-                        if (!state.isHandwritingMode && !viewModel.hasTemporaryHandwriting) {
+-                            if (keyboardState is KeyboardLayoutState.T9Pinyin) callbacks.onT9SwitchAway?.invoke()
+-                            else callbacks.onCommitCandidateBeforeModeChange?.invoke()
+-                        }
+-                        callbacks.onHandwritingToggle?.invoke()
+-                    })
+-                    ToolbarButton.EDIT -> ({ viewModel.toggleOverlay(OverlayRoute.Edit) })
+-                    ToolbarButton.SETTINGS -> ({ callbacks.onSettings?.invoke(); viewModel.closeOverlay() })
+-                    // 字幕是独立全屏页面，键盘随之收起，麦克风交给字幕页。没装「字幕」插件就不出现（排列页也不列）。
+-                    ToolbarButton.CAPTION -> if (com.kingzcheung.xime.ui.caption.CaptionPlugin.isActive(quickContext))
+-                        ({ viewModel.closeOverlay(); com.kingzcheung.xime.ui.caption.CaptionActivity.open(quickContext) }) else return null
+-                    ToolbarButton.ARRANGE -> ({ viewModel.showOverlay(OverlayRoute.ToolbarCustomize) })
+-                    // 布局手势开关只在适用的布局出现；排列页用同一规则（[quickAction] 为 null 即不列出）。
+-                    ToolbarButton.GLIDE, ToolbarButton.T9_FLICK, ToolbarButton.FOURTEEN_SWIPE,
+-                    ToolbarButton.KANA_HINTS, ToolbarButton.FLICK_DISC ->
+-                        if (item.button.appliesTo(state.inputProfile.layout.kind) &&
+-                            // 滑行开关：英文 26 键开关英文滑行，中文全拼、双拼 26 键开关中文滑行，九键开关九键滑行；
+-                            // 被「键盘滑动」占用时不出现。
+-                            (item.button != ToolbarButton.GLIDE ||
+-                                ((nineGlideMenu || state.isAsciiMode || chineseGlideMenu) && inputPreferences.cursorGesture != CursorGestureMode.KEYBOARD)))
+-                            ({ item.button.flipGesture(quickContext, inputPreferences, chineseGlideMenu, nineGlideMenu) }) else return null
+-                    ToolbarButton.SOUND -> ({
+-                        val on = !(quickToggles.sound || quickToggles.vibration)
+-                        SettingsPreferences.setSoundEnabled(quickContext, on)
+-                        SettingsPreferences.setVibrationEnabled(quickContext, on)
+-                    })
+-                    ToolbarButton.FLOATING -> ({
+-                        viewModel.closeOverlay()
+-                        callbacks.onFloatingModeChange?.invoke(!state.isFloatingMode)
+-                    })
+-                    ToolbarButton.GLASS -> ({
+-                        val glass = com.kingzcheung.xime.settings.FrostedGlassPreferences.read(quickContext)
+-                        com.kingzcheung.xime.settings.FrostedGlassPreferences.save(quickContext, glass.copy(enabled = !glass.enabled))
+-                    })
+-                    ToolbarButton.INCOGNITO -> ({
+-                        if (quickToggles.incognito) SettingsPreferences.setIncognito(quickContext, false)
+-                        else incognitoConfirm = true
+-                    })
+-                    // 英文状态标点固定半角，入口不出现，避免“点了看不到变化，实际却改了状态”。
+-                    ToolbarButton.FULL_SHAPE -> widthSwitch?.let { sw -> { callbacks.onToggleSchemaSwitch?.invoke(sw) } } ?: return null
+-                    // 拼音、双拼、仓颉、注音共用一个简繁开关。
+-                    ToolbarButton.TRADITIONAL -> if (traditionalSwitchApplies) ({
+-                        inputPreferences.copy(traditionalOutput = !inputPreferences.traditionalOutput).save(quickContext)
+-                    }) else return null
+-                    // 「语音转文本」关着时麦克风入口不出现（工具栏和菜单都是），不再显示一个点了只弹提示的图标。
+-                    ToolbarButton.VOICE -> if (!state.isSttEnabled) return null else ({
+-                        if (PermissionHelper.hasRecordAudioPermission(quickContext)) {
+-                            if (!state.isVoiceMode) {
+-                                if (keyboardState is KeyboardLayoutState.T9Pinyin) callbacks.onT9SwitchAway?.invoke()
+-                                else callbacks.onCommitCandidateBeforeModeChange?.invoke()
+-                            }
+-                            callbacks.onVoiceStickyToggle?.invoke()
+-                        } else {
+-                            android.widget.Toast.makeText(quickContext, "需要麦克风权限才能使用语音输入", android.widget.Toast.LENGTH_SHORT).show()
+-                            PermissionHelper.requestRecordAudioPermission(quickContext)
+-                        }
+-                    })
+-                }
+-                is ToolbarButtonItem.Plugin -> ({
+-                    if (item.action == "open_panel") {
+-                        // 这个插件的面板开着时再点一次是关上（翻译栏原来点了又重新打开一遍，只能点叉关）。
+-                        if (toolPanelOpenFor(state.toolPanelVisible, state.toolPanelPluginId, item.pluginId))
+-                            callbacks.onToolPanelClose?.invoke()
+-                        else callbacks.onOpenToolPanel?.invoke(item.pluginId)
+-                    }
++            val onClick: () -> Unit = when (item.button) {
++                ToolbarButton.EMOJI -> ({ viewModel.toggleOverlay(OverlayRoute.Emoji) })
++                ToolbarButton.CLIPBOARD -> ({ viewModel.toggleOverlay(OverlayRoute.Clipboard(0)) })
++                ToolbarButton.SCHEMA -> ({ viewModel.toggleOverlay(OverlayRoute.SchemaList) })
++                ToolbarButton.SYMBOL -> ({ viewModel.toggleOverlay(OverlayRoute.Symbol) })
++                ToolbarButton.EDIT -> ({ viewModel.toggleOverlay(OverlayRoute.Edit) })
++                ToolbarButton.SETTINGS -> ({ callbacks.onSettings?.invoke(); viewModel.closeOverlay() })
++                ToolbarButton.INCOGNITO -> ({
++                    if (quickToggles.incognito) SettingsPreferences.setIncognito(quickContext, false)
++                    else incognitoConfirm = true
+                 })
++                ToolbarButton.FULL_SHAPE -> widthSwitch?.let { sw -> { callbacks.onToggleSchemaSwitch?.invoke(sw) } } ?: return null
++                ToolbarButton.TRADITIONAL -> if (traditionalSwitchApplies) ({
++                    inputPreferences.copy(traditionalOutput = !inputPreferences.traditionalOutput).save(quickContext)
++                }) else return null
++                else -> return null
+             }
+-            val settingsEntry = com.kingzcheung.xime.ui.settings.menuSettingsEntry(item)
+-            val openSettings: (() -> Unit)? = settingsEntry?.let { entry -> {
+-                toolbarFeedback()
+-                com.kingzcheung.xime.ui.settings.SettingsSearchFocus.open(entry)
+-                callbacks.onSettingsPage?.invoke(entry.target)
+-                viewModel.closeOverlay()
+-            } }
+-            // 插件按钮（翻译）：工具栏上长按弹出插件给的列表，滑到一项松手就选
+-            val pressMenu = (item as? ToolbarButtonItem.Plugin)?.takeIf { it.action == "open_panel" }?.let { plugin ->
+-                val load = callbacks.onToolPanelQuickOptions ?: return@let null
+-                val choose = callbacks.onToolPanelQuickSelect ?: return@let null
+-                com.kingzcheung.xime.keyboard.ToolbarPressMenu(load = { load(plugin.pluginId) },
+-                    onChoose = { key, option -> toolbarFeedback(); choose(plugin.pluginId, key, option) })
+-            }
+-            return ToolbarAction(item, onLongClick = openSettings, pressMenu = pressMenu, active = if (item is ToolbarButtonItem.Plugin)
+-                item.action == "open_panel" && toolPanelOpenFor(state.toolPanelVisible, state.toolPanelPluginId, item.pluginId)
+-                else item is ToolbarButtonItem.Builtin && when (item.button) {
++            return ToolbarAction(item, active = when (item.button) {
+                 ToolbarButton.EDIT -> (page as? KeyboardPage.Overlay)?.route == OverlayRoute.Edit
+                 ToolbarButton.EMOJI -> (page as? KeyboardPage.Overlay)?.route == OverlayRoute.Emoji
+                 ToolbarButton.CLIPBOARD -> (page as? KeyboardPage.Overlay)?.route is OverlayRoute.Clipboard
+-                ToolbarButton.OCR -> (page as? KeyboardPage.Overlay)?.route == OverlayRoute.Ocr
+                 ToolbarButton.SYMBOL -> (page as? KeyboardPage.Overlay)?.route == OverlayRoute.Symbol
+                 ToolbarButton.SCHEMA -> (page as? KeyboardPage.Overlay)?.route == OverlayRoute.SchemaList
+-                // 表情、剪贴板等面板盖住手写板时只亮面板那个按钮（#185）
+-                ToolbarButton.HANDWRITING_LOOKUP -> handwritingToolbarActive(page,
+-                    state.isHandwritingMode || viewModel.hasTemporaryHandwriting)
+-                ToolbarButton.VOICE -> state.voiceSticky
+-                ToolbarButton.SOUND -> quickToggles.sound || quickToggles.vibration
+-                ToolbarButton.FLOATING -> state.isFloatingMode
+-                ToolbarButton.GLASS -> inputPreferences.frostedGlass.enabled
+                 ToolbarButton.INCOGNITO -> quickToggles.incognito
+-                in ToolbarButton.LAYOUT_GESTURES -> item.button.gestureOn(inputPreferences, chineseGlideMenu, nineGlideMenu)
+                 ToolbarButton.FULL_SHAPE -> widthSwitch?.let { it.states.getOrNull(it.currentIndex) == "全角" } == true
+                 ToolbarButton.TRADITIONAL -> inputPreferences.traditionalOutput
+                 else -> false
+@@ -1100,8 +1010,9 @@ fun KeyboardView(
+             }
+         }
+         // 无痕只在它自己的位置（工具栏或菜单）显示开启状态，不额外插入图标。
+-        val toolbarQuickActions = (if (inlineEditor.active) inlineEditor.toolbar else state.toolbarButtons).mapNotNull(::quickAction)
+-        val menuQuickActions = (if (inlineEditor.active) inlineEditor.menu else state.menuButtons).mapNotNull(::quickAction)
++        val toolbarQuickActions = (if (inlineEditor.active) inlineEditor.toolbar else state.toolbarButtons)
++            .filterNot { it == ToolbarButton.SETTINGS.id }.mapNotNull(::quickAction)
++        val menuQuickActions = (state.menuButtons + ToolbarButton.SETTINGS.id).distinct().mapNotNull(::quickAction)
+         val unusedQuickActions = if (inlineEditor.active) inlineEditor.unused.mapNotNull(::quickAction) else emptyList()
+         val startInlineEditing: (() -> Unit)? = callbacks.onUpdateQuickActions?.takeIf { inlineEditingEnabled }?.let { {
+             toolbarFeedback()
+@@ -1480,7 +1391,9 @@ fun KeyboardView(
+                 },
+                 LocalCorrectionFullScheme provides correctionScheme.takeIf { !doublePinyinKeysShown }) {
+             ScaledCandidateBar(candidateBarScaleState.floatValue) {
+-            CandidateBar(
++            if (yanmoDictationStage != 0) {
++                dev.yanmo.ime.YanmoDictationBar(yanmoDictationStage, keyboardBgColor, keyTextColor)
++            } else CandidateBar(
+                 modifier = Modifier.then(if (holdingBar) Modifier.clearAndSetSemantics {}.pointerInput(Unit) {
+                     awaitPointerEventScope {
+                         while (true) {
+@@ -2399,9 +2312,6 @@ fun KeyboardView(
+                         )
+                     }
+                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+-                        TextButton(onClick = { callbacks.onSwitchKeyboard?.invoke() }) {
+-                            Text("切换输入法", color = keyTextColor)
+-                        }
+                         TextButton(onClick = { callbacks.onHideKeyboard?.invoke() }) {
+                             Text("收起", color = keyTextColor)
+                         }
+@@ -2528,7 +2438,6 @@ fun KeyboardView(
+                         imagesExpanded = state.clipboardImagesExpanded,
+                         onExpandImages = callbacks.onExpandClipboardImages,
+                         onCollapseImages = callbacks.onCollapseClipboardImages,
+-                        onRecognizeDocument = { viewModel.showOverlay(OverlayRoute.Ocr) },
+                         onOpenSearch = callbacks.onClipboardSearchOpen,
+                         onTranslateText = callbacks.onClipboardTranslate?.takeIf { callbacks.clipboardTranslateAvailable() },
+                     )
+diff --git a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/LanguageKeyButton.kt b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/LanguageKeyButton.kt
+index 9fc2782..22a6bf9 100644
+--- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/LanguageKeyButton.kt
++++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/LanguageKeyButton.kt
+@@ -211,8 +211,6 @@ fun LanguageKeyButton(
+ 
+     val menuHoldSeconds by rememberUpdatedState(
+         normalizeLanguageMenuHoldSeconds(LocalKeyboardInputPreferences.current.languageMenuHoldSeconds))
+-    // 「长按语言键切换输入法」（GitHub #60 #68，默认关）：长按到时弹系统的输入法选择框，不弹语言列表。
+-    val imePicker by rememberUpdatedState(LocalKeyboardInputPreferences.current.languageKeyImePicker)
+     fun closeMenu() {
+         menuOpen = false
+         menuSticky = false
+@@ -271,18 +269,9 @@ fun LanguageKeyButton(
+                     if (down.isConsumed) return@awaitEachGesture
+                     var chosenId: String? = null
+                     var keepOpen = false
+-                    var pickerShown = false
+                     // 按在语言键上就不让键盘的滑动移光标接手，菜单弹出前后都一样。
+                     suppressCursorMove.value = true
+-                    val menuJob = if (imePicker) scope.launch {
+-                        delay((menuHoldSeconds * 1000).roundToLong())
+-                        pickerShown = true
+-                        view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+-                        val imm = context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+-                            as? android.view.inputmethod.InputMethodManager
+-                        @Suppress("DEPRECATION")
+-                        imm?.showInputMethodPicker()
+-                    } else if (hasMenu) scope.launch {
++                    val menuJob = if (hasMenu) scope.launch {
+                         delay((menuHoldSeconds * 1000).roundToLong())
+                         menuSchemas = schemas
+                         selectedId = null
+@@ -299,11 +288,7 @@ fun LanguageKeyButton(
+                             val event = awaitPointerEvent(PointerEventPass.Initial)
+                             val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                             if (change.isConsumed) break
+-                            if (pickerShown) {
+-                                // 选择框已弹出：吃掉这次按压剩下的事件，松手不再算一次点按（不切语言）。
+-                                change.consume()
+-                                if (!change.pressed) break
+-                            } else if (menuOpen) {
++                            if (menuOpen) {
+                                 change.consume()
+                                 pointer = keyScreenPosition + change.position
+                                 selectedId = languageMenuSelection(menuSchemas, pointer, viewport, scroll.value, currentRowHeight, selectedId)
+diff --git a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/SpaceKeyButton.kt b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/SpaceKeyButton.kt
+index 1feb9b6..441edc7 100644
+--- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/SpaceKeyButton.kt
++++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/SpaceKeyButton.kt
+@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
+ import androidx.compose.material.icons.Icons
+ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
++import androidx.compose.material.icons.filled.Mic
+ import androidx.compose.material.icons.filled.SpaceBar
+ import androidx.compose.material3.Icon
+ import androidx.compose.material3.Text
+@@ -96,7 +97,8 @@ fun SpaceKeyButton(
+         pressed = pressed,
+     )
+     // 上滑取消的提示只在麦克风真开着时显示（语音总开关关着时长按不会开麦）。
+-    val showVoiceCancel = voiceHolding && isVoiceMode
++    val yanmoRecording = dev.yanmo.ime.LocalYanmoDictationStage.current == dev.yanmo.ime.VoiceSession.RECORDING
++    val showVoiceCancel = voiceHolding && (isVoiceMode || yanmoRecording)
+     // 过线后用删除键上滑清空同一套删除色，任何主题、玻璃下都认得出。
+     val cancelColors = if (showVoiceCancel && voiceCancelArmed) keyFlickFeedbackColors(keyFill, textColor,
+         com.kingzcheung.xime.ui.theme.LocalKeyboardPalette.current?.accent ?: androidx.compose.material3.MaterialTheme.colorScheme.primary,
+@@ -252,6 +254,16 @@ fun SpaceKeyButton(
+                 fontFamily = AppFonts.keyFontFamily, modifier = Modifier.testTag("space-voice-cancel-hint"))
+         } else if (cursorActive) {
+             SpaceCursorHint(textColor, maxWidth.value, maxHeight.value, density.fontScale, !settings.hideFunctionKeyHints)
++        } else if (holdAction == SpaceHoldAction.VOICE_TOGGLE && !isSttEnabled) {
++            Row(Modifier.semantics { contentDescription = "空格" },
++                horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
++                Icon(Icons.Default.Mic, contentDescription = null, tint = textColor,
++                    modifier = Modifier.size(iconSize.coerceAtMost(18f).dp))
++                if (this@BoxWithConstraints.maxWidth.value >= 76f * density.fontScale) {
++                    Text("长按说话", color = textColor, fontSize = (labelSize.coerceIn(10f, 13f)).sp,
++                        maxLines = 1, softWrap = false, fontFamily = AppFonts.keyFontFamily)
++                }
++            }
+         } else if (!settings.hideFunctionKeyHints && SpaceLanguageFlash.isLanguageName(displayName) && labelSize >= 8f) {
+             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                 Text(displayName, color = textColor,
+diff --git a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/T9KeyboardLayout.kt b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/T9KeyboardLayout.kt
+index af8b164..a85d72d 100644
+--- a/app/src/main/java/com/kingzcheung/xime/ui/keyboard/T9KeyboardLayout.kt
++++ b/app/src/main/java/com/kingzcheung/xime/ui/keyboard/T9KeyboardLayout.kt
+@@ -128,8 +128,9 @@ fun T9KeyboardLayout(
+     candidateState: State<CandidateState> = remember { mutableStateOf(CandidateState()) },
+     onGestureAction: ((GestureAction, String) -> Unit)? = null,
+ ) {
+-    KeyboardKeySpacingScope(modifier, columns = 5f * 3f / 3.4f,
+-        policy = KeyVisualPolicy.T9, allowShrink = isFloatingMode, applyGutter = true,
++    KeyboardKeySpacingScope(modifier, columns = KeyVisualPolicy.T9Columns,
++        horizontalInset = KeyVisualPolicy.WideKeysGutter.dp,
++        policy = KeyVisualPolicy.T9Pinyin, allowShrink = isFloatingMode, applyGutter = true,
+         growthSpacing = keySpacingX?.value to keySpacingY?.value) { bodyModifier ->
+     val controller = t9Controller
+     val configuration = LocalConfiguration.current
+@@ -504,7 +505,7 @@ private fun T9KeyboardContent(
+         Column(
+             modifier = Modifier
+                 .fillMaxHeight()
+-                .weight(0.8f).testTag("t9-left-rail"),
++                .weight(KeyVisualPolicy.T9RailFraction).testTag("t9-left-rail"),
+             verticalArrangement = Arrangement.spacedBy(0.dp)
+         ) {
+             BoxWithConstraints(
+@@ -606,7 +607,7 @@ private fun T9KeyboardContent(
+         Column(
+             modifier = Modifier
+                 .fillMaxHeight()
+-                .weight(3.4f),
++                .weight(KeyVisualPolicy.T9LetterFraction),
+         ) {
+             Row(
+                 modifier = Modifier.fillMaxWidth().weight(1f),
+@@ -730,12 +731,12 @@ private fun T9KeyboardContent(
+                 )
+             }
+             Row(modifier = Modifier.fillMaxWidth().weight(1f)) {
+-                KeyboardModeKey(
+-                    slot = 2, onKeyPress = onKeyPress,
++                dev.yanmo.ime.YanmoLanguageKey(
++                    english = uiState.isAsciiMode, switchLanguage = { onKeyPress("ime_switch") },
+                     backgroundColor = specialKeyBackgroundColor, textColor = specialKeyTextColor,
+-                    modifier = Modifier.weight(0.8f), onKeyPressDown = onKeyPressDown,
++                    modifier = Modifier.weight(0.8f),
++                    onPress = { onKeyPressDown?.invoke("ime_switch") },
+                     shadowEnabled = shadowEnabled, shadowElevation = shadowElevation, shadowShapeRadius = shadowShapeRadius,
+-                    ctrlTargets = ctrlTargets, onCtrlShortcut = onCtrlShortcut,
+                 )
+                 T9SpaceKey(
+                     schemaName = "拼音", isSttEnabled = uiState.isSttEnabled,
+@@ -746,13 +747,12 @@ private fun T9KeyboardContent(
+                     modifier = Modifier.weight(1.8f),
+                     shadowEnabled = shadowEnabled, shadowElevation = shadowElevation, shadowShapeRadius = shadowShapeRadius,
+                 )
+-                LanguageKeyButton(
+-                    icon = rememberVectorPainter(Icons.Default.Language),
+-                    onClick = { onKeyPress("ime_switch") },
+-                    backgroundColor = specialKeyBackgroundColor, iconColor = specialKeyTextColor,
+-                    modifier = Modifier.weight(0.8f),
+-                    onPress = { onKeyPressDown?.invoke("ime_switch") },
++                KeyboardModeKey(
++                    slot = 2, onKeyPress = onKeyPress,
++                    backgroundColor = specialKeyBackgroundColor, textColor = specialKeyTextColor,
++                    modifier = Modifier.weight(0.8f), onKeyPressDown = onKeyPressDown,
+                     shadowEnabled = shadowEnabled, shadowElevation = shadowElevation, shadowShapeRadius = shadowShapeRadius,
++                    ctrlTargets = ctrlTargets, onCtrlShortcut = onCtrlShortcut,
+                 )
+             }
+         }
+@@ -761,7 +761,7 @@ private fun T9KeyboardContent(
+         Column(
+             modifier = Modifier
+                 .fillMaxHeight()
+-                .weight(0.8f).testTag("t9-right-rail"),
++                .weight(KeyVisualPolicy.T9RailFraction).testTag("t9-right-rail"),
+         ) {
+             // 按住 !@# 点删除：Ctrl+删除（用户 11-13）；还在打字时照常删编码，九键的删除要先经过它自己的选音节撤回。
+             val ctrlDelete: () -> Unit = {
+@@ -793,7 +793,8 @@ private fun T9KeyboardContent(
+                 shadowElevation = shadowElevation,
+                 shadowShapeRadius = shadowShapeRadius,
+             )
+-            ResetKey(
++            KeyButton(
++                text = "清空",
+                 onClick = {
+                     controller.clearAll()
+                     // 重输 = 只清输入态（预编辑/候选/左栏），不动已上屏文本（对标主流输入法 2026-08-11）：
+@@ -808,7 +809,6 @@ private fun T9KeyboardContent(
+                 shadowEnabled = shadowEnabled,
+                 shadowElevation = shadowElevation,
+                 shadowShapeRadius = shadowShapeRadius,
+-                compactMode = compactMode,
+             )
+             // 只在「0 键是不是下一项」变化时重组九键整块，每按一个数字只重组候选栏和左栏。
+             val nextCandidate by remember(candidateState, uiState.inputProfile) {
+diff --git a/app/src/main/java/com/kingzcheung/xime/ui/menubar/ClipboardBoardView.kt b/app/src/main/java/com/kingzcheung/xime/ui/menubar/ClipboardBoardView.kt
+index abcd87b..fa67768 100644
+--- a/app/src/main/java/com/kingzcheung/xime/ui/menubar/ClipboardBoardView.kt
++++ b/app/src/main/java/com/kingzcheung/xime/ui/menubar/ClipboardBoardView.kt
+@@ -199,17 +199,6 @@ internal fun ConnectedClipboardBoard(
+         },
+         groups = groups, initialTabKey = returnTab,
+         onAssignGroup = groupStore::assign,
+-        onManageGroups = { record ->
+-            groupStore.setKeyboardEntry(record)
+-            context.startActivity(com.kingzcheung.xime.service.settingsActivityIntent(context,
+-                com.kingzcheung.xime.ui.settings.SettingsRoutes.ClipboardGroups))
+-            // The keyboard left open covered 新建分组 on the settings page (tablet 11-05); Back there returns here.
+-            hideKeyboardFrom(context)
+-        },
+-        onOpenSettings = {
+-            context.startActivity(com.kingzcheung.xime.service.settingsActivityIntent(context,
+-                com.kingzcheung.xime.ui.settings.SettingsRoutes.ClipboardPanel))
+-        },
+         onFormOpen = { tab, adding ->
+             groupStore.setReturnTab(tab.key)
+             if (adding) groupStore.setAddTarget((tab as? ClipboardTab.Group)?.group?.id)
+diff --git a/app/src/main/java/com/kingzcheung/xime/ui/menubar/SchemaListView.kt b/app/src/main/java/com/kingzcheung/xime/ui/menubar/SchemaListView.kt
+index 03631b2..34f5230 100644
+--- a/app/src/main/java/com/kingzcheung/xime/ui/menubar/SchemaListView.kt
++++ b/app/src/main/java/com/kingzcheung/xime/ui/menubar/SchemaListView.kt
+@@ -1,6 +1,5 @@
+ package com.kingzcheung.xime.ui.menubar
+ 
+-import android.content.Intent
+ import androidx.compose.foundation.layout.*
+ import androidx.compose.foundation.rememberScrollState
+ import androidx.compose.foundation.verticalScroll
+@@ -76,11 +75,6 @@ fun SchemaListView(
+                 unavailableIds = switches.filterValues { it?.keepsScheme == false }.keys,
+                 rowHeight = layoutHeight,
+                 qwertyPreviewStagger = qwertyStagger,
+-                onManage = {
+-                    context.startActivity(Intent(context, com.kingzcheung.xime.CustomLayoutActivity::class.java)
+-                        .putExtra(com.kingzcheung.xime.CustomLayoutActivity.EXTRA_LANGUAGE, current.profile.language.id)
+-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+-                },
+                 containerColor = keyBgColor, contentColor = keyTextColor, accentColor = accentColor) { id ->
+                 layoutId = id
+                 // This is an explicit combination choice, not a layout rebind: one tap switches,
+@@ -102,12 +96,7 @@ fun SchemaListView(
+                 previews = schemes.associate { it.schemaId to InputProfiles.schemePreview(it.profile) },
+                 rowHeight = schemeHeight,
+                 containerColor = keyBgColor, contentColor = keyTextColor, accentColor = accentColor,
+-                onManage = {
+-                    // 设置已开着（从键盘齿轮进的、或正在设置页里打字）时，只带 NEW_TASK 的同一个 Intent
+-                    // 只会把旧页面拉到前面、收不到 onNewIntent，看起来就是点了没反应；和齿轮、长按菜单走同一个入口。
+-                    context.startActivity(com.kingzcheung.xime.service.settingsActivityIntent(context,
+-                        com.kingzcheung.xime.ui.settings.SettingsRoutes.Schema))
+-                }, onSelect = onSelectSchema)
++                onSelect = onSelectSchema)
+         }
+     }
+     }
+diff --git a/app/src/main/java/com/kingzcheung/xime/ui/theme/IconAppearance.kt b/app/src/main/java/com/kingzcheung/xime/ui/theme/IconAppearance.kt
+index 3a476cd..19eb8a6 100644
+--- a/app/src/main/java/com/kingzcheung/xime/ui/theme/IconAppearance.kt
++++ b/app/src/main/java/com/kingzcheung/xime/ui/theme/IconAppearance.kt
+@@ -94,8 +94,6 @@ object IconAppearance {
+     fun onKeyboardThemeChanged(context: Context, themeId: String) {
+         reload(context)
+         // 字幕图标先换：三星换主图标入口时可能直接结束本应用进程，排在后面的更新会丢。
+-        runCatching { com.kingzcheung.xime.ui.caption.CaptionLauncherIcon.refresh(context, themeId) }
+-        if (followTheme) runCatching { LauncherIcons.apply(context, effective, themeId = themeId) }
+     }
+ }
+ 
+@@ -186,7 +184,7 @@ object LauncherIcons {
+             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+         runCatching { activity.startActivity(intent) }.recoverCatching {
+             // 个别系统刚启用的入口还解析不到：直接开设置页本身。
+-            activity.startActivity(intent.setComponent(ComponentName(activity, "com.kingzcheung.xime.MainActivity")))
++            activity.startActivity(dev.yanmo.ime.YanmoActivity.settingsIntent(activity))
+         }.onSuccess {
+             @Suppress("DEPRECATION")
+             activity.overridePendingTransition(0, 0)
+diff --git a/app/src/main/java/com/kingzcheung/xime/update/AppUpdater.kt b/app/src/main/java/com/kingzcheung/xime/update/AppUpdater.kt
+index 83d36d3..f38f4a8 100644
+--- a/app/src/main/java/com/kingzcheung/xime/update/AppUpdater.kt
++++ b/app/src/main/java/com/kingzcheung/xime/update/AppUpdater.kt
+@@ -59,7 +59,7 @@ object AppUpdater {
+      * 老人版是单独打的包，换成公开包会丢掉老人版的界面，不给更新入口。
+      * 从 F-Droid 装的也不给：更新走商店（[storeManaged]）。
+      */
+-    val supported: Boolean get() = !BuildConfig.ELDER && !storeManaged
++    val supported: Boolean get() = false
+ 
+     /** 由 F-Droid 一类商店安装，见 [AppUpdateCatalog.isStoreInstaller]；进程启动时由 [init] 读一次。 */
+     @Volatile
+diff --git a/app/src/main/java/com/kingzcheung/xime/util/PermissionHelper.kt b/app/src/main/java/com/kingzcheung/xime/util/PermissionHelper.kt
+index ef7dd45..aa2f0a9 100644
+--- a/app/src/main/java/com/kingzcheung/xime/util/PermissionHelper.kt
++++ b/app/src/main/java/com/kingzcheung/xime/util/PermissionHelper.kt
+@@ -1,7 +1,6 @@
+ package com.kingzcheung.xime.util
+ 
+ import android.content.Context
+-import android.content.Intent
+ import android.content.pm.PackageManager
+ import androidx.core.content.ContextCompat
+ 
+@@ -51,13 +50,6 @@ object PermissionHelper {
+         voiceRequested = true
+         voiceGrantedAt = 0L
+         voiceSettingsAt = 0L
+-        // Its own task every time: with a plain NEW_TASK an existing CyIME task whose root intent is the same
+-        // MainActivity (extras do not count) is only brought forward, onCreate never runs and no dialog appears.
+-        // Its own task also returns to the app being typed in, not to the settings pages, when it finishes.
+-        val intent = Intent(context, com.kingzcheung.xime.MainActivity::class.java).setAction(ACTION_REQUEST_RECORD_AUDIO)
+-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK or Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS)
+-        intent.putExtra("request_permission", PERMISSION_RECORD_AUDIO)
+-        context.startActivity(intent)
++        context.startActivity(dev.yanmo.ime.YanmoActivity.settingsIntent(context))
+     }
+-    private const val ACTION_REQUEST_RECORD_AUDIO = "com.kingzcheung.xime.action.REQUEST_RECORD_AUDIO"
+-}
+\ No newline at end of file
++}
+diff --git a/app/src/main/res/xml/method.xml b/app/src/main/res/xml/method.xml
+index ff368d8..9959540 100644
+--- a/app/src/main/res/xml/method.xml
++++ b/app/src/main/res/xml/method.xml
+@@ -1,7 +1,7 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <input-method xmlns:android="http://schemas.android.com/apk/res/android"
+-    android:settingsActivity="com.kingzcheung.xime.MainActivity"
++    android:settingsActivity="dev.yanmo.ime.SettingsEntry"
+     android:isDefault="false"
+     android:supportsInlineSuggestions="true">
+ 
+-</input-method>
+\ No newline at end of file
++</input-method>

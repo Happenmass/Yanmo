@@ -15,6 +15,8 @@ import android.text.InputType;
 import android.view.View;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.ExtractedText;
+import android.view.inputmethod.ExtractedTextRequest;
 import android.view.inputmethod.InputConnection;
 
 import org.json.JSONArray;
@@ -26,7 +28,9 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLStreamHandler;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -36,6 +40,8 @@ public final class VoiceSessionProbe extends Instrumentation {
     private static final String RAW = "我我明天跟 Kai 开会";
     private static final String POLISHED = "明天跟 Kai 开会。\n";
     private int requests;
+    private int extractionRequests;
+    private final CountDownLatch extracted = new CountDownLatch(1);
     private volatile String expectedApiRaw;
     private Bundle arguments;
 
@@ -58,23 +64,57 @@ public final class VoiceSessionProbe extends Instrumentation {
             });
             Context context = getTargetContext();
             ManuscriptStoreProbe.verify(context);
-            Polish.save(context, true, "https://voice-probe.invalid/v1", "synthetic", "", true);
+            check(Polish.settings(context).edit().clear().commit(), "could not reset probe settings");
+            verifyLexicon(context);
+            check(!EditorContext.enabled(context), "context must start disabled");
+            EditorContext.setEnabled(context, true);
             runTake(false, false, 1);
+            check(requests == 0, "unconfigured text API received a request");
+            Polish.save(context, true, "https://voice-probe.invalid/v1", "synthetic", "", true);
+            runTake(false, false, 1, true);
+            check(extractionRequests == 1, "manual correction did not trigger one extraction");
             runTake(true, false, 0);
             runTake(false, true, 0);
             check(requests == 2, "expected two calls to the enabled text API");
-            Polish.save(context, false, "", "", "", true);
-            runTake(false, false, 0);
+            Polish.save(context, false, "https://voice-probe.invalid/v1", "synthetic", "", true);
+            runTake(false, false, 1);
             check(requests == 2, "disabled text API received a request");
             if ("true".equals(arguments.getString("checkBinder"))) {
                 result.putString("binder", verifyMemoryBinder(context));
             }
-            result.putString("stream", "Voice session passed: active editor once, switched/cancelled/disabled editor never; Production ASR Binder verified two WAV windows; SQLite WAV, raw text, finished text and PNG verified.\n");
+            result.putString("stream", "Voice session passed: raw/polished commit, editor switch, cancellation, SQLite media, ranked words, both cursor sides and hotwords on both ASR Binder windows, manual correction extraction and persistence.\n");
             finish(Activity.RESULT_OK, result);
         } catch (Exception | AssertionError failure) {
             result.putString("stream", android.util.Log.getStackTraceString(failure));
             finish(Activity.RESULT_CANCELED, result);
         }
+    }
+
+    private static void verifyLexicon(Context context) throws Exception {
+        for (Lexicon.Entry item : Lexicon.list(context)) Lexicon.remove(context, item.id);
+        Lexicon.save(context, null, "Kai", Lexicon.GLOBAL);
+        String id = Lexicon.list(context).get(0).id;
+        Lexicon.save(context, id, "Kai Chen", Lexicon.AI_TOOLS);
+        check(Lexicon.list(context).get(0).id.equals(id), "editing replaced the term ID");
+        check(Lexicon.list(context).get(0).group.equals(Lexicon.AI_TOOLS), "editing lost the classification");
+        try {
+            Lexicon.save(context, null, "ＫＡＩ chen", Lexicon.GLOBAL);
+            throw new AssertionError("duplicate spelling was saved");
+        } catch (java.io.IOException expected) {
+            check(Lexicon.list(context).size() == 1, "a duplicate changed the dictionary");
+        }
+        Lexicon.save(context, null, "Temporary", Lexicon.GLOBAL);
+        for (Lexicon.Entry item : Lexicon.list(context)) {
+            if (item.term.equals("Temporary")) Lexicon.remove(context, item.id);
+        }
+        check(Lexicon.list(context).size() == 1, "deleting a word did not persist");
+        Lexicon.save(context, null, "项目晨星", Lexicon.GLOBAL);
+        List<Lexicon.Entry> entries = Lexicon.list(context);
+        Lexicon.recordMatches(context, entries, "项目晨星和 Kai Chenn，项目晨星");
+        Lexicon.recordMatches(context, entries, "Kai Chen");
+        check(Lexicon.list(context).stream().allMatch(entry -> entry.matchCount == 1), "wrong hit count");
+        check(Lexicon.hotwords(Lexicon.list(context), Lexicon.GLOBAL).equals(Arrays.asList("项目晨星")),
+                "unrelated app got scoped words");
     }
 
     private String verifyMemoryBinder(Context context) throws Exception {
@@ -111,6 +151,10 @@ public final class VoiceSessionProbe extends Instrumentation {
     }
 
     private void runTake(boolean switchEditor, boolean cancel, int commits) throws Exception {
+        runTake(switchEditor, cancel, commits, false);
+    }
+
+    private void runTake(boolean switchEditor, boolean cancel, int commits, boolean learn) throws Exception {
         Context context = getTargetContext();
         String[] previous = Manuscripts.history(context);
         boolean realWindows = commits > 0;
@@ -122,6 +166,7 @@ public final class VoiceSessionProbe extends Instrumentation {
         CountDownLatch allowAsr = new CountDownLatch(1);
         TestIme[] service = new TestIme[1];
         VoiceSession[] voice = new VoiceSession[1];
+        List<Integer> states = new ArrayList<>();
         ProbeConnection[] original = new ProbeConnection[1];
         ProbeConnection[] other = new ProbeConnection[1];
         runOnMainSync(() -> {
@@ -131,6 +176,7 @@ public final class VoiceSessionProbe extends Instrumentation {
             ime.editor = original[0];
             service[0] = ime;
             voice[0] = new VoiceSession(ime, context.getPackageName(), state -> {
+                states.add(state);
                 if (state == VoiceSession.IDLE) complete.countDown();
             }, (wav, stopped) -> {
                 wav.write(pcm);
@@ -162,11 +208,31 @@ public final class VoiceSessionProbe extends Instrumentation {
         if (png != null) Manuscripts.saveScreenshot(context, id, png);
         allowAsr.countDown();
         check(complete.await(20, TimeUnit.SECONDS), "voice coordinator did not finish");
+        if (learn) {
+            runOnMainSync(() -> {
+                original[0].text = "明天跟 凯岑开会。\n";
+                voice[0].manualCommit(original[0], "岑");
+            });
+            check(extracted.await(14, TimeUnit.SECONDS), "corrected text never reached the API");
+            long deadline = SystemClock.uptimeMillis() + 5000;
+            while (Lexicon.list(context).stream().noneMatch(entry -> entry.term.equals("凯岑"))
+                    && SystemClock.uptimeMillis() < deadline) SystemClock.sleep(25);
+            Lexicon.Entry learned = Lexicon.list(context).stream().filter(entry -> entry.term.equals("凯岑"))
+                    .findFirst().orElseThrow(() -> new AssertionError("correction was not stored"));
+            check(learned.group.equals(Lexicon.AI_TOOLS), "correction lost the app scope");
+            Lexicon.remove(context, learned.id);
+            original[0].text = POLISHED;
+        }
         runOnMainSync(() -> voice[0].destroy());
         check(original[0].commits == commits, "original editor commit count " + original[0].commits
                 + ", manuscript error: " + Manuscripts.read(context, id, "error"));
         check(other[0].commits == 0, "wrote to the replacement editor");
-        if (commits > 0) check(POLISHED.equals(original[0].text), "commit changed the model output");
+        boolean enabled = Polish.enabled(context);
+        List<Integer> expectedStates = new ArrayList<>(Arrays.asList(VoiceSession.RECORDING, VoiceSession.PROCESSING));
+        if (enabled && !cancel) expectedStates.add(VoiceSession.POLISHING);
+        expectedStates.add(VoiceSession.IDLE);
+        check(states.equals(expectedStates), "unexpected voice stages: " + states);
+        if (commits > 0) check((enabled ? POLISHED : expectedRaw).equals(original[0].text), "commit changed the model output");
 
         String[] after = Manuscripts.history(context);
         check(after.length == previous.length + 1, "expected one manuscript");
@@ -186,9 +252,17 @@ public final class VoiceSessionProbe extends Instrumentation {
             decoded.recycle();
         }
         check(Manuscripts.read(context, id, "raw").equals(cancel ? "" : expectedRaw), "incorrect raw transcript");
-        boolean enabled = Polish.enabled(context);
         check(Manuscripts.read(context, id, "polished").equals(cancel || !enabled ? "" : POLISHED), "incorrect polished transcript");
-        if (switchEditor || !enabled || cancel) check(!Manuscripts.read(context, id, "error").isEmpty(), "failure missing");
+        check(Manuscripts.read(context, id, "error").isEmpty() == !(switchEditor || cancel), "incorrect manuscript error");
+        String diagnostics = Manuscripts.diagnostics(context, id);
+        check(diagnostics.contains("录音开始"), "missing persisted recording diagnostic");
+        if (commits > 0) check(diagnostics.contains("光标上下文已提供") && diagnostics.contains("已写入输入框")
+                && !diagnostics.contains("Kai") && !diagnostics.contains("前前"), "incorrect persisted ASR diagnostics");
+        if (commits > 0) {
+            String windowTiming = "权重准备 3 ms · 音频交接 4 ms · 推理总计 50 ms · 模型加载 18 ms · 前端与预填 11 ms · 解码 20 ms";
+            check(diagnostics.indexOf(windowTiming) >= 0 && diagnostics.indexOf(windowTiming) != diagnostics.lastIndexOf(windowTiming),
+                    "both ASR windows must save the individual SDK timings");
+        }
     }
 
     private static byte[] screenshot() {
@@ -202,6 +276,7 @@ public final class VoiceSessionProbe extends Instrumentation {
 
     private final class Response extends HttpURLConnection {
         private final ByteArrayOutputStream body = new ByteArrayOutputStream();
+        private boolean extraction;
 
         Response(URL url) { super(url); }
 
@@ -216,16 +291,32 @@ public final class VoiceSessionProbe extends Instrumentation {
                 check(messages.getJSONObject(0).getString("role").equals("system"), "system prompt missing");
                 check(!messages.getJSONObject(0).getString("content").isEmpty(), "empty system prompt");
                 JSONObject payload = new JSONObject(messages.getJSONObject(1).getString("content"));
-                check(payload.getJSONArray("ASR_RESULTS").getJSONObject(0).getString("transcript").equals(expectedApiRaw),
-                        "recognition text changed before text API");
+                extraction = payload.has("CORRECTED");
+                if (extraction) {
+                    check(payload.getString("ORIGINAL").equals(POLISHED), "correction baseline was not the inserted text");
+                    check(payload.getString("CORRECTED").equals("明天跟 凯岑开会。\n"), "correction included text outside dictation");
+                    extractionRequests++;
+                } else {
+                    JSONArray lexicon = payload.getJSONObject("AUDIO_CONTEXT").getJSONArray("lexicon");
+                    check(lexicon.length() == 2 && lexicon.getJSONObject(0).getString("term").equals("Kai Chen"),
+                            "active dictionary entry was missing from the text API");
+                    check(payload.getJSONArray("ASR_RESULTS").getJSONObject(0).getString("transcript").equals(expectedApiRaw),
+                            "recognition text changed before text API");
+                    JSONObject editor = payload.getJSONObject("context");
+                    check(editor.getString("text_before_cursor").equals(ProbeConnection.BEFORE.substring(7)),
+                            "left cursor context was missing");
+                    check(editor.getString("text_after_cursor").equals(ProbeConnection.AFTER.substring(0, 300)),
+                            "right cursor context was missing");
+                    requests++;
+                }
             } catch (Exception error) {
                 throw new IllegalStateException(error);
             }
-            requests++;
             return 200;
         }
         @Override public ByteArrayInputStream getInputStream() {
-            String response = "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":" + JSONObject.quote(POLISHED) + "}}]}";
+            String response = "{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"content\":" + JSONObject.quote(extraction ? "[\"凯岑\"]" : POLISHED) + "}}]}";
+            if (extraction) extracted.countDown();
             return new ByteArrayInputStream(response.getBytes(StandardCharsets.UTF_8));
         }
     }
@@ -236,7 +327,7 @@ public final class VoiceSessionProbe extends Instrumentation {
 
         TestIme(Context context) {
             attachBaseContext(context);
-            info.packageName = "probe.editor";
+            info.packageName = "com.openai.chatgpt";
             info.inputType = InputType.TYPE_CLASS_TEXT;
         }
 
@@ -246,7 +337,26 @@ public final class VoiceSessionProbe extends Instrumentation {
     }
 
     private static final class ProbeConnection extends BaseInputConnection {
+        static final String BEFORE = "1234567" + repeat("前", 300);
+        static final String AFTER = repeat("后", 300) + "7654321";
         String text;
+
+        private static String repeat(String item, int count) {
+            char[] chars = new char[count];
+            Arrays.fill(chars, item.charAt(0));
+            return new String(chars);
+        }
+
+        @Override public CharSequence getTextBeforeCursor(int length, int flags) { return BEFORE; }
+        @Override public CharSequence getTextAfterCursor(int length, int flags) { return AFTER; }
+
+        @Override public ExtractedText getExtractedText(ExtractedTextRequest request, int flags) {
+            ExtractedText result = new ExtractedText();
+            result.text = BEFORE + (text == null ? "" : text) + AFTER;
+            result.selectionStart = result.selectionEnd = BEFORE.length() + (text == null ? 0 : text.length());
+            result.partialStartOffset = result.partialEndOffset = -1;
+            return result;
+        }
         int commits;
 
         ProbeConnection(Context context) { super(new View(context), false); }

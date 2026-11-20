@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <bool name="yanmo_screenshot_service_supported">false</bool>
+    <string name="yanmo_screenshot_service_label">言墨口述截屏</string>
+    <string name="yanmo_screenshot_service_description">结束口述时截取一张屏幕画面，随文稿保存在本机。本服务只请求截图，不读取界面控件或监听操作。</string>
+</resources>

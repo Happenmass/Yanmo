@@ -4,7 +4,9 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -15,18 +17,22 @@ import android.os.Messenger;
 import android.os.ParcelFileDescriptor;
 import android.os.ProxyFileDescriptorCallback;
 import android.os.RemoteException;
+import android.os.SystemClock;
 import android.os.storage.StorageManager;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 
-/** Android Agent SDK SpeechWire V1 client for the prototype's Java overlay. */
+/** Android Agent SDK SpeechWire V1 client. */
 final class LocalAsr implements AutoCloseable {
     private static final String ACTION = "dev.androidagent.action.SPEECH_SERVICE_V1";
     private static final int STATUS = 1;
@@ -34,6 +40,7 @@ final class LocalAsr implements AutoCloseable {
     private static final int CANCEL = 4;
 
     private final Context app;
+    private final Consumer<String> diagnostics;
     private final CompletableFuture<Messenger> connected = new CompletableFuture<>();
     private volatile Request pending;
     private final Messenger replies = new Messenger(new Handler(Looper.getMainLooper(), message -> {
@@ -45,6 +52,7 @@ final class LocalAsr implements AutoCloseable {
 
     private volatile boolean disconnected;
     private boolean bound;
+    private boolean acceptsHints;
     private HandlerThread audioCallbacks;
 
     private final ServiceConnection connection = new ServiceConnection() {
@@ -70,25 +78,57 @@ final class LocalAsr implements AutoCloseable {
     };
 
     LocalAsr(Context app, String servicePackage) throws Failure {
+        this(app, servicePackage, event -> {});
+    }
+
+    LocalAsr(Context app, String servicePackage, Consumer<String> diagnostics) throws Failure {
         this.app = app;
-        int match = app.getPackageManager().checkSignatures(app.getPackageName(), servicePackage);
-        if (match == PackageManager.SIGNATURE_UNKNOWN_PACKAGE) throw new Failure("SERVICE_NOT_INSTALLED");
-        if (match != PackageManager.SIGNATURE_MATCH) throw new Failure("ACCESS_DENIED");
+        this.diagnostics = diagnostics;
+        PackageManager packages = app.getPackageManager();
+        ApplicationInfo sdk;
         try {
-            bound = app.bindService(new Intent(ACTION).setPackage(servicePackage), connection, Context.BIND_AUTO_CREATE);
+            sdk = packages.getApplicationInfo(servicePackage, 0);
+        } catch (PackageManager.NameNotFoundException error) {
+            throw new Failure("SERVICE_NOT_INSTALLED");
+        }
+        if (packages.checkSignatures(app.getPackageName(), servicePackage) != PackageManager.SIGNATURE_MATCH) {
+            throw new Failure("SIGNATURE_MISMATCH");
+        }
+        Intent intent = new Intent(ACTION).setPackage(servicePackage);
+        ResolveInfo resolved = packages.resolveService(intent, 0);
+        if (resolved == null || resolved.serviceInfo == null || !resolved.serviceInfo.exported) {
+            throw new Failure("SERVICE_NOT_AVAILABLE");
+        }
+        intent.setComponent(new ComponentName(resolved.serviceInfo.packageName, resolved.serviceInfo.name));
+        try {
+            bound = app.bindService(intent, connection, Context.BIND_AUTO_CREATE);
         } catch (SecurityException error) {
             throw new Failure("ACCESS_DENIED");
         }
-        if (!bound) throw new Failure("SERVICE_NOT_INSTALLED");
+        if (!bound) {
+            diagnostics.accept("系统拒绝绑定 · SDK 停止标记 " +
+                    ((sdk.flags & ApplicationInfo.FLAG_STOPPED) != 0 ? "开启" : "关闭"));
+            try {
+                app.unbindService(connection);
+            } catch (IllegalArgumentException ignored) {
+                // The OS may have already discarded the rejected connection.
+            }
+            throw new Failure("BIND_FAILED");
+        }
     }
 
     void requireReady() throws Failure {
-        String status = request(STATUS, new Bundle(), 5).getString("asr");
+        Bundle result = request(STATUS, new Bundle(), 5);
+        acceptsHints = result.getBoolean("asrHints");
+        String status = result.getString("asr");
         if (status == null) throw new Failure("INVALID_REPLY");
         if (!status.equals("READY")) throw new Failure(status);
     }
 
-    String transcribeWindow(byte[] window) throws IOException {
+    boolean acceptsHints() { return acceptsHints; }
+
+    String transcribeWindow(byte[] window, List<String> hotwords, EditorContext context) throws IOException {
+        long started = SystemClock.elapsedRealtime();
         ParcelFileDescriptor memory;
         try {
             memory = openProxyAudio(new WavReader(window));
@@ -96,9 +136,45 @@ final class LocalAsr implements AutoCloseable {
             memory = null;
         }
         try (ParcelFileDescriptor audio = memory != null ? memory : openUnlinkedAudio(window)) {
-            String text = requestAudio(ASR, audio, 120).getString("text");
-            if (text == null) throw new Failure("INVALID_REPLY");
-            return text;
+            Bundle input = new Bundle();
+            input.putParcelable("audio", audio);
+            if (acceptsHints) {
+                if (!hotwords.isEmpty()) input.putStringArrayList("hotwords", new ArrayList<>(hotwords));
+                if (!context.before.isEmpty()) input.putString("textBeforeCursor", context.before);
+                if (!context.after.isEmpty()) input.putString("textAfterCursor", context.after);
+            }
+            long sent = SystemClock.elapsedRealtime();
+            try {
+                Bundle reply = request(ASR, input, 120);
+                logTiming(reply, sent - started, SystemClock.elapsedRealtime() - sent);
+                String text = reply.getString("text");
+                if (text == null) throw new Failure("INVALID_REPLY");
+                return text;
+            } catch (Failure failure) {
+                diagnostics.accept("识别请求耗时 " + (SystemClock.elapsedRealtime() - sent) + " ms");
+                throw failure;
+            }
+        }
+    }
+
+    private void logTiming(Bundle reply, long descriptorMs, long requestMs) {
+        StringBuilder line = new StringBuilder("识别计时 · 音频描述符 ").append(descriptorMs)
+                .append(" ms · 请求往返 ").append(requestMs).append(" ms");
+        appendTime(line, reply, "prepareMs", "权重准备");
+        appendTime(line, reply, "audioTransferMs", "音频交接");
+        appendTime(line, reply, "inferenceMs", "推理总计");
+        appendTime(line, reply, "modelLoadMs", "模型加载");
+        appendTime(line, reply, "frontendMs", "前端与预填");
+        appendTime(line, reply, "decodeMs", "解码");
+        diagnostics.accept(line.toString());
+    }
+
+    private static void appendTime(StringBuilder line, Bundle reply, String key, String label) {
+        if (reply.containsKey(key)) {
+            double value = reply.getDouble(key);
+            if (Double.isFinite(value) && value >= 0) {
+                line.append(" · ").append(label).append(' ').append(Math.round(value)).append(" ms");
+            }
         }
     }
 
@@ -177,7 +253,18 @@ final class LocalAsr implements AutoCloseable {
             Bundle reply = await(request.reply, timeoutSeconds, "TIMEOUT");
             received = true;
             String error = reply.getString("error");
-            if (error != null) throw new Failure(error);
+            if (error != null) {
+                if (operation == ASR) {
+                    String phase = reply.getString("asrPhase", "");
+                    switch (phase) {
+                        case "prepare": diagnostics.accept("SDK 中断于权重准备"); break;
+                        case "transfer": diagnostics.accept("SDK 中断于音频交接"); break;
+                        case "inference": diagnostics.accept("SDK 中断于推理"); break;
+                        default: break;
+                    }
+                }
+                throw new Failure(error);
+            }
             return reply;
         } catch (RemoteException failure) {
             throw new Failure("DISCONNECTED");

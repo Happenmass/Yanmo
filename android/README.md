@@ -1,53 +1,55 @@
-# 言墨 Android 原型
+# 言墨 Android
 
-言墨 Android 的应用 ID 是 `dev.yanmo.ime`。键盘使用 CyIME 1.15.94 的九键与 26 键布局、候选栏、Rime JNI 和雾凇词库。切换布局时点工具栏左侧第二个键盘图标，再选九键或 26 键。短按空格照常输入。长按空格开始听写，松手结束，向上滑动后松手取消。原型复用桌面端的 `engine/polish.txt`。
+言墨 Android 的应用 ID 是 `dev.yanmo.ime`。键盘使用 CyIME 1.15.94 的候选栏、Rime JNI 和雾凇词库。点顶部原有布局菜单选择「九键」或「26 键」。空格左侧的「中／英」切换打字语言，系统导航栏仍提供输入法切换。短按空格照常输入，长按开始听写、松手结束、上滑取消。主应用和键盘跟随系统深浅色。
 
-[音频、截屏与文稿架构图](../docs/architecture/android-ime-media.svg) · [可编辑的 draw.io 图](../docs/architecture/android-ime-media.drawio)
+主应用有书案、文稿、词库和设置四个标签。从桌面图标打开言墨后的「设置」、键盘顶部菜单的齿轮和 Android 系统输入法设置都打开同一页。设置沿用原设置的分组卡片、状态提示和开关。听写设置包括启用和选用键盘、麦克风权限，文字处理包括自然整理和文字 API，隐私与存储包括录音截屏和本机文稿说明。应用图标、Android 输入法名称及键盘菜单标识统一为言墨。键盘上的手写、拍照识别及上游独立语音入口已移除。
+
+九键和 26 键全拼的候选排序可随本机选词记录调整。启用智能联想时，输入历史也参与后续联想。无痕和敏感输入框停止新增学习记录。
+
+个人词条保存在本机，按听写命中次数、最近命中和创建时间排序。ASR 选择至多 64 个词，AI 工具组与全局组采用 48／16 配额并相互补位，其他应用取全局组。ASR 提示需要声明 `asrHints` 能力的同签名 SDK。旧版 SDK 仍可处理纯音频。
+
+在「设置 → 隐私与存储」开启「读取输入框上下文」后，录音开始时读取光标前后各最多 300 字，辅助本地 ASR 和显式开启的文字整理。开关默认关闭。HTP 超出提示 token 预算时保留优先词条和靠近光标的文字。自然整理与桌面端共用 `engine/polish.txt`。
+
+启用文字 API 后，成功上屏的口述在同一输入框内有 10 秒纠词窗口。键盘实际提交文字才算手动编辑，未上屏的组词和粘贴跳过。通过键盘提交编辑器动作时提前比较，否则到期比较。只有确认口述写入且片段内出现文字替换时，才用共用的 `engine/correction-terms.txt` 提取词条。请求只发送改前改后的口述片段和必要时的 ASR 原文。有效词条去重后存入本机。要求关闭个性化学习的编辑器跳过读取和学习。
+
+文稿详情会显示本次保存的失败原因。自 `yanmo.14` 起，「听写诊断」会随新文稿保存录音、松手、SDK 就绪、输入连接变化和上屏结果的时间线，内容只含阶段与结果。系统允许读取应用日志时，也可用 `adb logcat -d -s YanmoVoice` 查看。
+
+[Android 设计稿](../docs/design/android-v2.md) · [当前架构与上游残留](../docs/architecture/android-ime-current.md) · [音频、截屏与文稿架构图](../docs/architecture/android-ime-media.svg) · [可编辑的 draw.io 图](../docs/architecture/android-ime-media.drawio)
 
 ## 录音和文稿存储
 
-长按空格时，输入法只创建文稿 ID 和空记录，麦克风 PCM 留在进程内存。松手后补齐 WAV 头，先把完整音频保存到 SQLite，再分成最长 24 秒的窗口识别。每个有文字的窗口都会更新原文。文字 API 返回后先保存整理稿，再向仍有效的原输入框写入一次。截屏与识别并行：已授权时取松手后的一帧，在内存编码 PNG 后写入同一篇文稿。若录音期间进程终止，尚在内存的音频会丢失。达到根据堆余量计算的录音容量时，输入法会自动结束并提示。
+长按空格时，输入法创建文稿 ID 和空记录，麦克风 PCM 留在进程内存。松手后补齐 WAV 头，先把完整音频保存到 SQLite，再分成最长 24 秒的窗口识别。每个有文字的窗口都会更新原文。启用自然整理时，先保存文字 API 返回的整理稿，再向仍有效的原输入框写入一次。未启用或停用时，直接写入识别原文。若录音期间进程终止，尚在内存的音频会丢失。达到根据堆余量计算的录音容量时，输入法会自动结束并提示。
 
-私有库位于 `no_backup/manuscripts.sqlite3`。`manuscript` 表保存文本和状态，`attachment` 表按文稿 ID、媒体类型和顺序保存 256 KiB 的 BLOB 分块。回放时按播放位置读取，最多缓存一个音频分块。历史页也可从库中查看大图、删除文稿及附件。升级后首次打开历史页会在后台逐篇迁移旧目录，事务成功后清理该篇的旧文件。
+Android 11 起，可在「设置 → 录音时截屏」进入系统无障碍设置，手动开启「言墨口述截屏」。结束口述时请求一张截图，编码成 PNG 后随文稿保存。服务只请求单张截图，不读取界面控件、不监听操作。截屏失败时照常识别。原先的屏幕共享授权需要换成这项系统授权。
+
+Android 15 模拟器复验（2026-11-19）：旧版启用后在空闲和松手后都保留屏幕共享。正式签名的单帧版在空闲、长按及松手后均无投屏会话。长按期间将状态栏时钟从 11:59 切到 12:01，保存的截图显示 12:01。松手后可查看截图和测试通知，关闭开关会撤销截屏服务。
+
+私有库位于 `no_backup/manuscripts.sqlite3`。`manuscript` 表保存文本和状态，`attachment` 表按文稿 ID、媒体类型和顺序保存 256 KiB 的 BLOB 分块。回放时按播放位置读取，最多缓存一个音频分块。文稿页可复制正文、查看原文与附件，并删除整篇。升级后，书案及文稿页后台逐篇迁移旧目录，事务成功后清理该篇的旧文件。
 
 Sound Software 的同签名 Binder 接口读取有明确长度的 WAV 描述符。言墨通过 Android 的 `StorageManager.openProxyFileDescriptor` 从内存响应读请求。若系统无法创建有效代理，才使用单窗口临时 WAV，打开后先移除目录项再写入。SDK 内部仍会将收到的音频暂存为自己的 WAV，调用结束后清理。音频和截屏都在设备内处理，文字 API 只接收文字请求。
 
 ## 构建试用 APK
 
-需要 Python 3.11 或更高版本、JDK 17 或更高版本、Android SDK Platform 36、Build-Tools 36.1.0。
+需要 Python 3.11 或更高版本、JDK 17 或更高版本、Android SDK Platform 36、Build-Tools 36.1.0、NDK 29.0.14206865 和 CMake 3.22.1。
 
 ```sh
 ./android/build-apk.sh
 ```
 
-脚本核验原版 APK 的 SHA-256，保留它的 Android 资源 ID、原始布局和 Rime 原生库。脚本为原始输入法服务解除继承限制，接入言墨的输入法服务和应用入口，调整奶油主题的浅色配色。词库、键盘资源和 JNI 文件沿用原版，另从 full 版提取对应版本的九键词组模型和 Rime 资产清单。语音 SDK 以独立应用运行。原版 full APK 缓存于 `~/.cache/codex/yanmo-android`，未写入 Git。
+脚本在 `~/.cache/codex/yanmo-android` 准备固定的上游源码与子模块，应用 `android/patches/yanmo-keyboard-ui.patch` 后由 Gradle 编译 Kotlin、Java、资源和 Rime 原生库。九键词组模型来自校验过的上游 1.15.94 full APK，解包与构建都在用户缓存内。语音 SDK 以独立应用运行。
 
-- 默认产物为 `android/build/Yanmo-Android-Prototype-arm64-v8a.apk`
+- 默认正式签名产物为 `android/build/Yanmo-Android-Prototype-phone-arm64-v8a.apk`
+- `./android/build-apk.sh --unsigned` 生成独立的对齐待签名 APK
 - 以 `YANMO_SPEECH_PACKAGE=dev.androidagent.sample.fixture` 构建时，产物名附加服务应用 ID
-- 默认用 `~/.android/debug.keystore` 签名。语音 SDK 应用须与言墨签名一致才能取得签名级语音权限
-- 自定义签名可用 `YANMO_ANDROID_KEYSTORE`、`YANMO_ANDROID_KEY_ALIAS`、`YANMO_ANDROID_STORE_PASSWORD` 与 `YANMO_ANDROID_KEY_PASSWORD`
+- 默认使用本机已配置的正式发布密钥和钥匙串。言墨和 AI SDK 共用该证书，覆盖安装时保留已授权的语音权限
+- 其他构建环境可用 `YANMO_ANDROID_KEYSTORE`、`YANMO_ANDROID_KEY_ALIAS`、`YANMO_ANDROID_STORE_PASSWORD` 与 `YANMO_ANDROID_KEY_PASSWORD` 提供同一签名。脚本核验发布证书及 16 KiB 对齐
 - 如无需九键词组模型，可显式设置 `YANMO_LIGHT_KEYBOARD=1` 构建轻量包
 
-试用包面向 arm64-v8a，最低 Android 9。CyIME 的签名检查会把这份言墨开发签名识别为非官方 CyIME 安装包，启动时可能显示 CyIME 提示。请先安装配套的语音 SDK，在言墨首页授予麦克风权限，启用并切换到言墨键盘。选择九键或全键，在普通编辑框长按空格开始听写。文字 API 和截屏授权在言墨首页配置。
+安装包面向 arm64-v8a，最低 Android 9。启用并选用言墨即可打字。听写依赖同签名的 [AI SDK](https://github.com/Happenmass/acpm/releases) 及其支持的高通 HTP 设备。公开的 AI SDK `0.1.1` 可做本地听写。ASR 热词和光标提示需要 SDK 声明 `asrHints` 能力。已有版本用 `adb install -r` 覆盖安装。文字 API 和截屏授权位于言墨设置页。
 
 ## 源码与许可
 
-CyIME 及本 Android 键盘派生部分使用 GNU GPL v3。上游代码、子模块地址和资源来源固定在 CyIME 1.15.94（`6f97a555ced063c0bcad73c600fe420f5e4b2536`）。原 APK 中的第三方许可证和资源声明随试用包保留，CyIME 许可证在本目录另有副本。正式对外分发 APK 时须同时提供相应源码。
-
-以下命令准备可从源码构建的 Android 工程。该路径在 CyIME 原有空格回调直接接入听写，使用与试用包相同的言墨 Java 源码。
-
-```sh
-cyime_checkout="$HOME/.cache/codex/yanmo-android/cyime-source-1.15.94"
-git clone --depth 1 --filter=blob:none --no-checkout --branch 1.15.94 https://github.com/Cyletix/CyIME.git "$cyime_checkout"
-git -C "$cyime_checkout" sparse-checkout set --no-cone '/*' '!*.onnx' '!*.ort' '!*.safetensors' '!*.tflite' '!*.gguf'
-git -C "$cyime_checkout" checkout --detach 6f97a555ced063c0bcad73c600fe420f5e4b2536
-git -C "$cyime_checkout" submodule update --init --depth 1 --jobs 6
-./android/tools/prepare_source.py "$cyime_checkout" \
-  --keyboard-assets "$HOME/.cache/codex/yanmo-android/CyIME-1.15.94-full-arm64-v8a.apk"
-(cd "$cyime_checkout" && ./gradlew -I scripts/phone-release-abi.gradle :app:assembleDebug)
-```
-
-源码构建还需要 Android NDK 29.0.14206865、CMake 3.22.1、仓库的 Gradle 包装器及上游任务依赖。源代码准备工具接受 `--speech-package`。上游编译任务生成 Rime 资产清单。
+Android APK 按 GNU GPL v3 发布。上游代码、子模块和资源来源固定在 CyIME 1.15.94（`6f97a555ced063c0bcad73c600fe420f5e4b2536`）。第三方许可证及资源声明随 APK 保留，CyIME 许可证在本目录另有副本。Android Release 提供 APK 对应的源代码归档，含言墨构建脚本、应用补丁及构建所用的 CyIME 与子模块源码。
 
 ## 原型验收（2026-11-18）
 
@@ -57,6 +59,53 @@ git -C "$cyime_checkout" submodule update --init --depth 1 --jobs 6
 - 本次模拟器没有高通 HTP。真实 Binder 调用返回 `UNSUPPORTED_DEVICE`，录音与截屏仍可查阅。独立探针让超过 24 秒的合成音频经过生产切窗与 Binder 调用。隔离进程核对两窗的 WAV 头及全部 PCM，返回固定识别结果。受控 HTTPS 响应随后走实际整理、SQLite 保存及原输入框写入流程；另覆盖切换输入框、取消和禁用 API。执行 `ANDROID_SERIAL=<模拟器> ./android/tools/test_voice.sh -e checkBinder true` 可在已安装同签名 SDK fixture 的模拟器复验。执行 `./android/check-polish.sh` 可核对文字 API 请求与桌面端的一致性。
 - 真机试用包 `android/build/Yanmo-Android-Prototype-phone-arm64-v8a.apk` 另用录音豆正式证书签名，目标服务为 `dev.androidagent.sample`。已比对本次 APK 与留存的正式版 AI SDK 0.1.0 安装包证书，并通过 16 KiB ZIP 对齐检查。言墨在兼容高通手机上的真实口述、正式文字 API 请求和落字仍待联测。
 
-本机源码路径已验证到 Gradle 的原生和词库依赖准备阶段。完整 Gradle 编译仍依赖上游 Maven 的 OpenCV 4.12.0 等 AAR。试用包使用上面的已验证打包入口。
+## UI 改版验收（2026-11-19）
 
-本次可安装 APK 通过固定上游发布产物与本分支源码构建。独立的上游全源码 Gradle 验证到达 `:app:preDebugBuild`；该次离线编译在解析 OpenCV / ONNX Runtime 的 Maven AAR 时停止，尚未产出全源码 APK。
+- 全源码 Gradle Release 构建、同正式证书签名及 16 KiB 对齐通过。试用包版本为 `1.15.94-yanmo.1`（`20261448`）。包内移除了 CyIME 安装包误报和键盘内重复的系统输入法选择命令。
+- Android 15 模拟器覆盖旧包后打开并回放了旧录音。四页导航、扩展试写、词库分类新增、文字 API 设置以及系统深浅色切换通过。
+- 在系统设置搜索框中用 26 键输入 `nihao`，空格选中「你好」。九键复验 `64426`、短按空格、中英切换及回到九键。真实长按空格显示录音计时，深浅色切换后试写正文保留。
+- Android 17 隔离探针覆盖识别、整理状态、原文／整理稿写入、取消、错焦点、词条增删改和请求接线。SDK 通过 Binder 读取完整 WAV 描述符。Magic V6 的系统栏入口和本地 HTP 待复验。
+
+## 九键尺寸调整（2026-11-19）
+
+- 默认竖屏高度从可用屏高的 37% 降为 32%，已保存的自定义高度仍走原有调节路径。九键侧栏各占 14%，普通候选从左侧直接排列。
+- 1080×2420、480 dpi 模拟器实测，九键区从 894 px 降为 743 px，中间字母键从 216 px 加宽至 243 px。以 `64426` 输入后，候选展开、折叠及点击「你好」上屏均通过。
+- `1.15.94-yanmo.2`（`20261449`）已同签名覆盖 Magic V6，安装 APK 哈希一致，麦克风和语音 SDK 授权保留。
+
+## 设置整合验收（2026-11-19）
+
+- `1.15.94-yanmo.7`（`20261454`）已同签名覆盖 Magic V6。安装 APK 哈希一致，言墨仍为当前输入法，麦克风与语音 SDK 授权保留。
+- 模拟器验证应用设置、键盘齿轮与系统输入法设置进入同一页。深浅色、文字 API 的空值校验与保存、模型 ID 直接输入字母和符号、截屏授权跳转通过。旧设置 Activity 无法启动。
+- 九键和 26 键拼音均完成选词上屏。长按空格显示正在录音。
+
+### Magic V6 实机复验（2026-11-19）
+
+- 已装 `1.15.94-yanmo.7` 与本地同签 APK 的 SHA-256 一致。同一包内含统一设置和口述结束时的单帧截屏。实测从九键顶部菜单点齿轮，进入言墨设置。
+- 用 Mac 扬声器播放合成测试句，手机通过长按空格录音约 6 秒。暂时关闭自然整理后，试写框收到「今天下午三点开会，请准备一杯温水。」。SDK 控制台显示 Qualcomm HTP、最近一次 Decode 306 ms、失败计数 0。
+- 临时启用「言墨口述截屏」后，新文稿含一张可放大的截屏附件。画面保留录音计时 00:05。空闲、录音中、松手后均无 MediaProjection 会话。
+- 测完恢复自然整理开启、截屏关闭及测试前的前台应用。测试文稿留在言墨供检查。实机截图在本机 `android/build/magic-v6-verification/`。
+
+### 遗留清理和润色验证（2026-11-19）
+
+- `1.15.94-yanmo.10`（`20261457`）沿用发布证书覆盖 Magic V6，设备 APK 与本地构建哈希一致。九键 `64426` 和 26 键 `nihao` 均选择「你好」上屏，键盘齿轮进入言墨设置。
+- APK 从 138.52 MiB 降至 118.06 MiB。清单、DEX、R8 映射和 ZIP 复核覆盖旧设置、手写、OCR、旧听写、字幕、Lua 插件和跨设备剪贴板。九键词组模型、Rime JNI、`libcylm.so` 和原生 ONNX Runtime 保留。启动继续使用已安装的 Rime 数据目录和用户词库。
+- 清理版真机曾触发键盘尺寸调节 composable 的 R8 校验错误。构建给该组件加局部保留规则，覆盖包实测可正常打开两种布局。
+- Magic V6 上言墨与 SDK 的证书及签名权限一致。SDK 进程被回收后，Android 能解析已安装的服务，绑定返回失败。言墨现在提示连接失败。打开 SDK 控制台后，最终包实测 Qualcomm HTP 上屏（最近一次 Decode 301 ms），松手在文稿保存一张可放大截屏，空闲、录音中和松手后均无 MediaProjection 会话。自然整理和截屏授权恢复原值。
+- 安卓和 Mac 使用同一份 `engine/polish.txt`。自然整理默认省略最后一句的中英文句号，保留必要格式和有效问号、感叹号。两端文字请求一致性测试通过。
+
+### Magic V6 的 SDK 冷启动（2026-11-19）
+
+- 自动管理下，SDK 进程回收后仍能解析同签名的语音服务，首次绑定返回失败。授予 AI SDK 的「允许关联启动」后，系统能从 Binder 服务请求正常拉起进程。设备上的入口是「设置 → 应用启动管理 → AI SDK → 手动管理」。这次只勾选了「允许关联启动」。
+- 正式签名的 `1.15.94-yanmo.12`（`20261459`）已覆盖安装。绑定失败时，言墨会清理被拒绝的连接，并在荣耀设备提示对应的系统设置。AI SDK 沿用设备原有的 0.1.1 推理代码、模型和资源。为覆盖诊断包，只递增了 SDK 的安装版本号（`versionCode=4`），重新用原证书签名。
+- 真机通过 Android Activity Manager 回收 SDK 后，确认长按前无 SDK PID，且没有强行停止应用。第一次长按空格即完成 Qualcomm HTP 听写并写入试写框。系统启动历史记录为 `reason=SERVICE`、`startType=COLD`。控制台于上屏后打开核对诊断，同一流程连续两次通过，最近一次 Decode 分别为 344 ms 和 282 ms。
+- 松手后文稿出现一张可放大截屏。空闲、录音中、松手后均无 MediaProjection 会话。两轮均恢复原有自然整理和截屏授权。两份 APK 的设备哈希与本地产物一致。
+
+### 光标上下文、纠词与听写诊断（2026-11-19）
+
+- Magic V6 已原签覆盖 `1.15.94-yanmo.14` 与 SM8850 O3 AI SDK `0.1.2-dev`。从无 SDK 进程开始，在试写框完成携带光标上下文的 HTP 识别，松手后键盘仍可用。文稿可展开「听写诊断」，冷启动连接、上下文和上屏均可见。测试后恢复文字整理和上下文开关原值。
+- Android 模拟器探针核对两段 Binder 请求的前后各 300 字及热词，验证手动修改等待 10 秒后提取并入库、词频排序以及听写诊断保存。`./android/check-polish.sh` 核对桌面与安卓文字 API 请求。已安装安卓 APK 与运行中 Mac 应用的 `polish.txt` SHA-256 一致。
+
+### ASR 分项计时（本地诊断版）
+
+- `yanmo.15` 的「听写诊断」记录 Binder 音频描述符准备、请求往返、SDK 权重准备和音频交接、推理总耗时、模型加载、前端与预填及解码。系统拒绝绑定时同时记录 SDK 的停止标记。SDK 未提供的指标不会被记成零。
+- SDK `0.1.3-dev` 新增服务端分项及失败阶段，兼容原 SpeechWire V1。模型加载、前端与预填、解码均包含在推理总计内；请求往返另含服务端准备、音频交接和进程间通信。

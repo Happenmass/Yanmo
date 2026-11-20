@@ -146,6 +146,15 @@ final class Manuscripts {
         saveMedia(context, id, "screenshot", png);
     }
 
+    static void saveDiagnostics(Context context, String id, String text) {
+        saveMedia(context, id, "diagnostics", text.getBytes(StandardCharsets.UTF_8));
+    }
+
+    static String diagnostics(Context context, String id) {
+        byte[] data = media(context, id, "diagnostics");
+        return data == null ? "" : new String(data, StandardCharsets.UTF_8);
+    }
+
     private static void saveMedia(Context context, String id, String kind, byte[] data) {
         SQLiteDatabase db = database(context);
         db.beginTransactionNonExclusive();
