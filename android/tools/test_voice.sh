@@ -29,7 +29,7 @@ cat > "$work/AndroidManifest.xml" <<'XML'
 XML
 main="$repo/android/src/main/java/dev/yanmo/ime"
 javac --release 8 -cp "$platform" -d "$work/classes" \
-    "$main"/{VoiceSession,LocalAsr,Manuscripts,Lexicon,Polish,ScreenCapture,CorrectionWindow,EditorContext}.java \
+    "$main"/{VoiceSession,VoiceFailureHistory,LocalAsr,Manuscripts,Lexicon,Polish,ScreenCapture,CorrectionWindow,EditorContext}.java \
     "$repo"/android/src/androidTest/java/dev/yanmo/ime/{VoiceSessionProbe,ManuscriptStoreProbe,SpeechWireProbeService}.java
 jar cf "$work/classes.jar" -C "$work/classes" .
 "$tools/d8" --lib "$platform" --min-api 28 --output "$work/dex" "$work/classes.jar"

@@ -9,16 +9,13 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.os.Bundle;
 import android.os.Handler;
-import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Message;
 import android.os.Messenger;
 import android.os.ParcelFileDescriptor;
-import android.os.ProxyFileDescriptorCallback;
 import android.os.RemoteException;
 import android.os.SystemClock;
-import android.os.storage.StorageManager;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -31,6 +28,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 /** Android Agent SDK SpeechWire V1 client. */
 final class LocalAsr implements AutoCloseable {
@@ -38,6 +36,9 @@ final class LocalAsr implements AutoCloseable {
     private static final int STATUS = 1;
     private static final int ASR = 2;
     private static final int CANCEL = 4;
+    private static final Pattern CODE = Pattern.compile("[A-Z0-9_]{1,64}");
+    private static final Pattern DETAIL = Pattern.compile("[A-Z0-9_]{1,64}|QNN [a-zA-Z0-9_ ]{1,60}|[A-Za-z0-9_]{1,55}(?:Exception|Error)");
+    private static final Pattern NATIVE = Pattern.compile("0x[0-9a-f]{1,16}|(?:errno|exit) -?[0-9]{1,10}");
 
     private final Context app;
     private final Consumer<String> diagnostics;
@@ -53,7 +54,6 @@ final class LocalAsr implements AutoCloseable {
     private volatile boolean disconnected;
     private boolean bound;
     private boolean acceptsHints;
-    private HandlerThread audioCallbacks;
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder binder) {
@@ -121,21 +121,18 @@ final class LocalAsr implements AutoCloseable {
         Bundle result = request(STATUS, new Bundle(), 5);
         acceptsHints = result.getBoolean("asrHints");
         String status = result.getString("asr");
-        if (status == null) throw new Failure("INVALID_REPLY");
-        if (!status.equals("READY")) throw new Failure(status);
+        if (!"READY".equals(status)) {
+            throw new Failure(status == null ? "INVALID_REPLY" : code(status),
+                    "stage=STATUS_REPLY request=" + result.getString("id", "-") + " sdkPid=" + result.getInt("servicePid"));
+        }
     }
 
     boolean acceptsHints() { return acceptsHints; }
 
     String transcribeWindow(byte[] window, List<String> hotwords, EditorContext context) throws IOException {
         long started = SystemClock.elapsedRealtime();
-        ParcelFileDescriptor memory;
-        try {
-            memory = openProxyAudio(new WavReader(window));
-        } catch (IOException unavailable) {
-            memory = null;
-        }
-        try (ParcelFileDescriptor audio = memory != null ? memory : openUnlinkedAudio(window)) {
+        String transport = "fd=FILE wavBytes=" + window.length;
+        try (ParcelFileDescriptor audio = openUnlinkedAudio(window)) {
             Bundle input = new Bundle();
             input.putParcelable("audio", audio);
             if (acceptsHints) {
@@ -146,18 +143,23 @@ final class LocalAsr implements AutoCloseable {
             long sent = SystemClock.elapsedRealtime();
             try {
                 Bundle reply = request(ASR, input, 120);
-                logTiming(reply, sent - started, SystemClock.elapsedRealtime() - sent);
+                logTiming(reply, sent - started, SystemClock.elapsedRealtime() - sent, transport);
                 String text = reply.getString("text");
-                if (text == null) throw new Failure("INVALID_REPLY");
+                if (text == null) throw new Failure("INVALID_REPLY", "stage=BINDER_REPLY request=" + reply.getString("id", "-"));
                 return text;
             } catch (Failure failure) {
                 diagnostics.accept("识别请求耗时 " + (SystemClock.elapsedRealtime() - sent) + " ms");
-                throw failure;
+                throw new Failure(failure.reason, failure.details + " " + transport + " fdMs=" + (sent - started));
             }
+        } catch (Failure failure) {
+            throw failure;
+        } catch (IOException failure) {
+            throw new Failure("AUDIO_DESCRIPTOR_IO", "stage=AUDIO_DESCRIPTOR " + transport
+                    + " throwable=" + failure.getClass().getSimpleName());
         }
     }
 
-    private void logTiming(Bundle reply, long descriptorMs, long requestMs) {
+    private void logTiming(Bundle reply, long descriptorMs, long requestMs, String transport) {
         StringBuilder line = new StringBuilder("识别计时 · 音频描述符 ").append(descriptorMs)
                 .append(" ms · 请求往返 ").append(requestMs).append(" ms");
         appendTime(line, reply, "prepareMs", "权重准备");
@@ -166,7 +168,7 @@ final class LocalAsr implements AutoCloseable {
         appendTime(line, reply, "modelLoadMs", "模型加载");
         appendTime(line, reply, "frontendMs", "前端与预填");
         appendTime(line, reply, "decodeMs", "解码");
-        diagnostics.accept(line.toString());
+        diagnostics.accept(line.append(" · ").append(transport).toString());
     }
 
     private static void appendTime(StringBuilder line, Bundle reply, String key, String label) {
@@ -184,50 +186,17 @@ final class LocalAsr implements AutoCloseable {
         return request(operation, input, timeoutSeconds);
     }
 
-    ParcelFileDescriptor openProxyAudio(WavReader reader) throws IOException {
-        StorageManager storage = app.getSystemService(StorageManager.class);
-        if (storage == null) throw new IOException("Proxy file descriptors are unavailable");
-        if (audioCallbacks == null) {
-            audioCallbacks = new HandlerThread("YanmoAsrAudio");
-            audioCallbacks.start();
-        }
-        ParcelFileDescriptor audio = storage.openProxyFileDescriptor(ParcelFileDescriptor.MODE_READ_ONLY,
-                reader, new Handler(audioCallbacks.getLooper()));
-        if (audio.getStatSize() == reader.onGetSize()) return audio;
-        audio.close();
-        throw new IOException("The proxy descriptor does not report its audio size");
-    }
-
-    static class WavReader extends ProxyFileDescriptorCallback {
-        private final byte[] wav;
-
-        WavReader(byte[] wav) {
-            this.wav = wav;
-        }
-
-        @Override public long onGetSize() {
-            return wav.length;
-        }
-
-        @Override public int onRead(long offset, int size, byte[] buffer) {
-            if (offset >= wav.length || size <= 0) return 0;
-            int count = Math.min(size, wav.length - (int) offset);
-            System.arraycopy(wav, (int) offset, buffer, 0, count);
-            return count;
-        }
-
-        @Override public void onRelease() {}
-    }
-
-    private ParcelFileDescriptor openUnlinkedAudio(byte[] window) throws IOException {
+    ParcelFileDescriptor openUnlinkedAudio(byte[] window) throws IOException {
         File file = File.createTempFile("asr-", ".wav", app.getCacheDir());
-        try (FileOutputStream output = new FileOutputStream(file)) {
+        try {
             ParcelFileDescriptor audio = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
             boolean success = false;
             try {
-                // Remove the name before writing a byte, including for process death mid-request.
-                if (!file.delete()) throw new IOException("Cannot unlink the temporary ASR window");
-                output.write(window);
+                try (FileOutputStream output = new FileOutputStream(file)) {
+                    // Unlink before writing so the audio is reachable only through the open descriptors.
+                    if (!file.delete()) throw new IOException("Cannot unlink the temporary ASR window");
+                    output.write(window);
+                }
                 success = true;
                 return audio;
             } finally {
@@ -239,17 +208,21 @@ final class LocalAsr implements AutoCloseable {
     }
 
     private Bundle request(int operation, Bundle data, long timeoutSeconds) throws Failure {
-        Messenger server = await(connected, 5, "DISCONNECTED");
         Request request = new Request();
-        pending = request;
-        if (disconnected) {
-            pending = null;
-            throw new Failure("DISCONNECTED");
-        }
+        Messenger server = null;
+        String stage = "BINDER_CONNECT";
+        long started = SystemClock.elapsedRealtime();
+        boolean sent = false;
         data.putString("id", request.id);
         boolean received = false;
         try {
+            server = await(connected, 5, "CONNECT_TIMEOUT");
+            pending = request;
+            if (disconnected) throw new Failure("DISCONNECTED");
+            stage = "BINDER_SEND";
             send(server, operation, data);
+            sent = true;
+            stage = "BINDER_REPLY";
             Bundle reply = await(request.reply, timeoutSeconds, "TIMEOUT");
             received = true;
             String error = reply.getString("error");
@@ -263,14 +236,24 @@ final class LocalAsr implements AutoCloseable {
                         default: break;
                     }
                 }
-                throw new Failure(error);
+                StringBuilder details = new StringBuilder("sdkPid=").append(reply.getInt("servicePid"));
+                appendSafe(details, "asrPhase", reply.getString("asrPhase"), Pattern.compile("prepare|transfer|inference"));
+                appendSafe(details, "sdkStage", reply.getString("failureStage"), CODE);
+                appendSafe(details, "sdkDetail", reply.getString("failureDetail"), DETAIL);
+                appendSafe(details, "native", reply.getString("nativeErrorCode"), NATIVE);
+                if (reply.containsKey("failureElapsedMs")) details.append(" sdkMs=").append(reply.getLong("failureElapsedMs"));
+                throw new Failure(code(error), details.toString());
             }
             return reply;
         } catch (RemoteException failure) {
-            throw new Failure("DISCONNECTED");
+            throw new Failure("DISCONNECTED", requestDetails(operation, request.id, stage, started)
+                    + " throwable=" + failure.getClass().getSimpleName());
+        } catch (Failure failure) {
+            throw new Failure(failure.reason, requestDetails(operation, request.id, stage, started)
+                    + (failure.details.isEmpty() ? "" : " " + failure.details));
         } finally {
             pending = null;
-            if (!received) {
+            if (sent && !received) {
                 Bundle cancel = new Bundle();
                 cancel.putString("id", request.id);
                 try {
@@ -279,6 +262,22 @@ final class LocalAsr implements AutoCloseable {
                     // Service is already disconnected.
                 }
             }
+        }
+    }
+
+    private static String requestDetails(int operation, String requestId, String stage, long started) {
+        String op = operation == ASR ? "ASR" : operation == STATUS ? "STATUS" : "SPEAKERS";
+        return "operation=" + op + " stage=" + stage + " request=" + requestId
+                + " roundTripMs=" + (SystemClock.elapsedRealtime() - started);
+    }
+
+    private static String code(String value) {
+        return value != null && CODE.matcher(value).matches() ? value : "UNKNOWN_SDK_ERROR";
+    }
+
+    private static void appendSafe(StringBuilder details, String key, String value, Pattern pattern) {
+        if (value != null && value.length() <= 64 && pattern.matcher(value).matches()) {
+            details.append(' ').append(key).append('=').append(value);
         }
     }
 
@@ -303,7 +302,6 @@ final class LocalAsr implements AutoCloseable {
     }
 
     @Override public void close() {
-        if (audioCallbacks != null) audioCallbacks.quitSafely();
         if (bound) {
             app.unbindService(connection);
             bound = false;
@@ -317,9 +315,15 @@ final class LocalAsr implements AutoCloseable {
 
     static final class Failure extends IOException {
         final String reason;
+        final String details;
 
         Failure(String reason) {
+            this(reason, "");
+        }
+
+        Failure(String reason, String details) {
             this.reason = reason;
+            this.details = details;
         }
     }
 }

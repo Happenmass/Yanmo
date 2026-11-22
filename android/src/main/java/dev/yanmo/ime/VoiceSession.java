@@ -115,6 +115,7 @@ public final class VoiceSession {
         }
         if (host.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             Log.i(TAG, "start rejected: microphone permission");
+            VoiceFailureHistory.record(app, 0, "录音", "MICROPHONE_PERMISSION_DENIED", "");
             notice("请先为言墨开启麦克风权限");
             return false;
         }
@@ -131,6 +132,7 @@ public final class VoiceSession {
             return true;
         } catch (RuntimeException error) {
             Log.w(TAG, "start failed: manuscript");
+            VoiceFailureHistory.record(app, 0, "开始听写", "DICTATION_START_FAILED", error.getClass().getSimpleName());
             notice("无法创建文稿");
             return false;
         }
@@ -231,6 +233,7 @@ public final class VoiceSession {
                 failure = "录音已取消";
             } else if (wav.length <= WAV_HEADER) {
                 failure = "未采集到音频";
+                recording.failure(stage, "EMPTY_AUDIO", "");
             } else {
                 stage = "语音识别";
                 List<Lexicon.Entry> entries = Collections.emptyList();
@@ -249,6 +252,7 @@ public final class VoiceSession {
                 recording.raw = raw;
                 if (raw.trim().isEmpty()) {
                     failure = "未识别到语音";
+                    recording.failure(stage, "EMPTY_TRANSCRIPT", "wavBytes=" + wav.length);
                 } else if (!Polish.enabled(app)) {
                     textToCommit = raw;
                 } else {
@@ -264,6 +268,7 @@ public final class VoiceSession {
                             recording.context, recording.terms);
                     if (polished.trim().isEmpty()) {
                         failure = "文字 API 返回空结果";
+                        recording.failure(stage, "EMPTY_POLISH_REPLY", "");
                     } else {
                         stage = "保存成文";
                         Manuscripts.polished(app, recording.id, polished);
@@ -273,11 +278,14 @@ public final class VoiceSession {
             }
         } catch (LocalAsr.Failure error) {
             failure = asrFailure(error.reason);
+            recording.failure(stage, error.reason, error.details.isEmpty() ? "stage=BINDER_BIND" : error.details);
         } catch (Polish.Failure error) {
             failure = error.getMessage();
+            recording.failure(stage, "POLISH_FAILED", error.getMessage());
         } catch (Exception error) {
             // Preserve only stage-level diagnostics. Remote exceptions may contain request data.
             failure = stage + "失败";
+            recording.failure(stage, "DICTATION_STAGE_FAILED", error.getClass().getSimpleName());
         }
         String result = textToCommit;
         String error = failure;
@@ -290,12 +298,14 @@ public final class VoiceSession {
                 InputConnection target = recording.editor;
                 if (destroyed || target == null || target != host.getCurrentInputConnection()) {
                     failure = "输入框已切换，文字已保存到文稿";
+                    recording.failure("写入", "EDITOR_CHANGED", "");
                 } else {
                     CorrectionWindow observation = !recording.privateEditor && Polish.enabled(app) && !composing.getAsBoolean()
                             ? CorrectionWindow.beforeWrite(target, text, recording.raw, recording.group,
                                     SystemClock.uptimeMillis()) : null;
                     if (!target.commitText(text, 1)) {
                         failure = "无法写入输入框，文字已保存到文稿";
+                        recording.failure("写入", "EDITOR_COMMIT_REJECTED", "");
                     } else {
                         if (!recording.terms.isEmpty()) worker.execute(() -> {
                             try {
@@ -313,13 +323,20 @@ public final class VoiceSession {
             }
         } catch (RuntimeException error) {
             failure = "无法写入输入框，文字已保存到文稿";
+            recording.failure("写入", "EDITOR_COMMIT_FAILED", error.getClass().getSimpleName());
         } finally {
             recording.event(failure == null ? "已写入输入框" : failure);
             try {
+                if (!recording.cancelled && recording.failureCode != null) {
+                    VoiceFailureHistory.record(app, SystemClock.elapsedRealtime() - recording.startedAt,
+                            recording.failureStage, recording.failureCode, recording.failureDetail);
+                }
                 if (failure != null) Manuscripts.fail(app, recording.id, failure);
                 Manuscripts.saveDiagnostics(app, recording.id, recording.diagnostics.toString());
-            } catch (RuntimeException ignored) {
+            } catch (RuntimeException error) {
                 // Always release the session when the storage layer reports an error.
+                VoiceFailureHistory.record(app, SystemClock.elapsedRealtime() - recording.startedAt,
+                        "保存文稿", "MANUSCRIPT_SAVE_FAILED", error.getClass().getSimpleName());
             } finally {
                 Manuscripts.end(app, recording.id);
                 active = null;
@@ -458,6 +475,7 @@ public final class VoiceSession {
             case "MODELS_NOT_INSTALLED":
             case "RUNTIME_NOT_INSTALLED": return "请先安装本地语音识别模型和运行时";
             case "DISCONNECTED": return "本地语音识别服务已断开";
+            case "CONNECT_TIMEOUT": return "本地语音识别服务已断开";
             case "TIMEOUT": return "本地语音识别超时";
             case "BUSY": return "本地语音识别服务正忙";
             default: return "本地语音识别失败";
@@ -476,6 +494,9 @@ public final class VoiceSession {
         final boolean privateEditor;
         final long startedAt = SystemClock.elapsedRealtime();
         final StringBuffer diagnostics = new StringBuffer();
+        String failureStage;
+        String failureCode;
+        String failureDetail;
         String raw;
         List<Lexicon.Entry> terms = Collections.emptyList();
         final CountDownLatch readyToSave = new CountDownLatch(1);
@@ -484,6 +505,16 @@ public final class VoiceSession {
         boolean polishing;
         volatile boolean finishRecording;
         volatile boolean cancelled;
+
+        synchronized void failure(String stage, String code, String detail) {
+            failureStage = stage;
+            failureCode = code;
+            failureDetail = detail;
+            String message = "失败代码 " + code + (detail.isEmpty() ? "" : " · " + detail);
+            Log.w(TAG, message);
+            diagnostics.append('+').append(SystemClock.elapsedRealtime() - startedAt)
+                    .append(" ms  ").append(message).append('\n');
+        }
 
         synchronized void event(String message) {
             Log.i(TAG, message);

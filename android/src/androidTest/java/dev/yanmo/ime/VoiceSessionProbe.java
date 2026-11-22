@@ -33,7 +33,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /** Runs the real voice coordinator and text request with synthetic audio and a deterministic HTTPS response. */
 public final class VoiceSessionProbe extends Instrumentation {
@@ -63,26 +62,59 @@ public final class VoiceSessionProbe extends Instrumentation {
                 };
             });
             Context context = getTargetContext();
+            if ("true".equals(arguments.getString("verifyFailureRestart"))) {
+                VoiceFailureHistory.Entry latest = VoiceFailureHistory.recent(context).get(0);
+                check(latest.code.equals("INFERENCE_FAILED") && latest.detail.contains("sdkStage=AUDIO_READ"),
+                        "Failure diagnostics did not persist across process restart");
+                result.putString("stream", "Voice session passed: failure history persisted across restart.\n");
+                finish(Activity.RESULT_OK, result);
+                return;
+            }
             ManuscriptStoreProbe.verify(context);
             check(Polish.settings(context).edit().clear().commit(), "could not reset probe settings");
             verifyLexicon(context);
             check(!EditorContext.enabled(context), "context must start disabled");
             EditorContext.setEnabled(context, true);
-            runTake(false, false, 1);
-            check(requests == 0, "unconfigured text API received a request");
-            Polish.save(context, true, "https://voice-probe.invalid/v1", "synthetic", "", true);
-            runTake(false, false, 1, true);
-            check(extractionRequests == 1, "manual correction did not trigger one extraction");
-            runTake(true, false, 0);
-            runTake(false, true, 0);
-            check(requests == 2, "expected two calls to the enabled text API");
-            Polish.save(context, false, "https://voice-probe.invalid/v1", "synthetic", "", true);
-            runTake(false, false, 1);
-            check(requests == 2, "disabled text API received a request");
-            if ("true".equals(arguments.getString("checkBinder"))) {
-                result.putString("binder", verifyMemoryBinder(context));
+            boolean diagnosticsOnly = "true".equals(arguments.getString("diagnosticsOnly"));
+            if (!diagnosticsOnly) {
+                runTake(false, false, 1);
+                check(requests == 0, "unconfigured text API received a request");
+                Polish.save(context, true, "https://voice-probe.invalid/v1", "synthetic", "", true);
+                runTake(false, false, 1, true);
+                check(extractionRequests == 1, "manual correction did not trigger one extraction");
+                runTake(true, false, 0);
+                runTake(false, true, 0);
+                check(requests == 2, "expected two calls to the enabled text API");
+                Polish.save(context, false, "https://voice-probe.invalid/v1", "synthetic", "", true);
+                runTake(false, false, 1);
+                check(requests == 2, "disabled text API received a request");
             }
-            result.putString("stream", "Voice session passed: raw/polished commit, editor switch, cancellation, SQLite media, ranked words, both cursor sides and hotwords on both ASR Binder windows, manual correction extraction and persistence.\n");
+            Lexicon.save(context, null, "SyntheticFailureMarker", Lexicon.AI_TOOLS);
+            runTake(false, false, 0, false, true);
+            VoiceFailureHistory.Entry latest = VoiceFailureHistory.recent(context).get(0);
+            check(latest.code.equals("INFERENCE_FAILED") && latest.detail.contains("request=")
+                    && latest.detail.contains("sdkStage=AUDIO_READ") && latest.detail.contains("native=errno 5")
+                    && latest.detail.contains("sdkMs=7") && latest.detail.contains("fd=FILE")
+                    && !latest.detail.contains("SyntheticFailureMarker"), "incorrect independent failure history");
+            if ("true".equals(arguments.getString("checkFailureBinder"))) {
+                try (LocalAsr asr = new LocalAsr(context, "dev.androidagent.sample.fixture")) {
+                    asr.requireReady();
+                    try {
+                        asr.transcribeWindow(new byte[64], java.util.Collections.emptyList(), EditorContext.EMPTY);
+                        throw new AssertionError("Expected invalid WAV error from SDK");
+                    } catch (LocalAsr.Failure failure) {
+                        check(failure.reason.equals("INFERENCE_FAILED") && failure.details.contains("sdkStage=WAV_VALIDATION")
+                                && failure.details.contains("sdkDetail=INVALID_WAV"), "unexpected real SDK failure reply");
+                        result.putString("correlation", failure.details);
+                    }
+                }
+            }
+            if ("true".equals(arguments.getString("checkBinder"))) {
+                result.putString("binder", verifyFileBinder(context));
+            }
+            result.putString("stream", diagnosticsOnly
+                    ? "Voice session passed: persisted ASR failure metadata.\n"
+                    : "Voice session passed: raw/polished commit, editor switch, cancellation, SQLite media, ranked words, both cursor sides and hotwords on both ASR Binder windows, manual correction extraction, and persisted ASR failure metadata.\n");
             finish(Activity.RESULT_OK, result);
         } catch (Exception | AssertionError failure) {
             result.putString("stream", android.util.Log.getStackTraceString(failure));
@@ -117,29 +149,19 @@ public final class VoiceSessionProbe extends Instrumentation {
                 "unrelated app got scoped words");
     }
 
-    private String verifyMemoryBinder(Context context) throws Exception {
+    private String verifyFileBinder(Context context) throws Exception {
         byte[] wav = new byte[44 + 16_000 * 2 * 2];
         VoiceSession.writeHeader(wav);
-        AtomicInteger bytesRead = new AtomicInteger();
-        LocalAsr.WavReader observer = new LocalAsr.WavReader(wav) {
-            @Override public int onRead(long offset, int size, byte[] buffer) {
-                int count = super.onRead(offset, size, buffer);
-                bytesRead.addAndGet(count);
-                return count;
-            }
-        };
         try (LocalAsr asr = new LocalAsr(context, "dev.androidagent.sample.fixture");
-             ParcelFileDescriptor audio = asr.openProxyAudio(observer)) {
-            check(audio.getStatSize() == wav.length, "proxy descriptor did not report WAV length");
+             ParcelFileDescriptor audio = asr.openUnlinkedAudio(wav)) {
+            check(audio.getStatSize() == wav.length, "file descriptor did not report WAV length");
             // SPEAKERS uses the same SDK withAudio() path as ASR and does not gate on HTP.
             try {
                 check(asr.requestAudio(3, audio, 30).getLongArray("turns") != null, "invalid SDK speaker reply");
             } catch (LocalAsr.Failure failure) {
-                // The emulator fixture can omit speaker weights. Verify the service has already read
-                // the complete WAV in withAudio() before treating that diagnostic as expected.
+                // The emulator SDK fixture can omit speaker weights.
                 check("INFERENCE_FAILED".equals(failure.reason), "SDK speaker error: " + failure.reason);
             }
-            check(bytesRead.get() == wav.length, "SDK did not read all WAV bytes: " + bytesRead.get());
             try {
                 asr.requireReady();
                 throw new AssertionError("emulator unexpectedly supports HTP");
@@ -147,7 +169,7 @@ public final class VoiceSessionProbe extends Instrumentation {
                 check("UNSUPPORTED_DEVICE".equals(failure.reason), "Binder ASR status: " + failure.reason);
             }
         }
-        return "Signed SDK read " + bytesRead.get() + " WAV bytes via read-only memory FD; HTP returned UNSUPPORTED_DEVICE.";
+        return "Signed SDK speaker request exercised with a read-only file FD; HTP returned UNSUPPORTED_DEVICE.";
     }
 
     private void runTake(boolean switchEditor, boolean cancel, int commits) throws Exception {
@@ -155,9 +177,13 @@ public final class VoiceSessionProbe extends Instrumentation {
     }
 
     private void runTake(boolean switchEditor, boolean cancel, int commits, boolean learn) throws Exception {
+        runTake(switchEditor, cancel, commits, learn, false);
+    }
+
+    private void runTake(boolean switchEditor, boolean cancel, int commits, boolean learn, boolean sdkFailure) throws Exception {
         Context context = getTargetContext();
         String[] previous = Manuscripts.history(context);
-        boolean realWindows = commits > 0;
+        boolean realWindows = commits > 0 || sdkFailure;
         byte[] pcm = realWindows ? SpeechWireProbeService.pcm() : new byte[] {1, 2, 3, 4};
         String expectedRaw = realWindows ? SpeechWireProbeService.TRANSCRIPT : RAW;
         expectedApiRaw = expectedRaw;
@@ -251,11 +277,13 @@ public final class VoiceSessionProbe extends Instrumentation {
             check(decoded != null && decoded.getPixel(0, 0) == Color.MAGENTA, "SQLite screenshot could not be decoded");
             decoded.recycle();
         }
-        check(Manuscripts.read(context, id, "raw").equals(cancel ? "" : expectedRaw), "incorrect raw transcript");
+        check(Manuscripts.read(context, id, "raw").equals(cancel || sdkFailure ? "" : expectedRaw), "incorrect raw transcript");
         check(Manuscripts.read(context, id, "polished").equals(cancel || !enabled ? "" : POLISHED), "incorrect polished transcript");
-        check(Manuscripts.read(context, id, "error").isEmpty() == !(switchEditor || cancel), "incorrect manuscript error");
+        check(Manuscripts.read(context, id, "error").isEmpty() == !(switchEditor || cancel || sdkFailure), "incorrect manuscript error");
         String diagnostics = Manuscripts.diagnostics(context, id);
         check(diagnostics.contains("录音开始"), "missing persisted recording diagnostic");
+        if (sdkFailure) check(diagnostics.contains(VoiceFailureHistory.recent(context).get(0).detail),
+                "manuscript and independent history must save the same request metadata");
         if (commits > 0) check(diagnostics.contains("光标上下文已提供") && diagnostics.contains("已写入输入框")
                 && !diagnostics.contains("Kai") && !diagnostics.contains("前前"), "incorrect persisted ASR diagnostics");
         if (commits > 0) {

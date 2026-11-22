@@ -65,7 +65,7 @@ public final class YanmoActivity extends ComponentActivity {
     private static final String[] TERM_GROUPS = {Lexicon.GLOBAL, Lexicon.AI_TOOLS};
 
     private enum Screen {
-        DESK(0), TRIAL(0), HISTORY(1), MANUSCRIPT(1), DICTIONARY(2), TERM(2), SETTINGS(3), API(3);
+        DESK(0), TRIAL(0), HISTORY(1), MANUSCRIPT(1), DICTIONARY(2), TERM(2), SETTINGS(3), API(3), DIAGNOSTICS(3);
         final int tab;
         Screen(int tab) { this.tab = tab; }
     }
@@ -153,6 +153,7 @@ public final class YanmoActivity extends ComponentActivity {
             case TERM: showTerm(state.getString("termId")); break;
             case SETTINGS: showSettings(); break;
             case API: showApiSettings(state.getBoolean("requestEnable")); break;
+            case DIAGNOSTICS: showVoiceFailures(); break;
         }
     }
 
@@ -369,7 +370,22 @@ public final class YanmoActivity extends ComponentActivity {
     private void showSettings() {
         openPage(Screen.SETTINGS, "", this::showHome);
         settingsView = new YanmoSettings(this, this::manageMicrophone, this::changeScreenshot, this::showApiSettings);
-        page.addView(settingsView.getView(), new LinearLayout.LayoutParams(-1, -1));
+        page.addView(settingsView.getView(), new LinearLayout.LayoutParams(-1, 0, 1));
+        actionRow(page, "最近听写失败", "", this::showVoiceFailures);
+    }
+
+    private void showVoiceFailures() {
+        openPage(Screen.DIAGNOSTICS, "最近听写失败", this::showSettings);
+        load(() -> VoiceFailureHistory.recent(this), failures -> {
+            if (failures.isEmpty()) paragraph("暂无失败记录。", colors.secondary);
+            for (VoiceFailureHistory.Entry failure : failures) {
+                heading(page, failure.stage + " · " + failure.code, 18);
+                String at = DateFormat.getDateTimeInstance().format(new Date(failure.atMs));
+                paragraph(at + " · " + failure.elapsedMs + " ms", colors.secondary);
+                if (!failure.detail.isEmpty()) selectableText(page, failure.detail, "");
+                divider(page);
+            }
+        }, () -> paragraph("无法读取失败记录。", colors.warning));
     }
 
     private void changeScreenshot(boolean enabled) {
@@ -900,7 +916,7 @@ public final class YanmoActivity extends ComponentActivity {
             scroll.setFillViewport(true);
             page.setPadding(dp(22), dp(14), dp(22), dp(24));
             scroll.addView(page, new ScrollView.LayoutParams(-1, -2));
-            if (next == Screen.TRIAL || next == Screen.MANUSCRIPT || next == Screen.TERM) {
+            if (next == Screen.TRIAL || next == Screen.MANUSCRIPT || next == Screen.TERM || next == Screen.DIAGNOSTICS) {
                 textAction(page, "‹  返回", back);
             }
             LinearLayout header = horizontal(page);

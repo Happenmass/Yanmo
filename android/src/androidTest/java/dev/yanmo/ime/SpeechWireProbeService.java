@@ -10,6 +10,10 @@ import android.os.Message;
 import android.os.Messenger;
 import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
+import android.system.ErrnoException;
+import android.system.Os;
+import android.system.OsConstants;
+import android.system.StructStat;
 import android.util.Log;
 
 import java.io.DataInputStream;
@@ -55,6 +59,15 @@ public final class SpeechWireProbeService extends Service {
                 case 2: // ASR
                     try (ParcelFileDescriptor audio = data.getParcelable("audio")) {
                         require(ready && windows < 2 && audio != null, "unexpected ASR request");
+                        if (data.getStringArrayList("hotwords").contains("SyntheticFailureMarker")) {
+                            response.putString("error", "INFERENCE_FAILED");
+                            response.putString("asrPhase", "transfer");
+                            response.putString("failureStage", "AUDIO_READ");
+                            response.putString("failureDetail", "DESCRIPTOR_READ_FAILED");
+                            response.putString("nativeErrorCode", "errno 5");
+                            response.putLong("failureElapsedMs", 7);
+                            break;
+                        }
                         require(java.util.Arrays.asList("Kai Chen", "项目晨星").equals(data.getStringArrayList("hotwords")),
                                 "wrong ASR term scope or order");
                         String before = data.getString("textBeforeCursor");
@@ -78,6 +91,11 @@ public final class SpeechWireProbeService extends Service {
         } catch (AssertionError | IOException error) {
             Log.e("SpeechWireProbe", "invalid request", error);
             response.putString("error", "INVALID_AUDIO");
+            response.putString("failureStage", "FIXTURE_AUDIO");
+            response.putString("failureDetail", error instanceof IOException ? "IOException" : "AssertionError");
+            if (error.getCause() instanceof android.system.ErrnoException) {
+                response.putString("nativeErrorCode", "errno " + ((android.system.ErrnoException) error.getCause()).errno);
+            }
         }
         Message reply = Message.obtain();
         reply.setData(response);
@@ -92,6 +110,15 @@ public final class SpeechWireProbeService extends Service {
     private static void validate(ParcelFileDescriptor audio, int window) throws IOException {
         int length = window == 0 ? FIRST_BYTES : TAIL_BYTES;
         int offset = window == 0 ? 0 : FIRST_BYTES;
+        try {
+            StructStat stat = Os.fstat(audio.getFileDescriptor());
+            require(OsConstants.S_ISREG(stat.st_mode) && stat.st_nlink == 0,
+                    "ASR descriptor must refer to an unlinked regular file");
+            int flags = Os.fcntlInt(audio.getFileDescriptor(), OsConstants.F_GETFL, 0);
+            require((flags & OsConstants.O_ACCMODE) == OsConstants.O_RDONLY, "ASR descriptor must be read-only");
+        } catch (ErrnoException error) {
+            throw new IOException("Could not verify the ASR descriptor", error);
+        }
         require(audio.getStatSize() == length + 44L, "wrong descriptor length at window " + window);
         try (DataInputStream input = new DataInputStream(
                 new ParcelFileDescriptor.AutoCloseInputStream(audio.dup()))) {

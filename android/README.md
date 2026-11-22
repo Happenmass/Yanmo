@@ -16,6 +16,8 @@
 
 [Android 设计稿](../docs/design/android-v2.md) · [当前架构与上游残留](../docs/architecture/android-ime-current.md) · [音频、截屏与文稿架构图](../docs/architecture/android-ime-media.svg) · [可编辑的 draw.io 图](../docs/architecture/android-ime-media.drawio)
 
+在「设置 → 最近听写失败」可以查询最近 30 次失败。记录包含发生时间、阶段、耗时和失败代码。ASR 请求还会记录所用描述符类型和 WAV 大小。搭配支持详细失败诊断的 AI SDK 时，可在 SDK「概览 → 最近推理失败」按同一请求 ID 对照失败阶段及底层错误码。对应文稿的「听写诊断」也保留相同的明细。独立失败历史与录音、文稿分别保存，诊断记录只包含运行元数据。
+
 ## 录音和文稿存储
 
 长按空格时，输入法创建文稿 ID 和空记录，麦克风 PCM 留在进程内存。松手后补齐 WAV 头，先把完整音频保存到 SQLite，再分成最长 24 秒的窗口识别。每个有文字的窗口都会更新原文。启用自然整理时，先保存文字 API 返回的整理稿，再向仍有效的原输入框写入一次。未启用或停用时，直接写入识别原文。若录音期间进程终止，尚在内存的音频会丢失。达到根据堆余量计算的录音容量时，输入法会自动结束并提示。
@@ -26,7 +28,7 @@ Android 15 模拟器复验（2026-11-19）：旧版启用后在空闲和松手�
 
 私有库位于 `no_backup/manuscripts.sqlite3`。`manuscript` 表保存文本和状态，`attachment` 表按文稿 ID、媒体类型和顺序保存 256 KiB 的 BLOB 分块。回放时按播放位置读取，最多缓存一个音频分块。文稿页可复制正文、查看原文与附件，并删除整篇。升级后，书案及文稿页后台逐篇迁移旧目录，事务成功后清理该篇的旧文件。
 
-Sound Software 的同签名 Binder 接口读取有明确长度的 WAV 描述符。言墨通过 Android 的 `StorageManager.openProxyFileDescriptor` 从内存响应读请求。若系统无法创建有效代理，才使用单窗口临时 WAV，打开后先移除目录项再写入。SDK 内部仍会将收到的音频暂存为自己的 WAV，调用结束后清理。音频和截屏都在设备内处理，文字 API 只接收文字请求。
+Sound Software 的同签名 Binder 接口读取有明确长度的 WAV 描述符。言墨在私有缓存中为每个窗口打开只读文件描述符，移除文件名后才写入 WAV。最后一个描述符关闭时，系统回收文件。SDK 内部仍会将收到的音频暂存为自己的 WAV，调用结束后清理。音频和截屏都在设备内处理，文字 API 只接收文字请求。
 
 ## 构建试用 APK
 
@@ -55,7 +57,7 @@ Android APK 按 GNU GPL v3 发布。上游代码、子模块和资源来源固�
 
 - Android 17 ARM64 模拟器按键实测。九键输入 `64426`、26 键输入 `nihao`，两种布局首选均为「你好」。短按空格选词，再次短按输入空格；长按开始录音，松手后文稿可回放 WAV。通过系统屏幕共享授权后，松手时的真实截图能在文稿中放大。两种布局的空格均已触发实际 SDK 请求。
 - 存储改版已在 Android 17 ARM64 模拟器验证。真实键盘长按期间没有音频附件，松手后 SQLite 可读出 WAV 和系统授权截屏。升级旧包的 6 篇文稿共 18 个文件逐项核对 SHA-256 一致。独立仪器测试还覆盖超过 5 MiB 的音频、超过 3 MiB 的图片、删除和迁移重试。
-- 同签名 SDK 的说话人接口和 ASR 共用服务端的读音频方法。模拟器上经该接口验证了服务完整读取内存代理提供的 64,044 字节 WAV。ASR 自身在读取前先检查 HTP。
+- 同签名 SDK 的说话人接口和 ASR 共用服务端的读音频方法。当时在模拟器上经该接口验证了服务完整读取代理描述符提供的 64,044 字节 WAV。ASR 自身在读取前先检查 HTP。
 - 本次模拟器没有高通 HTP。真实 Binder 调用返回 `UNSUPPORTED_DEVICE`，录音与截屏仍可查阅。独立探针让超过 24 秒的合成音频经过生产切窗与 Binder 调用。隔离进程核对两窗的 WAV 头及全部 PCM，返回固定识别结果。受控 HTTPS 响应随后走实际整理、SQLite 保存及原输入框写入流程；另覆盖切换输入框、取消和禁用 API。执行 `ANDROID_SERIAL=<模拟器> ./android/tools/test_voice.sh -e checkBinder true` 可在已安装同签名 SDK fixture 的模拟器复验。执行 `./android/check-polish.sh` 可核对文字 API 请求与桌面端的一致性。
 - 真机试用包 `android/build/Yanmo-Android-Prototype-phone-arm64-v8a.apk` 另用录音豆正式证书签名，目标服务为 `dev.androidagent.sample`。已比对本次 APK 与留存的正式版 AI SDK 0.1.0 安装包证书，并通过 16 KiB ZIP 对齐检查。言墨在兼容高通手机上的真实口述、正式文字 API 请求和落字仍待联测。
 
