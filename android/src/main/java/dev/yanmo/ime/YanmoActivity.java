@@ -44,6 +44,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.activity.ComponentActivity;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 
 import java.io.IOException;
 import java.text.DateFormat;
@@ -65,7 +67,7 @@ public final class YanmoActivity extends ComponentActivity {
     private static final String[] TERM_GROUPS = {Lexicon.GLOBAL, Lexicon.AI_TOOLS};
 
     private enum Screen {
-        DESK(0), TRIAL(0), HISTORY(1), MANUSCRIPT(1), DICTIONARY(2), TERM(2), SETTINGS(3), API(3), DIAGNOSTICS(3);
+        DESK(0), TRIAL(0), HISTORY(1), MANUSCRIPT(1), DICTIONARY(2), TERM(2), SETTINGS(3), API(3), DIAGNOSTICS(3), SYNC(3);
         final int tab;
         Screen(int tab) { this.tab = tab; }
     }
@@ -88,6 +90,24 @@ public final class YanmoActivity extends ComponentActivity {
     private Button setupAction;
     private LinearLayout recent;
     private YanmoSettings settingsView;
+    private YanmoSyncUi syncView;
+    private final ActivityResultLauncher<Intent> qrScanLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result -> {
+                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                    String qrText = result.getData().getStringExtra(QrScannerActivity.EXTRA_QR_TEXT);
+                    if (qrText != null && !qrText.trim().isEmpty() && syncView != null) {
+                        syncView.handleScannedQr(qrText.trim(), false);
+                    }
+                }
+            });
+    private final SyncManager.Listener syncListener = remoteLibraryUpdated -> {
+        if (settingsView != null) settingsView.refresh();
+        if (!remoteLibraryUpdated) return;
+        if (screen == Screen.DESK && recent != null) loadRecent();
+        else if (screen == Screen.HISTORY) showHistory();
+        else if (screen == Screen.DICTIONARY) showDictionary();
+    };
     private MediaPlayer player;
     private Runnable progress;
     private Button audioButton;
@@ -100,6 +120,7 @@ public final class YanmoActivity extends ComponentActivity {
                 == Configuration.UI_MODE_NIGHT_YES;
         setTheme(dark ? android.R.style.Theme_Material_NoActionBar : android.R.style.Theme_Material_Light_NoActionBar);
         super.onCreate(state);
+        SyncManager.get(this).addListener(syncListener);
         colors = new YanmoColors(dark);
         getWindow().setStatusBarColor(colors.paper);
         getWindow().setNavigationBarColor(colors.paper);
@@ -154,6 +175,7 @@ public final class YanmoActivity extends ComponentActivity {
             case SETTINGS: showSettings(); break;
             case API: showApiSettings(state.getBoolean("requestEnable")); break;
             case DIAGNOSTICS: showVoiceFailures(); break;
+            case SYNC: showSyncSettings(); break;
         }
     }
 
@@ -207,6 +229,7 @@ public final class YanmoActivity extends ComponentActivity {
         super.onResume();
         refreshPermissions();
         if (recent != null && recent.getChildCount() > 0) loadRecent();
+        SyncManager.get(this).onAppResumed();
     }
 
     @Override
@@ -223,6 +246,7 @@ public final class YanmoActivity extends ComponentActivity {
 
     @Override
     protected void onDestroy() {
+        SyncManager.get(this).removeListener(syncListener);
         releasePlayer();
         storage.shutdown();
         handler.removeCallbacks(permissionRefresh);
@@ -299,7 +323,7 @@ public final class YanmoActivity extends ComponentActivity {
                 addParagraph(destination, "录音识别后，文稿会出现在这里。", colors.secondary);
             }
             for (Manuscripts.Summary item : history.entries.subList(0, Math.min(3, history.entries.size()))) {
-                manuscriptRow(destination, item, shortDate(item.id));
+                manuscriptRow(destination, item, shortDate(item.createdAtMs));
             }
         }, () -> {
             destination.removeAllViews();
@@ -369,9 +393,21 @@ public final class YanmoActivity extends ComponentActivity {
 
     private void showSettings() {
         openPage(Screen.SETTINGS, "", this::showHome);
-        settingsView = new YanmoSettings(this, this::manageMicrophone, this::changeScreenshot, this::showApiSettings);
+        settingsView = new YanmoSettings(this, this::manageMicrophone, this::changeScreenshot,
+                this::showApiSettings, this::showSyncSettings);
         page.addView(settingsView.getView(), new LinearLayout.LayoutParams(-1, 0, 1));
         actionRow(page, "最近听写失败", "", this::showVoiceFailures);
+    }
+
+    private void showSyncSettings() {
+        openPage(Screen.SYNC, "", this::showSettings);
+        syncView = new YanmoSyncUi(this, this::showSettings, this::launchQrScanner);
+        page.addView(syncView.getView(), new LinearLayout.LayoutParams(-1, -1));
+        SyncManager.get(this).refreshSnapshotAsync();
+    }
+
+    private void launchQrScanner() {
+        qrScanLauncher.launch(new Intent(this, QrScannerActivity.class));
     }
 
     private void showVoiceFailures() {
@@ -448,10 +484,10 @@ public final class YanmoActivity extends ComponentActivity {
             }
             String lastDay = "";
             for (Manuscripts.Summary item : history.entries) {
-                String day = day(item.id);
+                String day = day(item.createdAtMs);
                 if (!day.equals(lastDay)) heading(page, day, 20);
                 lastDay = day;
-                manuscriptRow(page, item, time(item.id));
+                manuscriptRow(page, item, time(item.createdAtMs));
             }
         }, () -> {
             status.setText("无法读取文稿，请重试。");
@@ -466,26 +502,30 @@ public final class YanmoActivity extends ComponentActivity {
     }
 
     private static final class Entry {
+        long createdAtMs;
         String error, polished, raw, captureStatus, diagnostics;
-        boolean audio, screenshot;
+        boolean audio, screenshot, remoteAttachments;
     }
 
     private void showEntry(String id) {
         openPage(Screen.MANUSCRIPT, "文稿", this::showHistory);
         manuscriptId = id;
-        paragraph(shortDate(id), colors.secondary);
+        TextView dateLabel = paragraph("", colors.secondary);
         TextView status = paragraph("正在读取文稿…", colors.secondary);
         load(() -> {
             Entry entry = new Entry();
+            entry.createdAtMs = Manuscripts.createdAtMs(this, id);
             entry.error = Manuscripts.read(this, id, "error");
             entry.polished = Manuscripts.read(this, id, "polished");
             entry.raw = Manuscripts.read(this, id, "raw");
             entry.audio = Manuscripts.size(this, id, "audio") > 44;
             entry.screenshot = Manuscripts.size(this, id, "screenshot") > 0;
+            entry.remoteAttachments = SyncManager.get(this).hasRemoteAttachments(id);
             entry.captureStatus = Manuscripts.read(this, id, "capture-status");
             entry.diagnostics = Manuscripts.diagnostics(this, id);
             return entry;
         }, entry -> {
+            dateLabel.setText(shortDate(entry.createdAtMs));
             page.removeView(status);
             renderEntry(id, entry);
         }, () -> status.setText("无法读取已保存的文稿。"));
@@ -500,18 +540,24 @@ public final class YanmoActivity extends ComponentActivity {
         disclosure("识别原文", "", panel -> selectableText(panel, entry.raw, "尚无识别原文"), null);
         boolean media = entry.audio || entry.screenshot;
         String mediaLabel = entry.audio && entry.screenshot ? "录音 · 截屏"
-                : entry.audio ? "录音" : entry.screenshot ? "截屏" : "";
-        if (media || !entry.captureStatus.isEmpty()) {
+                : entry.audio ? "录音" : entry.screenshot ? "截屏"
+                : entry.remoteAttachments ? "按需同步下载" : "";
+        if (media || entry.remoteAttachments || !entry.captureStatus.isEmpty()) {
             disclosure("附件", mediaLabel, panel -> {
-                if (entry.audio) showAudio(panel, id);
-                if (entry.screenshot) {
-                    TextView loading = addParagraph(panel, "正在读取截屏…", colors.secondary);
-                    load(() -> decode(Manuscripts.media(this, id, "screenshot"), 420), thumbnail -> {
-                        panel.removeView(loading);
-                        showScreenshot(panel, id, thumbnail);
-                    }, () -> loading.setText("无法读取截屏。"));
-                } else if (!entry.captureStatus.isEmpty()) {
-                    addParagraph(panel, entry.captureStatus, colors.secondary);
+                if (!entry.audio && !entry.screenshot && entry.remoteAttachments) {
+                    TextView downloading = addParagraph(panel, "正在从同步节点下载加密附件…", colors.secondary);
+                    load(() -> {
+                        SyncManager.get(this).ensureManuscriptAttachments(id);
+                        Entry refreshed = new Entry();
+                        refreshed.audio = Manuscripts.size(this, id, "audio") > 44;
+                        refreshed.screenshot = Manuscripts.size(this, id, "screenshot") > 0;
+                        return refreshed;
+                    }, refreshed -> {
+                        panel.removeView(downloading);
+                        renderLocalAttachmentViews(panel, id, refreshed.audio, refreshed.screenshot, entry.captureStatus);
+                    }, () -> downloading.setText("无法下载同步附件，请确认节点在线后重试。"));
+                } else {
+                    renderLocalAttachmentViews(panel, id, entry.audio, entry.screenshot, entry.captureStatus);
                 }
             }, this::resetPlayback);
         }
@@ -532,6 +578,22 @@ public final class YanmoActivity extends ComponentActivity {
                             return null;
                         }, ignored -> showHistory(), () -> toast("无法删除文稿，请稍后重试。"));
                     }).show());
+        }
+    }
+
+    private void renderLocalAttachmentViews(LinearLayout panel, String id, boolean hasAudio,
+                                            boolean hasScreenshot, String captureStatus) {
+        if (hasAudio) showAudio(panel, id);
+        if (hasScreenshot) {
+            TextView loading = addParagraph(panel, "正在读取截屏…", colors.secondary);
+            load(() -> decode(Manuscripts.media(this, id, "screenshot"), 420), thumbnail -> {
+                panel.removeView(loading);
+                showScreenshot(panel, id, thumbnail);
+            }, () -> loading.setText("无法读取截屏。"));
+        } else if (!captureStatus.isEmpty()) {
+            addParagraph(panel, captureStatus, colors.secondary);
+        } else if (!hasAudio) {
+            addParagraph(panel, "该文稿暂无可用附件。", colors.secondary);
         }
     }
 
@@ -871,7 +933,7 @@ public final class YanmoActivity extends ComponentActivity {
 
     private void openPage(Screen next, String title, Runnable back, Consumer<LinearLayout> headerAction) {
         View focused = getCurrentFocus();
-        if (focused instanceof EditText || (screen == Screen.API && focused != null)) {
+        if (focused instanceof EditText || ((screen == Screen.API || screen == Screen.SYNC) && focused != null)) {
             InputMethodManager keyboard = getSystemService(InputMethodManager.class);
             if (keyboard != null) keyboard.hideSoftInputFromWindow(focused.getWindowToken(), 0);
         }
@@ -881,6 +943,7 @@ public final class YanmoActivity extends ComponentActivity {
         keyboardStatus = null;
         setupAction = null;
         settingsView = null;
+        syncView = null;
         recent = null;
         manuscriptId = null;
         termId = null;
@@ -908,7 +971,7 @@ public final class YanmoActivity extends ComponentActivity {
 
         page = vertical();
         page.setFocusableInTouchMode(true);
-        if (next == Screen.SETTINGS || next == Screen.API) {
+        if (next == Screen.SETTINGS || next == Screen.API || next == Screen.SYNC) {
             root.addView(page, new LinearLayout.LayoutParams(-1, 0, 1));
         } else {
             ScrollView scroll = new ScrollView(this);
@@ -1167,27 +1230,15 @@ public final class YanmoActivity extends ComponentActivity {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
-    private String shortDate(String id) {
-        return day(id) + " · " + time(id);
+    private String shortDate(long createdAtMs) {
+        return day(createdAtMs) + " · " + time(createdAtMs);
     }
 
-    private static String day(String id) {
-        Date created = createdAt(id);
-        return created == null ? "未知日期" : DateFormat.getDateInstance(DateFormat.MEDIUM).format(created);
+    private static String day(long createdAtMs) {
+        return createdAtMs <= 0 ? "未知日期" : DateFormat.getDateInstance(DateFormat.MEDIUM).format(new Date(createdAtMs));
     }
 
-    private String time(String id) {
-        Date created = createdAt(id);
-        return created == null ? "" : android.text.format.DateFormat.getTimeFormat(this).format(created);
-    }
-
-    private static Date createdAt(String id) {
-        int separator = id.indexOf('-');
-        if (separator <= 0) return null;
-        try {
-            return new Date(Long.parseLong(id.substring(0, separator)));
-        } catch (NumberFormatException invalid) {
-            return null;
-        }
+    private String time(long createdAtMs) {
+        return createdAtMs <= 0 ? "" : android.text.format.DateFormat.getTimeFormat(this).format(new Date(createdAtMs));
     }
 }

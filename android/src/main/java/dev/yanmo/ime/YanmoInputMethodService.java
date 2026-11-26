@@ -20,8 +20,19 @@ public final class YanmoInputMethodService extends XimeInputMethodService {
                 .putBoolean("voice_swipe_cancel", true)
                 .apply();
         super.onCreate();
+        SyncManager.get(this);
         voice = new VoiceSession(this, PrototypeBuild.SPEECH_PACKAGE,
-                this::updateYanmoDictationStage, this::yanmoComposing);
+                new VoiceSession.Listener() {
+                    @Override public void onVoiceState(int state) {
+                        updateYanmoDictationStage(state);
+                        if (state == VoiceSession.IDLE) YanmoDictationPreview.update("");
+                    }
+
+                    @Override public void onVoicePreview(String text) {
+                        YanmoDictationPreview.update(text);
+                    }
+                },
+                this::yanmoComposing);
     }
 
     @Override public void onStartInput(EditorInfo attribute, boolean restarting) {
@@ -29,9 +40,15 @@ public final class YanmoInputMethodService extends XimeInputMethodService {
         super.onStartInput(attribute, restarting);
     }
 
+    @Override public void onStartInputView(EditorInfo attribute, boolean restarting) {
+        super.onStartInputView(attribute, restarting);
+        SyncManager.get(this).onImeInputViewStarted();
+    }
+
     @Override public void onFinishInputView(boolean finishingInput) {
         endEditorSession("onFinishInputView; finishingInput=" + finishingInput);
         super.onFinishInputView(finishingInput);
+        SyncManager.get(this).onImeInputViewFinished();
     }
 
     @Override public void onFinishInput() {

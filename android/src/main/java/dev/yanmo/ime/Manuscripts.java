@@ -11,7 +11,11 @@ import android.media.MediaDataSource;
 import android.os.Build;
 import android.util.AtomicFile;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -20,34 +24,65 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
 final class Manuscripts {
+    private static final int DB_VERSION = 2;
     private static final Set<String> ACTIVE = new HashSet<>();
     private static final Object LEGACY_LOCK = new Object();
     private static final int CHUNK_BYTES = 256 * 1024;
     private static final String[] LEGACY_TEXT = {"raw", "polished", "error", "capture-status"};
     private static volatile Store store;
+    private static volatile SyncHook syncHook;
+
+    interface SyncHook {
+        void onFinished(String id);
+        void onDeleted(String id);
+    }
+
+    static void setSyncHook(SyncHook hook) {
+        syncHook = hook;
+    }
 
     private Manuscripts() {}
 
     static synchronized String begin(Context context) {
-        String id = System.currentTimeMillis() + "-" + UUID.randomUUID();
+        long now = System.currentTimeMillis();
+        String id = now + "-" + UUID.randomUUID();
         ContentValues initial = new ContentValues();
         initial.put("id", id);
+        initial.put("created_at_ms", now);
         database(context).insertOrThrow("manuscript", null, initial);
         ACTIVE.add(id);
         return id;
     }
 
+    static void setMetadata(Context context, String id, String application, double seconds) {
+        try {
+            ContentValues values = new ContentValues();
+            values.put("application", application == null ? "" : application);
+            values.put("seconds", Math.max(0.0, seconds));
+            database(context).update("manuscript", values, "id = ?", new String[] { id });
+        } catch (SQLiteException ignored) {
+        }
+    }
+
     static synchronized void end(Context context, String id) {
         ACTIVE.remove(id);
+        SyncHook hook = syncHook;
+        if (hook != null) hook.onFinished(id);
     }
 
     static synchronized boolean active(String id) {
         return ACTIVE.contains(id);
+    }
+
+    static synchronized Set<String> activeIds() {
+        return new HashSet<>(ACTIVE);
     }
 
     static synchronized void discard(Context context, String id) throws IOException {
@@ -62,6 +97,8 @@ final class Manuscripts {
     static synchronized void delete(Context context, String id) throws IOException {
         if (active(id)) throw new IOException("这篇文稿正在处理中，请稍后重试。");
         discard(context, id);
+        SyncHook hook = syncHook;
+        if (hook != null) hook.onDeleted(id);
     }
 
     static void capture(Context context, String id) {
@@ -105,10 +142,12 @@ final class Manuscripts {
     static final class Summary {
         final String id;
         final String preview;
+        final long createdAtMs;
 
-        Summary(String id, String preview) {
+        Summary(String id, String preview, long createdAtMs) {
             this.id = id;
             this.preview = preview;
+            this.createdAtMs = createdAtMs;
         }
     }
 
@@ -118,10 +157,119 @@ final class Manuscripts {
                 "SELECT id, substr(coalesce(nullif(polished, ''), nullif(raw, ''), nullif(error, ''),"
                     + " CASE WHEN EXISTS(SELECT 1 FROM attachment WHERE attachment.id = manuscript.id"
                     + " AND kind = 'audio' AND (part > 0 OR length(data) > 44)) THEN '录音' ELSE '录音未完成' END),"
-                    + " 1, 300) FROM manuscript ORDER BY id DESC", null)) {
-            while (rows.moveToNext()) result.add(new Summary(rows.getString(0), rows.getString(1)));
+                    + " 1, 300), created_at_ms FROM manuscript ORDER BY created_at_ms DESC, id DESC", null)) {
+            while (rows.moveToNext()) {
+                long ms = rows.isNull(2) ? 0L : rows.getLong(2);
+                String id = rows.getString(0);
+                if (ms <= 0) ms = parseCreatedAtFromId(id);
+                result.add(new Summary(id, rows.getString(1), ms));
+            }
         }
         return result;
+    }
+
+    static long createdAtMs(Context context, String id) {
+        try (SQLiteStatement st = database(context).compileStatement(
+                "SELECT COALESCE((SELECT created_at_ms FROM manuscript WHERE id = ?), 0)")) {
+            st.bindString(1, id);
+            long ms = st.simpleQueryForLong();
+            if (ms > 0) return ms;
+        } catch (SQLiteException ignored) {
+        }
+        return parseCreatedAtFromId(id);
+    }
+
+    static long parseCreatedAtFromId(String id) {
+        if (id == null) return 0L;
+        int sep = id.indexOf('-');
+        if (sep <= 0) return 0L;
+        try {
+            return Long.parseLong(id.substring(0, sep));
+        } catch (NumberFormatException ignored) {
+            return 0L;
+        }
+    }
+
+    static SyncModels.ManuscriptRecord readRecord(Context context, String id) {
+        try (Cursor c = database(context).rawQuery(
+                "SELECT created_at_ms, raw, polished, error, capture_status, application, seconds, "
+                        + "user_edited, delivery_note, audio_warning, asr_results_json, source_device_id "
+                        + "FROM manuscript WHERE id = ?",
+                new String[] { id })) {
+            if (!c.moveToFirst()) return null;
+            return recordFromCursor(id, c, 0);
+        }
+    }
+
+    static List<SyncModels.ManuscriptRecord> listFinishedRecords(Context context) {
+        List<SyncModels.ManuscriptRecord> out = new ArrayList<>();
+        try (Cursor c = database(context).rawQuery(
+                "SELECT id, created_at_ms, raw, polished, error, capture_status, application, seconds, "
+                        + "user_edited, delivery_note, audio_warning, asr_results_json, source_device_id "
+                        + "FROM manuscript ORDER BY created_at_ms ASC, id ASC", null)) {
+            while (c.moveToNext()) {
+                out.add(recordFromCursor(c.getString(0), c, 1));
+            }
+        }
+        return out;
+    }
+
+    private static SyncModels.ManuscriptRecord recordFromCursor(String id, Cursor c, int col) {
+        long ms = c.isNull(col) ? 0L : c.getLong(col);
+        if (ms <= 0) ms = parseCreatedAtFromId(id);
+        String raw = c.isNull(col + 1) ? "" : c.getString(col + 1);
+        String polished = c.isNull(col + 2) ? "" : c.getString(col + 2);
+        String error = c.isNull(col + 3) ? "" : c.getString(col + 3);
+        String captureStatus = c.isNull(col + 4) ? "" : c.getString(col + 4);
+        String app = c.isNull(col + 5) ? "" : c.getString(col + 5);
+        double seconds = c.isNull(col + 6) ? 0.0 : c.getDouble(col + 6);
+        boolean userEdited = !c.isNull(col + 7) && c.getInt(col + 7) != 0;
+        String deliveryNote = c.isNull(col + 8) ? null : c.getString(col + 8);
+        String audioWarning = c.isNull(col + 9) ? null : c.getString(col + 9);
+        String asrJson = c.isNull(col + 10) ? null : c.getString(col + 10);
+        String sourceDeviceId = c.isNull(col + 11) ? null : c.getString(col + 11);
+        List<SyncModels.AsrResult> asrResults = Collections.emptyList();
+        if (asrJson != null && !asrJson.isEmpty()) {
+            try {
+                asrResults = SyncModels.AsrResult.fromJsonArray(new JSONArray(asrJson));
+            } catch (JSONException ignored) {
+            }
+        }
+        return new SyncModels.ManuscriptRecord(
+                id, ms, raw, polished, error, captureStatus, app, seconds, userEdited,
+                deliveryNote, audioWarning, asrResults, sourceDeviceId
+        );
+    }
+
+    static void upsertFromSync(SQLiteDatabase db, SyncModels.ManuscriptRecord item) {
+        ContentValues cv = new ContentValues();
+        cv.put("id", item.id);
+        cv.put("created_at_ms", item.createdAtMs);
+        cv.put("raw", item.original);
+        if (item.polishedText != null && !item.polishedText.isEmpty()) cv.put("polished", item.polishedText);
+        else cv.putNull("polished");
+        cv.put("application", item.application);
+        cv.put("seconds", item.seconds);
+        cv.put("user_edited", item.userEdited ? 1 : 0);
+        if (item.deliveryNote != null) cv.put("delivery_note", item.deliveryNote);
+        else cv.putNull("delivery_note");
+        if (item.audioWarning != null) cv.put("audio_warning", item.audioWarning);
+        else cv.putNull("audio_warning");
+        try {
+            if (!item.asrResults.isEmpty()) {
+                cv.put("asr_results_json", SyncModels.AsrResult.toJsonArray(item.asrResults).toString());
+            } else {
+                cv.putNull("asr_results_json");
+            }
+        } catch (JSONException ignored) {
+        }
+        if (item.sourceDeviceId != null) cv.put("source_device_id", item.sourceDeviceId);
+        else cv.putNull("source_device_id");
+        db.insertWithOnConflict("manuscript", null, cv, SQLiteDatabase.CONFLICT_REPLACE);
+    }
+
+    static void saveCachedMedia(Context context, String id, String kind, byte[] data) {
+        saveMedia(context, id, kind, data);
     }
 
     static String read(Context context, String id, String name) throws IOException {
@@ -185,28 +333,16 @@ final class Manuscripts {
 
     static byte[] media(Context context, String id, String kind) {
         SQLiteDatabase db = database(context);
-        // CursorWindow refills must see the same attachment version even during deletion.
-        if (Build.VERSION.SDK_INT >= 35) db.beginTransactionReadOnly();
-        else db.beginTransactionNonExclusive();
-        try {
-            long length = size(db, id, kind);
-            if (length == 0) return null;
-            byte[] bytes = new byte[Math.toIntExact(length)];
-            int offset = 0;
-            try (Cursor parts = db.rawQuery(
-                    "SELECT data FROM attachment WHERE id = ? AND kind = ? ORDER BY part",
-                    new String[] { id, kind })) {
-                while (parts.moveToNext()) {
-                    byte[] data = parts.getBlob(0);
-                    System.arraycopy(data, 0, bytes, offset, data.length);
-                    offset += data.length;
-                }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (Cursor parts = db.rawQuery(
+                "SELECT data FROM attachment WHERE id = ? AND kind = ? ORDER BY part",
+                new String[] { id, kind })) {
+            while (parts.moveToNext()) {
+                byte[] data = parts.getBlob(0);
+                if (data != null && data.length > 0) out.write(data, 0, data.length);
             }
-            db.setTransactionSuccessful();
-            return bytes;
-        } finally {
-            db.endTransaction();
         }
+        return out.size() == 0 ? null : out.toByteArray();
     }
 
     static AudioSource openAudio(Context context, String id) {
@@ -311,6 +447,7 @@ final class Manuscripts {
                 ContentValues values = new ContentValues();
                 values.put("id", id);
                 if (!exists(db, "manuscript", id)) {
+                    values.put("created_at_ms", parseCreatedAtFromId(id));
                     for (String name : LEGACY_TEXT) {
                         File file = new File(folder, name + ".txt");
                         if (file.isFile() || new File(file.getPath() + ".bak").isFile()) {
@@ -397,7 +534,7 @@ final class Manuscripts {
         }
     }
 
-    private static SQLiteDatabase database(Context context) {
+    static SQLiteDatabase database(Context context) {
         Store current = store;
         if (current == null) {
             synchronized (Manuscripts.class) {
@@ -414,7 +551,7 @@ final class Manuscripts {
     private static final class Store extends SQLiteOpenHelper {
         Store(Context context) {
             super(context, new File(context.getNoBackupFilesDir(), "manuscripts.sqlite3").getPath(),
-                    null, 1);
+                    null, DB_VERSION);
             setWriteAheadLoggingEnabled(true);
         }
 
@@ -428,12 +565,71 @@ final class Manuscripts {
         @Override
         public void onCreate(SQLiteDatabase db) {
             db.execSQL("CREATE TABLE manuscript (id TEXT PRIMARY KEY, raw TEXT, polished TEXT,"
-                    + " error TEXT, capture_status TEXT)");
+                    + " error TEXT, capture_status TEXT, created_at_ms INTEGER NOT NULL DEFAULT 0,"
+                    + " application TEXT NOT NULL DEFAULT '', seconds REAL NOT NULL DEFAULT 0,"
+                    + " user_edited INTEGER NOT NULL DEFAULT 0, delivery_note TEXT,"
+                    + " audio_warning TEXT, asr_results_json TEXT, source_device_id TEXT)");
             db.execSQL("CREATE TABLE attachment (id TEXT NOT NULL REFERENCES manuscript(id) ON DELETE CASCADE,"
                     + " kind TEXT NOT NULL, part INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (id, kind, part))");
             db.execSQL("CREATE TABLE legacy_import (id TEXT PRIMARY KEY)");
+            createSyncTables(db);
         }
 
-        @Override public void onUpgrade(SQLiteDatabase db, int previous, int current) {}
+        @Override
+        public void onUpgrade(SQLiteDatabase db, int previous, int current) {
+            if (previous < 2) {
+                db.execSQL("ALTER TABLE manuscript ADD COLUMN created_at_ms INTEGER NOT NULL DEFAULT 0");
+                db.execSQL("ALTER TABLE manuscript ADD COLUMN application TEXT NOT NULL DEFAULT ''");
+                db.execSQL("ALTER TABLE manuscript ADD COLUMN seconds REAL NOT NULL DEFAULT 0");
+                db.execSQL("ALTER TABLE manuscript ADD COLUMN user_edited INTEGER NOT NULL DEFAULT 0");
+                db.execSQL("ALTER TABLE manuscript ADD COLUMN delivery_note TEXT");
+                db.execSQL("ALTER TABLE manuscript ADD COLUMN audio_warning TEXT");
+                db.execSQL("ALTER TABLE manuscript ADD COLUMN asr_results_json TEXT");
+                db.execSQL("ALTER TABLE manuscript ADD COLUMN source_device_id TEXT");
+                try (Cursor rows = db.rawQuery("SELECT id FROM manuscript WHERE created_at_ms = 0", null)) {
+                    while (rows.moveToNext()) {
+                        String id = rows.getString(0);
+                        long ms = parseCreatedAtFromId(id);
+                        if (ms > 0) {
+                            ContentValues cv = new ContentValues();
+                            cv.put("created_at_ms", ms);
+                            db.update("manuscript", cv, "id = ?", new String[] { id });
+                        }
+                    }
+                }
+                createSyncTables(db);
+            }
+        }
+
+        private static void createSyncTables(SQLiteDatabase db) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+            db.execSQL("CREATE TABLE IF NOT EXISTS sync_entries ("
+                    + "collection TEXT NOT NULL,"
+                    + "record_key TEXT NOT NULL,"
+                    + "local_id TEXT,"
+                    + "version_hlc TEXT NOT NULL,"
+                    + "origin_device_id TEXT NOT NULL,"
+                    + "deleted INTEGER NOT NULL DEFAULT 0,"
+                    + "deleted_at_ms INTEGER,"
+                    + "updated_at_ms INTEGER NOT NULL,"
+                    + "meta_json TEXT NOT NULL DEFAULT '{}',"
+                    + "PRIMARY KEY (collection, record_key))");
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_sync_entries_updated "
+                    + "ON sync_entries(collection, updated_at_ms, record_key)");
+            db.execSQL("CREATE TABLE IF NOT EXISTS sync_hub_cursors ("
+                    + "hub_instance_id TEXT PRIMARY KEY,"
+                    + "last_pulled_seq INTEGER NOT NULL DEFAULT 0,"
+                    + "last_sync_at_ms INTEGER)");
+            db.execSQL("CREATE TABLE IF NOT EXISTS sync_hub_acked ("
+                    + "hub_instance_id TEXT NOT NULL,"
+                    + "collection TEXT NOT NULL,"
+                    + "record_key TEXT NOT NULL,"
+                    + "acked_version_hlc TEXT NOT NULL,"
+                    + "PRIMARY KEY (hub_instance_id, collection, record_key))");
+            db.execSQL("CREATE TABLE IF NOT EXISTS sync_pruned ("
+                    + "manuscript_id TEXT PRIMARY KEY,"
+                    + "pruned_at_ms INTEGER NOT NULL,"
+                    + "pruned_version_hlc TEXT)");
+        }
     }
 }

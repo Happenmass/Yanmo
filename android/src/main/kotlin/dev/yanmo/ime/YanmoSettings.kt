@@ -15,6 +15,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.twotone.AutoAwesome
+import androidx.compose.material.icons.twotone.CloudSync
 import androidx.compose.material.icons.twotone.Description
 import androidx.compose.material.icons.twotone.Keyboard
 import androidx.compose.material.icons.twotone.Mic
@@ -60,10 +61,12 @@ internal class YanmoSettings(
     private val manageMicrophone: Runnable,
     private val changeScreenshot: Consumer<Boolean>,
     private val openApi: Consumer<Boolean>,
+    private val openSync: Runnable,
 ) {
     private var keyboardStatus by mutableStateOf("")
     private var microphoneGranted by mutableStateOf(false)
     private var screenshotEnabled by mutableStateOf(false)
+    private var syncEnabled by mutableStateOf(false)
 
     val view: View = settingsView(activity) { Overview() }
 
@@ -77,6 +80,7 @@ internal class YanmoSettings(
         }
         microphoneGranted = activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         screenshotEnabled = ScreenCapture.enabled(activity)
+        syncEnabled = SyncManager.get(activity).isEnabledFast()
     }
 
     @Composable
@@ -163,6 +167,17 @@ internal class YanmoSettings(
                 )
                 SettingsRowDivider()
                 SettingsListRow("文稿保存", "录音、识别原文和整理稿保存在本机")
+            }
+            SettingsSection("跨设备同步") {
+                SettingsItem(
+                    icon = Icons.TwoTone.CloudSync,
+                    title = "个人同步空间",
+                    subtitle = "通过局域网中同账号的 AcpmRuntime 端到端加密同步词库与文稿",
+                    status = if (syncEnabled) "已开启" else "未开启",
+                    statusTone = if (syncEnabled) SettingsStatusTone.OK else SettingsStatusTone.WARNING,
+                    onClick = openSync::run,
+                    showArrow = true,
+                )
             }
         }
     }

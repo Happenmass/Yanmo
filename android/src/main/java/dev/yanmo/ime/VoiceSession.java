@@ -21,11 +21,16 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -44,6 +49,7 @@ public final class VoiceSession {
 
     public interface Listener {
         void onVoiceState(int state);
+        default void onVoicePreview(String text) {}
     }
 
     interface Recorder {
@@ -63,7 +69,7 @@ public final class VoiceSession {
     private final Transcriber transcriber;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
-
+    private final ExecutorService asrWorker = Executors.newSingleThreadExecutor();
     private final ExecutorService learning = Executors.newSingleThreadExecutor();
     private final Runnable correctionTimeout = this::finishCorrection;
     private CorrectionWindow correction;
@@ -128,6 +134,7 @@ public final class VoiceSession {
             active = recording;
             recording.event("录音开始");
             worker.execute(() -> process(recording));
+            listener.onVoicePreview("");
             listener.onVoiceState(RECORDING);
             return true;
         } catch (RuntimeException error) {
@@ -220,6 +227,7 @@ public final class VoiceSession {
         destroyed = true;
         editorEnded();
         worker.shutdown();
+        asrWorker.shutdownNow();
         learning.shutdownNow();
     }
 
@@ -228,32 +236,61 @@ public final class VoiceSession {
         String failure = null;
         String stage = "录音";
         try {
-            byte[] wav = collect(recording);
-            if (recording.cancelled) {
-                failure = "录音已取消";
-            } else if (wav.length <= WAV_HEADER) {
-                failure = "未采集到音频";
-                recording.failure(stage, "EMPTY_AUDIO", "");
-            } else {
-                stage = "语音识别";
-                List<Lexicon.Entry> entries = Collections.emptyList();
-                if (!recording.privateEditor) {
-                    try {
-                        entries = Lexicon.list(app);
-                    } catch (IOException ignored) {
-                        // A damaged lexicon must not prevent dictation.
-                    }
+            List<Lexicon.Entry> entries = Collections.emptyList();
+            if (!recording.privateEditor) {
+                try {
+                    entries = Lexicon.list(app);
+                } catch (IOException ignored) {
+                    // A damaged lexicon must not prevent dictation.
                 }
-                recording.terms = Lexicon.scoped(entries, recording.group);
-                Consumer<String> saveRaw = text -> Manuscripts.raw(app, recording.id, text);
-                String raw = transcriber == null
-                        ? transcribe(recording, wav, saveRaw, Lexicon.hotwords(entries, recording.group))
-                        : transcriber.transcribe(wav, saveRaw);
+            }
+            recording.terms = Lexicon.scoped(entries, recording.group);
+            List<String> hotwords = Lexicon.hotwords(entries, recording.group);
+            Consumer<String> saveRaw = text -> Manuscripts.raw(app, recording.id, text);
+            boolean polishEnabled = Polish.enabled(app);
+
+            String raw;
+            byte[] wav;
+            if (transcriber == null) {
+                LinkedBlockingQueue<byte[]> segmentQueue = new LinkedBlockingQueue<>();
+                byte[] endMarker = new byte[0];
+                Future<String> asrFuture = asrWorker.submit(
+                        () -> transcribeQueue(recording, segmentQueue, endMarker, hotwords, polishEnabled, saveRaw));
+                wav = collectStreaming(recording, segmentQueue, endMarker);
+                if (recording.cancelled) {
+                    asrFuture.cancel(true);
+                    failure = "录音已取消";
+                    raw = "";
+                } else if (wav.length <= WAV_HEADER) {
+                    asrFuture.cancel(true);
+                    failure = "未采集到音频";
+                    recording.failure(stage, "EMPTY_AUDIO", "");
+                    raw = "";
+                } else {
+                    stage = "语音识别";
+                    raw = awaitAsr(asrFuture);
+                }
+            } else {
+                wav = collect(recording);
+                if (recording.cancelled) {
+                    failure = "录音已取消";
+                    raw = "";
+                } else if (wav.length <= WAV_HEADER) {
+                    failure = "未采集到音频";
+                    recording.failure(stage, "EMPTY_AUDIO", "");
+                    raw = "";
+                } else {
+                    stage = "语音识别";
+                    raw = transcriber.transcribe(wav, saveRaw);
+                }
+            }
+
+            if (failure == null) {
                 recording.raw = raw;
                 if (raw.trim().isEmpty()) {
                     failure = "未识别到语音";
                     recording.failure(stage, "EMPTY_TRANSCRIPT", "wavBytes=" + wav.length);
-                } else if (!Polish.enabled(app)) {
+                } else if (!polishEnabled) {
                     textToCommit = raw;
                 } else {
                     stage = "文字整理";
@@ -300,10 +337,20 @@ public final class VoiceSession {
                     failure = "输入框已切换，文字已保存到文稿";
                     recording.failure("写入", "EDITOR_CHANGED", "");
                 } else {
+                    String committedPrefix;
+                    synchronized (recording) {
+                        committedPrefix = recording.committedStream.toString();
+                    }
+                    String remainingToCommit;
+                    if (!committedPrefix.isEmpty() && !Polish.enabled(app) && text.startsWith(committedPrefix)) {
+                        remainingToCommit = text.substring(committedPrefix.length());
+                    } else {
+                        remainingToCommit = text;
+                    }
                     CorrectionWindow observation = !recording.privateEditor && Polish.enabled(app) && !composing.getAsBoolean()
                             ? CorrectionWindow.beforeWrite(target, text, recording.raw, recording.group,
                                     SystemClock.uptimeMillis()) : null;
-                    if (!target.commitText(text, 1)) {
+                    if (!remainingToCommit.isEmpty() && !target.commitText(remainingToCommit, 1)) {
                         failure = "无法写入输入框，文字已保存到文稿";
                         recording.failure("写入", "EDITOR_COMMIT_REJECTED", "");
                     } else {
@@ -332,6 +379,7 @@ public final class VoiceSession {
                             recording.failureStage, recording.failureCode, recording.failureDetail);
                 }
                 if (failure != null) Manuscripts.fail(app, recording.id, failure);
+                Manuscripts.setMetadata(app, recording.id, recording.application, recording.durationSeconds);
                 Manuscripts.saveDiagnostics(app, recording.id, recording.diagnostics.toString());
             } catch (RuntimeException error) {
                 // Always release the session when the storage layer reports an error.
@@ -340,7 +388,10 @@ public final class VoiceSession {
             } finally {
                 Manuscripts.end(app, recording.id);
                 active = null;
-                if (!destroyed) listener.onVoiceState(IDLE);
+                if (!destroyed) {
+                    listener.onVoicePreview("");
+                    listener.onVoiceState(IDLE);
+                }
             }
         }
         if (failure != null && !destroyed && !recording.cancelled) notice(failure);
@@ -363,9 +414,150 @@ public final class VoiceSession {
         return saveAudio(recording, output);
     }
 
+    private byte[] collectStreaming(Recording recording, BlockingQueue<byte[]> segmentQueue, byte[] endMarker)
+            throws IOException, InterruptedException {
+        AdaptiveVad vad = new AdaptiveVad(SAMPLE_RATE);
+        VadAudioStream output = new VadAudioStream(vad, segmentQueue);
+        output.write(new byte[WAV_HEADER], 0, WAV_HEADER);
+        try {
+            recorder.record(output, () -> recording.finishRecording);
+            if (!recording.finishRecording) {
+                main.post(() -> {
+                    if (active == recording && !recording.stopped) {
+                        stop();
+                        notice("录音已达到当前可用内存上限，正在处理");
+                    }
+                });
+            }
+            if (!recording.cancelled) {
+                byte[] tail = output.finishTail();
+                if (tail != null) segmentQueue.offer(tail);
+            }
+        } finally {
+            segmentQueue.offer(endMarker);
+        }
+        recording.readyToSave.await();
+        return saveAudio(recording, output);
+    }
+
+    private String transcribeQueue(
+            Recording recording,
+            BlockingQueue<byte[]> segmentQueue,
+            byte[] endMarker,
+            List<String> hotwords,
+            boolean polishEnabled,
+            Consumer<String> saveRaw
+    ) throws Exception {
+        StringBuilder raw = new StringBuilder();
+        try (LocalAsr client = openReadyAsr(recording, hotwords)) {
+            while (!recording.cancelled && !destroyed) {
+                byte[] segment = segmentQueue.take();
+                if (segment == endMarker) break;
+                if (segment.length <= WAV_HEADER) continue;
+                EditorContext segContext = EditorContext.of(
+                        AdaptiveVad.combineBeforeContext(recording.context.before, raw.toString(), 300),
+                        recording.context.after
+                );
+                String recognized = client.transcribeWindow(segment, hotwords, segContext);
+                if (!recognized.trim().isEmpty()) {
+                    String prior = raw.toString();
+                    String delta = AdaptiveVad.joinDelta(prior, recognized);
+                    String updated = AdaptiveVad.joinTranscript(prior, recognized);
+                    raw.setLength(0);
+                    raw.append(updated);
+                    saveRaw.accept(updated);
+                    main.post(() -> {
+                        if (active != recording || destroyed || recording.cancelled) return;
+                        listener.onVoicePreview(updated);
+                        if (!polishEnabled && !delta.isEmpty()) {
+                            InputConnection target = recording.editor;
+                            if (target != null && target == host.getCurrentInputConnection()
+                                    && target.commitText(delta, 1)) {
+                                synchronized (recording) {
+                                    recording.committedStream.append(delta);
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+        }
+        return raw.toString();
+    }
+
+    private LocalAsr openReadyAsr(Recording recording, List<String> hotwords) throws LocalAsr.Failure {
+        recording.event("连接本地语音识别服务");
+        LocalAsr client = new LocalAsr(app, speechPackage, recording::event);
+        try {
+            client.requireReady();
+            int count = client.acceptsHints() ? hotwords.size() : 0;
+            boolean hasContext = client.acceptsHints()
+                    && (!recording.context.before.isEmpty() || !recording.context.after.isEmpty());
+            recording.event("本地识别就绪 · 热词 " + count + " 个 · 光标上下文" + (hasContext ? "已提供" : "未提供"));
+            return client;
+        } catch (LocalAsr.Failure failure) {
+            client.close();
+            throw failure;
+        }
+    }
+
+    private static String awaitAsr(Future<String> future) throws Exception {
+        try {
+            return future.get();
+        } catch (ExecutionException execution) {
+            Throwable cause = execution.getCause();
+            if (cause instanceof Exception) throw (Exception) cause;
+            throw new IOException("语音识别异常", cause);
+        }
+    }
+
+    private static final class VadAudioStream extends ByteArrayOutputStream {
+        private final AdaptiveVad vad;
+        private final BlockingQueue<byte[]> queue;
+        private int vadOffsetBytes = 0;
+
+        VadAudioStream(AdaptiveVad vad, BlockingQueue<byte[]> queue) {
+            this.vad = vad;
+            this.queue = queue;
+        }
+
+        @Override
+        public synchronized void write(byte[] b, int off, int len) {
+            super.write(b, off, len);
+            while (count - WAV_HEADER - vadOffsetBytes >= AdaptiveVad.FRAME_PCM_BYTES) {
+                AdaptiveVad.Segment seg = vad.feedPcmFrame(
+                        buf, WAV_HEADER + vadOffsetBytes, AdaptiveVad.FRAME_PCM_BYTES, vadOffsetBytes);
+                vadOffsetBytes += AdaptiveVad.FRAME_PCM_BYTES;
+                if (seg != null) {
+                    byte[] segWav = sliceWav(seg.startByte, seg.endByte);
+                    if (segWav != null) queue.offer(segWav);
+                }
+            }
+        }
+
+        synchronized byte[] finishTail() {
+            int totalPcm = Math.max(0, count - WAV_HEADER);
+            AdaptiveVad.Segment seg = vad.finish(totalPcm);
+            return seg == null ? null : sliceWav(seg.startByte, seg.endByte);
+        }
+
+        private byte[] sliceWav(int startPcmByte, int endPcmByte) {
+            int totalPcm = Math.max(0, count - WAV_HEADER);
+            int s = Math.max(0, Math.min(totalPcm, startPcmByte));
+            int e = Math.max(s, Math.min(totalPcm, endPcmByte));
+            int len = e - s;
+            if (len <= 0) return null;
+            byte[] wav = new byte[WAV_HEADER + len];
+            System.arraycopy(buf, WAV_HEADER + s, wav, WAV_HEADER, len);
+            writeHeader(wav);
+            return wav;
+        }
+    }
+
     private byte[] saveAudio(Recording recording, ByteArrayOutputStream output) {
         byte[] wav = output.toByteArray();
         if (wav.length > WAV_HEADER) {
+            recording.durationSeconds = (wav.length - WAV_HEADER) / (double) (SAMPLE_RATE * FRAME_BYTES);
             writeHeader(wav);
             Manuscripts.saveAudio(app, recording.id, wav);
         }
@@ -498,6 +690,8 @@ public final class VoiceSession {
         String failureCode;
         String failureDetail;
         String raw;
+        double durationSeconds;
+        final StringBuilder committedStream = new StringBuilder();
         List<Lexicon.Entry> terms = Collections.emptyList();
         final CountDownLatch readyToSave = new CountDownLatch(1);
         InputConnection editor;

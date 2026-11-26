@@ -47,7 +47,19 @@ Sound Software 的同签名 Binder 接口读取有明确长度的 WAV 描述符�
 - 其他构建环境可用 `YANMO_ANDROID_KEYSTORE`、`YANMO_ANDROID_KEY_ALIAS`、`YANMO_ANDROID_STORE_PASSWORD` 与 `YANMO_ANDROID_KEY_PASSWORD` 提供同一签名。脚本核验发布证书及 16 KiB 对齐
 - 如无需九键词组模型，可显式设置 `YANMO_LIGHT_KEYBOARD=1` 构建轻量包
 
-安装包面向 arm64-v8a，最低 Android 9。启用并选用言墨即可打字。听写依赖同签名的 [AI SDK](https://github.com/Happenmass/acpm/releases) 及其支持的高通 HTP 设备。公开的 AI SDK `0.1.1` 可做本地听写。ASR 热词和光标提示需要 SDK 声明 `asrHints` 能力。已有版本用 `adb install -r` 覆盖安装。文字 API 和截屏授权位于言墨设置页。
+安装包面向 arm64-v8a，最低 Android 9。启用并选用言墨即可打字。已有版本可用 `adb install -r` 覆盖安装，文字 API 与截屏授权位于言墨设置页。
+
+## 运行依赖（`acpm` 与 `acpm-desktop`）
+
+言墨 Android 不在应用内捆绑语音模型权重或同步服务端，核心外部依赖如下：
+
+- **[acpm（Android AI SDK）](https://github.com/Happenmass/acpm)**（推荐 `v0.1.2+`）：提供高通 HTP 端侧本地听写与 Binder 推理服务，需使用与言墨一致的发布证书签名；支持 `asrHints` 热词/光标上下文提示及按请求 ID 对照的双端失败诊断（旧版 `0.1.1` 可基础本地听写）。
+- **[acpm-desktop（AcpmRuntime）](https://github.com/Happenmass/acpm-desktop)**（推荐 `v0.1.0+`）：作为局域网 / 自建端到端加密同步仓节点，配合言墨「设置 → 跨设备同步」实现 Mac 与 Android 之间的文稿、音频/截屏附件及词库加密同步。
+
+## 新增功能（`yanmo.18`）
+
+- **自适应半流式 VAD + 链式上下文听写（与 Mac 端行为一致）**：长按空格录音期间通过 `AdaptiveVad` 执行 20 ms 帧级自适应底噪与零丢帧连续停顿切分（`< 2.5s → 1200ms`、`2.5–15s → 800ms`、`>= 15s → 400ms`、`24s` 单段上限，松手无条件补齐尾音），复用单条 `LocalAsr` 连接逐段异步识别，并将前段识别结果链式拼接为后续段的上下文提示。关闭自然整理时逐段直接上屏并更新听写条预览；开启自然整理时听写条实时预览转写进度，松手补全尾音后一次性整理写入并完整归档音频。
+- **端到端加密跨设备同步（Mac ↔ Android）**：支持扫描桌面端二维码配对与 24 词恢复码还原、局域网 NSD 自动发现 `AcpmRuntime` 节点、文稿与加密录音/截屏附件双向同步与按需拉取、词库增量合并及删除墓碑同步（已删热词不会跨端复活）。默认采用稀疏节能同步策略（本地变更累积 10 条或每日可调时间默认 `22:00` 触发同步，且在键盘/听写活跃期自动避让防输入卡顿）。
 
 ## 源码与许可
 

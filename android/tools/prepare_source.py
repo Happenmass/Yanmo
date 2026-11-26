@@ -38,7 +38,7 @@ def write_manifest(path, speech_package):
     root = xml.getroot()
     app = root.find("application")
     unused_permissions = {
-        "android.permission.REQUEST_INSTALL_PACKAGES", "android.permission.CAMERA",
+        "android.permission.REQUEST_INSTALL_PACKAGES",
         "android.permission.READ_CONTACTS", "android.permission.RECEIVE_SMS",
         "android.permission.READ_MEDIA_IMAGES", "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
         "android.permission.READ_EXTERNAL_STORAGE", "android.permission.ACCESS_WIFI_STATE", "android.permission.WAKE_LOCK",
@@ -47,9 +47,23 @@ def write_manifest(path, speech_package):
         if permission.get(A + "name") in unused_permissions:
             root.remove(permission)
     camera = root.find(f"uses-feature[@{A}name='android.hardware.camera.any']")
-    if camera is not None:
-        root.remove(camera)
+    if camera is None:
+        camera = ET.Element("uses-feature", {A + "name": "android.hardware.camera.any", A + "required": "false"})
+        root.insert(0, camera)
+    else:
+        camera.set(A + "required", "false")
+    required_permissions = (
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CHANGE_WIFI_MULTICAST_STATE",
+        speech_package + ".permission.SPEECH",
+    )
+    for perm in required_permissions:
+        if not any(item.get(A + "name") == perm for item in root.findall("uses-permission")):
+            root.insert(0, ET.Element("uses-permission", {A + "name": perm}))
     app.set(A + "allowBackup", "false")
+    app.set(A + "networkSecurityConfig", "@xml/network_security_config")
     app.set(A + "label", "@string/app_name")
     app.set(A + "icon", "@drawable/yanmo_mark")
     app.set(A + "roundIcon", "@drawable/yanmo_mark")
@@ -84,6 +98,16 @@ def write_manifest(path, speech_package):
         A + "targetActivity": YANMO_ACTIVITY,
         A + "exported": "true",
     })
+    ET.SubElement(app, "activity", {
+        A + "name": "dev.yanmo.ime.QrScannerActivity",
+        A + "exported": "false",
+        A + "theme": "@android:style/Theme.Material.Light.NoActionBar",
+    })
+    ET.SubElement(app, "service", {
+        A + "name": "dev.yanmo.ime.SyncJobService",
+        A + "permission": "android.permission.BIND_JOB_SERVICE",
+        A + "exported": "false",
+    })
     screenshot_service = ET.SubElement(app, "service", {
         A + "name": "dev.yanmo.ime.ScreenCapture",
         A + "label": "@string/yanmo_screenshot_service_label",
@@ -97,9 +121,6 @@ def write_manifest(path, speech_package):
         A + "name": "android.accessibilityservice",
         A + "resource": "@xml/yanmo_screenshot_service",
     })
-    permission = speech_package + ".permission.SPEECH"
-    if not any(item.get(A + "name") == permission for item in root.findall("uses-permission")):
-        root.insert(0, ET.Element("uses-permission", {A + "name": permission}))
     ET.SubElement(root.find("queries"), "package", {A + "name": speech_package})
     ET.indent(xml, space="    ")
     xml.write(path, encoding="utf-8", xml_declaration=True)
@@ -187,6 +208,17 @@ def main():
     write_manifest(src / "AndroidManifest.xml", args.speech_package)
     use_bundled_onnx_headers(app / "build-logic/tasks-native.gradle.kts")
     prune_legacy_sources(args.checkout, android / "patches")
+    replace_once(
+        app / "build.gradle.kts",
+        '    implementation("com.google.zxing:core:3.5.4")',
+        '    implementation("com.google.zxing:core:3.5.4")\n'
+        '    implementation("org.bouncycastle:bcprov-jdk18on:1.79")\n'
+        '    implementation("androidx.camera:camera-camera2:1.6.2")\n'
+        '    implementation("androidx.camera:camera-lifecycle:1.6.2")\n'
+        '    implementation("androidx.camera:camera-view:1.6.2")',
+    )
+    proguard = app / "proguard-rules.pro"
+    proguard.write_text(proguard.read_text() + "\n-dontwarn org.bouncycastle.**\n")
     wire_correction_learning(src / "java/com/kingzcheung/xime")
     for strings in (src / "res").glob("values*/strings.xml"):
         content = strings.read_text()

@@ -89,7 +89,10 @@ final class Polish {
                            String group, EditorContext editor, List<Lexicon.Entry> lexicon) throws Exception {
         JSONArray terms = new JSONArray();
         for (Lexicon.Entry entry : lexicon) {
-            terms.put(new JSONObject().put("term", entry.term).put("hint", "").put("aliases", new JSONArray()));
+            terms.put(new JSONObject()
+                    .put("term", entry.term)
+                    .put("hint", entry.hint == null ? "" : entry.hint)
+                    .put("aliases", new JSONArray(entry.aliases)));
         }
         String payload = new JSONStringer().object()
                 .key("INSTRUCTION").value("")

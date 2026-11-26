@@ -17,6 +17,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -43,6 +44,15 @@ import java.util.Locale
 import kotlinx.coroutines.delay
 
 internal val LocalYanmoDictationStage = compositionLocalOf { VoiceSession.IDLE }
+
+internal object YanmoDictationPreview {
+    val text = mutableStateOf("")
+
+    @JvmStatic
+    fun update(value: String?) {
+        text.value = value?.trim().orEmpty()
+    }
+}
 
 @Composable
 internal fun YanmoLanguageKey(
@@ -88,6 +98,8 @@ internal fun YanmoDictationBar(stage: Int, background: Color, foreground: Color)
         else -> "正在识别"
     }
     var seconds by remember(stage) { mutableLongStateOf(0L) }
+    val preview by YanmoDictationPreview.text
+    val previewTail = if (preview.length > 24) "…" + preview.takeLast(24) else preview
     LaunchedEffect(recording) {
         if (recording) {
             val start = SystemClock.elapsedRealtime()
@@ -112,8 +124,23 @@ internal fun YanmoDictationBar(stage: Int, background: Color, foreground: Color)
         if (recording) {
             Text(String.format(Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60),
                 color = foreground, fontSize = 13.sp, maxLines = 1)
-            Text("上滑取消 · 松手结束", color = foreground.copy(alpha = 0.75f), fontSize = 12.sp,
-                modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                if (previewTail.isNotEmpty()) previewTail else "上滑取消 · 松手结束",
+                color = foreground.copy(alpha = if (previewTail.isNotEmpty()) 0.92f else 0.75f),
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        } else if (previewTail.isNotEmpty()) {
+            Text(
+                previewTail,
+                color = foreground.copy(alpha = 0.88f),
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
