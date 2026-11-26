@@ -4,9 +4,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { cocoaNow, defaultSettings, FN_MODIFIER, migrateSettings, shortcutID, shortcutLabel, shortcutNeedsEventTap, validateSettings } from '../shared';
+import { checkAcpmURL, cocoaNow, defaultSettings, FN_MODIFIER, migrateSettings, shortcutID, shortcutLabel, shortcutNeedsEventTap, validateSettings } from '../shared';
 import { LibraryStore } from '../store';
-import { decodeSSE } from '../processes';
 import { renderMarkdown } from '../renderer/markdown';
 
 test('三组 FN 默认快捷键有效且不冲突，使用明确键名', () => {
@@ -24,13 +23,18 @@ test('三组 FN 默认快捷键有效且不冲突，使用明确键名', () => {
   settings.shortcuts.selectionTranslation = [{ keyCode: 0, modifiers: FN_MODIFIER, keyLabel: 'A' }];
   validateSettings(settings);
 });
-test('旧设置迁移保留纯修饰键、语言和隐私，默认 ModelScope', () => {
-  const settings = migrateSettings({ context: false, history: false, voiceTarget: 'ja', selectionTarget: 'zh-Hans', shortcuts: [{ keyCode: 0, modifiers: 0, keyLabel: '左 Control', modifierKeys: [59] }] });
-  assert.equal(settings.modelSource, 'modelscope'); assert.equal(settings.keepHistory, false);
+test('旧设置迁移保留纯修饰键、语言、隐私并映射 AcpmRuntime 模型规格', () => {
+  const settings = migrateSettings({ asr: 'mlx-community/Qwen3-ASR-0.6B-8bit', context: false, history: false, voiceTarget: 'ja', selectionTarget: 'zh-Hans', shortcuts: [{ keyCode: 0, modifiers: 0, keyLabel: '左 Control', modifierKeys: [59] }] });
+  assert.equal(settings.acpm.asrModel, 'qwen3-asr-0.6b');
+  assert.equal(settings.acpm.textModel, 'yanmo-correct-4b-cot');
+  assert.equal(settings.keepHistory, false);
   assert.equal(settings.voiceTarget, 'ja'); assert.equal(settings.selectionTarget, 'zh-Hans');
   assert.equal(shortcutID(settings.shortcuts.dictation[0]), 'mod:59');
   settings.shortcuts.selectionTranslation.push(settings.shortcuts.dictation[0]);
   assert.throws(() => validateSettings(settings), /已被使用/);
+
+  const large = migrateSettings({ asr: 'mlx-community/Qwen3-ASR-1.7B-8bit' });
+  assert.equal(large.acpm.asrModel, 'qwen3-asr-1.7b');
 });
 test('首次使用引导只在全新安装时出现，完成后不再出现', () => {
   const directory = mkdtempSync(join(tmpdir(), 'yanmo-guide-'));
@@ -69,11 +73,24 @@ test('文稿迁移备份原数据并保留 Swift 日期，损坏文件不覆盖'
     assert.equal(readFileSync(join(badTarget, 'library.json'), 'utf8'), 'broken');
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
-test('SSE 分片和 CRLF 不丢失或提前提交结果', () => {
-  const first = decodeSSE('data: {"event":"transcript","task_id":"1","text":"原文"}\r\n\r\ndata: {"event":"res');
-  assert.equal(first.events.length, 1); assert.equal(first.events[0].text, '原文');
-  const next = decodeSSE(first.rest + 'ult","task_id":"1","text":"完整结果"}\n\n');
-  assert.equal(next.events.length, 1); assert.equal(next.events[0].text, '完整结果'); assert.equal(next.rest, '');
+test('checkAcpmURL 允许本机、mDNS (.local)、局域网 IP 及 https，拒绝公网明文 http 与凭据', () => {
+  for (const good of [
+    'http://127.0.0.1:18790',
+    'http://localhost:18790',
+    'http://[::1]:18790',
+    'http://acpm.local:18790',
+    'http://192.168.1.25:18790',
+    'http://10.0.0.8:18790',
+    'http://172.16.4.2:18790',
+    'https://acpm.example.com',
+  ]) checkAcpmURL(good);
+  for (const bad of [
+    'http://api.example.com:18790',
+    'http://172.32.0.1:18790',
+    'https://user:pw@acpm.local:18790',
+    'https://acpm.local:18790?token=1',
+    'ftp://acpm.local',
+  ]) assert.throws(() => checkAcpmURL(bad));
 });
 test('Markdown 保留表格和原始代码，HTML 与图片保持惰性', () => {
   const code = 'const text = "<script>alert(1)</script>";\n';

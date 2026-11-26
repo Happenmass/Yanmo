@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import YanmoCore
 import YanmoNative
@@ -64,5 +65,39 @@ struct BridgeInputChecks {
             print("FAIL: fragmented UTF-8 or EOF command was lost"); exit(1)
         }
         print("PASS: fragmented UTF-8, batched commands and a final command without newline survive pipe reads")
+
+        // Verify 48kHz stereo PCM WAV -> 16kHz mono FLAC archival produces a valid playable FLAC file.
+        let tempDir = FileManager.default.temporaryDirectory
+        let wavURL = tempDir.appendingPathComponent("yanmo-check-\(UUID().uuidString).wav")
+        let flacURL = tempDir.appendingPathComponent("yanmo-check-\(UUID().uuidString).flac")
+        defer {
+            try? FileManager.default.removeItem(at: wavURL)
+            try? FileManager.default.removeItem(at: flacURL)
+        }
+        let stereoFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 2, interleaved: false)!
+        do {
+            let wavFile = try AVAudioFile(forWriting: wavURL, settings: stereoFormat.settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+            let frames: AVAudioFrameCount = 24000
+            let buffer = AVAudioPCMBuffer(pcmFormat: stereoFormat, frameCapacity: frames)!
+            buffer.frameLength = frames
+            for i in 0..<Int(frames) {
+                let sample = sin(Float(i) * 0.04) * 0.25
+                buffer.floatChannelData![0][i] = sample
+                buffer.floatChannelData![1][i] = sample
+            }
+            try wavFile.write(from: buffer)
+        }
+        let flacData = try AudioArchiver.encodeFLAC(from: wavURL)
+        guard flacData.prefix(4) == Data("fLaC".utf8) else {
+            print("FAIL: encoded archive does not start with fLaC magic")
+            exit(1)
+        }
+        try flacData.write(to: flacURL, options: .atomic)
+        let decoded = try AVAudioFile(forReading: flacURL)
+        guard decoded.fileFormat.sampleRate == 16000, decoded.fileFormat.channelCount == 1, decoded.length > 7000 else {
+            print("FAIL: decoded FLAC metadata invalid: rate=\(decoded.fileFormat.sampleRate), ch=\(decoded.fileFormat.channelCount), len=\(decoded.length)")
+            exit(1)
+        }
+        print("PASS: AudioArchiver encodes 48kHz stereo WAV into valid 16kHz mono FLAC (\(flacData.count) bytes)")
     }
 }

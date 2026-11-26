@@ -15,3 +15,5 @@ runtime/macos/*.lock
 test-results/
 playwright-report/
 dist-release/
+dist-local/
+.codex-attachments/

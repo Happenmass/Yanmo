@@ -10,6 +10,7 @@ import { LibraryStore } from '../store';
 
 test('日历显示各应用发送总量和真实文字请求用量，并区分未知用量和旧日期', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'yanmo-daily-qa-'));
+  const emptyAcpmDir = await mkdtemp(join(tmpdir(), 'yanmo-empty-acpm-'));
   const today = localDayKey(new Date());
   const yesterday = shiftLocalDay(today, -1);
   const earlier = shiftLocalDay(yesterday, -1);
@@ -55,7 +56,7 @@ test('日历显示各应用发送总量和真实文字请求用量，并区分�
       `).run(timestamp, timestamp, timestamp);
     } finally { db.close(); }
     const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
-      YANMO_DATA_DIR: directory, YANMO_QA: '1' };
+      YANMO_DATA_DIR: directory, YANMO_ACPM_DATA_DIR: emptyAcpmDir, YANMO_QA: '1' };
     delete env.ELECTRON_RUN_AS_NODE;
     const executablePath = process.env.YANMO_QA_APP;
     application = await electron.launch({ args: executablePath ? [] : [resolve('.')], env, executablePath, cwd: executablePath ? tmpdir() : resolve('.') });
@@ -103,5 +104,6 @@ test('日历显示各应用发送总量和真实文字请求用量，并区分�
     if (application) await application.close();
     server.close();
     await rm(directory, { recursive: true, force: true });
+    await rm(emptyAcpmDir, { recursive: true, force: true });
   }
 });

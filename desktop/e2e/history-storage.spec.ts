@@ -8,17 +8,20 @@ import { cocoaNow, defaultSettings } from '../shared';
 
 test('文稿预览可播放录音并放大 JPEG 与 AVIF，附件随文稿重启保留及删除', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'yanmo-history-qa-'));
+  const emptyAcpmDir = await mkdtemp(join(tmpdir(), 'yanmo-empty-acpm-'));
   const store = new LibraryStore(directory, { ...defaultSettings(), showDock: false });
   store.settings.onboarded = true;
   const item = { id: 'fixture', date: cocoaNow(), original: '合成原文', text: '合成正文', seconds: 2, application: '合成测试', polished: true };
   const endedAt = Date.now();
   store.library.manuscripts = [
     { ...item, recordingEndedAtMs: endedAt },
+    { ...item, id: 'flac-audio', text: 'FLAC 归档录音的文稿', recordingEndedAtMs: endedAt },
     { ...item, id: 'avif', text: '只有截屏的文稿', recordingEndedAtMs: endedAt },
     { ...item, id: 'warning', text: '没有录音的合成正文', audioWarning: '录音未保存：音频压缩失败，文字处理继续。' },
   ];
   const media = (format: string) => readFile(join(__dirname, 'fixtures', `manuscript-preview.${format}`));
   store.persist({ id: item.id, audioOpus: await media('ogg'), screenshotImage: await media('jpg') });
+  store.persist({ id: 'flac-audio', audioOpus: await media('flac') });
   store.persist({ id: 'avif', screenshotImage: await media('avif') });
   if (process.platform === 'darwin') {
     store.library.manuscripts.push({ ...item, id: 'odd-avif', text: '旧版保存的奇数高度截屏', recordingEndedAtMs: endedAt });
@@ -27,7 +30,7 @@ test('文稿预览可播放录音并放大 JPEG 与 AVIF，附件随文稿重启
   store.close();
   let application: ElectronApplication | undefined;
   const launch = async () => {
-    const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')), YANMO_DATA_DIR: directory, YANMO_QA: '1' };
+    const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')), YANMO_DATA_DIR: directory, YANMO_ACPM_DATA_DIR: emptyAcpmDir, YANMO_QA: '1' };
     delete env.ELECTRON_RUN_AS_NODE;
     const executablePath = process.env.YANMO_QA_APP;
     application = await electron.launch({ args: executablePath ? [] : [resolve('.')], executablePath, env, cwd: resolve('.') });
@@ -72,6 +75,11 @@ test('文稿预览可播放录音并放大 JPEG 与 AVIF，附件随文稿重启
       await expect(preview).not.toBeVisible();
       await expect(page.locator('.topbar')).toHaveCSS('-webkit-app-region', 'drag');
     }
+    await page.locator('.manuscript-select').filter({ hasText: 'FLAC 归档录音的文稿' }).click();
+    await expect.poll(() => page.locator('.recording-preview audio').evaluate((el: HTMLAudioElement) => el.readyState)).toBeGreaterThanOrEqual(1);
+    await page.getByRole('button', { name: '播放录音' }).click();
+    await expect.poll(() => page.locator('.recording-preview audio').evaluate((el: HTMLAudioElement) => el.currentTime)).toBeGreaterThan(0);
+    await page.getByRole('button', { name: '暂停录音' }).click();
     await page.locator('.manuscript-select').filter({ hasText: /^合成正文/ }).click();
     await expect.poll(() => thumbnail.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(32);
     await page.getByRole('button', { name: '放大录音结束截屏' }).click();
@@ -113,9 +121,9 @@ test('文稿预览可播放录音并放大 JPEG 与 AVIF，附件随文稿重启
     db.close();
     await application!.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false }); });
     await page.locator('.manuscript-item').filter({ hasText: '编辑后的合成正文' }).getByRole('button', { name: '删除文稿' }).click();
-    await expect(page.locator('.manuscript-item')).toHaveCount(process.platform === 'darwin' ? 3 : 2);
+    await expect(page.locator('.manuscript-item')).toHaveCount(process.platform === 'darwin' ? 4 : 3);
     await application!.close(); application = undefined;
     db = new DatabaseSync(join(directory, 'yanmo.db'), { readOnly: true });
     expect(db.prepare('SELECT id FROM manuscripts WHERE id=?').get('fixture')).toBeUndefined(); db.close();
-  } finally { if (application) await application.close(); await rm(directory, { recursive: true, force: true }); }
+  } finally { if (application) await application.close(); await rm(directory, { recursive: true, force: true }); await rm(emptyAcpmDir, { recursive: true, force: true }); }
 });

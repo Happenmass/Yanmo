@@ -10,6 +10,7 @@ type TrayProbe = { tray?: Tray; attachedMenus: boolean[]; popups: { label: strin
 test('菜单栏左键只打开主窗口，右键单独弹出菜单', async () => {
   test.skip(Boolean(process.env.YANMO_QA_APP), '此检查在源码启动前观察真实 Tray API；打包版另做系统点击验收');
   const directory = await mkdtemp(join(tmpdir(), 'yanmo-tray-clicks-'));
+  const emptyAcpmDir = await mkdtemp(join(tmpdir(), 'yanmo-empty-acpm-'));
   let application: ElectronApplication | undefined;
   try {
     await writeFile(join(directory, 'settings.json'), JSON.stringify({ ...defaultSettings(), showDock: false }));
@@ -40,7 +41,7 @@ test('菜单栏左键只打开主窗口，右键单独弹出菜单', async () =>
       };
       require(${JSON.stringify(resolve('.electron/main.cjs'))});
     `);
-    const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')), YANMO_DATA_DIR: directory, YANMO_QA: '1' };
+    const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')), YANMO_DATA_DIR: directory, YANMO_ACPM_DATA_DIR: emptyAcpmDir, YANMO_QA: '1' };
     delete env.ELECTRON_RUN_AS_NODE;
     application = await electron.launch({ args: [bootstrap], env });
     await expect.poll(() => application!.evaluate(() => (globalThis as unknown as { __yanmoTrayProbe: TrayProbe }).__yanmoTrayProbe.menuReady)).toBe(true);
@@ -63,5 +64,6 @@ test('菜单栏左键只打开主窗口，右键单独弹出菜单', async () =>
   } finally {
     if (application) await application.close();
     await rm(directory, { recursive: true, force: true });
+    await rm(emptyAcpmDir, { recursive: true, force: true });
   }
 });

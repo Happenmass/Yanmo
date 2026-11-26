@@ -13,6 +13,7 @@ const releaseAPI = 'https://api.github.com/repos/' + repository + '/releases/lat
 const releaseSignature = 'identifier "org.yanmo.desktop" and anchor apple generic'
   + ' and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "299DDXTQH5"';
 const stableVersion = /^v?(\d+)\.(\d+)\.(\d+)$/;
+const localVersion = /^(\d+)\.(\d+)\.(\d+)\+local\.[1-9]\d*$/;
 const maxDownloadBytes = 2 * 1024 ** 3;
 export class UpdateError extends Error {}
 
@@ -33,7 +34,7 @@ export async function findUpdate(current: string, fetcher: typeof fetch): Promis
     name: string; state: string; browser_download_url: string; digest: string; size: number;
   }[] } = await response.json();
   const latest = stableVersion.exec(release?.tag_name);
-  const installed = stableVersion.exec(current);
+  const installed = stableVersion.exec(current) ?? localVersion.exec(current);
   if (!latest || !installed || release.draft || release.prerelease) throw new UpdateError('GitHub 返回的版本信息无效。');
   const difference = latest.slice(1).map((part, index) => Number(part) - Number(installed[index + 1])).find(Boolean);
   if (difference === undefined || difference < 0) return;

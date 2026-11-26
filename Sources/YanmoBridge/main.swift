@@ -7,13 +7,14 @@ import YanmoCore
 import YanmoNative
 
 /// Owns OS handles only. Text generation, windows, and persistent application data
-/// remain in the Electron application and its independent inference backend.
+/// remain in the Electron application and external inference services.
 @MainActor
 final class Bridge {
     private let keys = HotKeys()
     private let recorder = AudioRecorder()
     private var destinations: [String: InputDestination] = [:]
     private var audioFiles = Set<URL>()
+    private var lastRecording: (taskId: String, data: Data)?
     private var correction: CorrectionObservation?
     private var meter: Timer?
     private var active = false
@@ -99,19 +100,21 @@ final class Bridge {
          "devices": AudioInput.available().map { ["id": $0.id, "name": $0.name] }]
     }
 
-    /// Opens Accessibility settings with a floating panel the user drags 言墨 from into the list.
-    private func guideAccessibility(app: String?, source: [String: Double]?) {
+    /// Shows the signed app bundle as a drag target beside the requested privacy pane.
+    private func guidePermission(_ pane: PermissionFlowPane, app: String?, source: [String: Double]?) {
         var frame: CGRect?
         if let source, let x = source["x"], let y = source["y"], let width = source["width"], let height = source["height"], let screen = NSScreen.screens.first {
             frame = CGRect(x: x, y: screen.frame.maxY - y - height, width: width, height: height) // Electron's origin is top-left.
         }
         NSApp.setActivationPolicy(.accessory) // A prohibited process cannot show the panel.
-        permissionFlow.authorize(pane: .accessibility, suggestedAppURLs: app.map { [URL(fileURLWithPath: $0)] } ?? [], sourceFrameInScreen: frame)
+        permissionFlow.authorize(pane: pane, suggestedAppURLs: app.map { [URL(fileURLWithPath: $0)] } ?? [], sourceFrameInScreen: frame)
         // macOS posts no grant notification; poll until granted (a no-op once settings are closed).
         trustWatch?.invalidate()
         trustWatch = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] timer in
             MainActor.assumeIsolated {
-                guard let self, AXIsProcessTrusted() else { return }
+                guard let self else { timer.invalidate(); return }
+                let granted = pane == .screenRecording ? CGPreflightScreenCaptureAccess() : AXIsProcessTrusted()
+                guard granted else { return }
                 timer.invalidate()
                 self.permissionFlow.closePanel(returnToPreviousApp: true)
                 NSApp.setActivationPolicy(.prohibited)
@@ -166,6 +169,17 @@ final class Bridge {
         return ["path": url.path, "seconds": duration]
     }
 
+    private nonisolated static func encodeFLAC(from inputURL: URL) throws -> Data {
+        try AudioArchiver.encodeFLAC(from: inputURL)
+    }
+
+    private nonisolated static func encodeFLAC(data: Data) throws -> Data {
+        let wavURL = FileManager.default.temporaryDirectory.appendingPathComponent("yanmo-archive-src-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: wavURL) }
+        try data.write(to: wavURL, options: .atomic)
+        return try encodeFLAC(from: wavURL)
+    }
+
     private nonisolated static func transcodeScreenshot(_ encoded: String, to format: String) -> String? {
         guard let input = Data(base64Encoded: encoded),
               let source = CGImageSourceCreateWithData(input as CFData, nil),
@@ -191,9 +205,14 @@ final class Bridge {
             case "legacySettings": result = legacySettings()
             case "permissions":
                 if args["request"] as? Bool == true, !AXIsProcessTrusted() {
-                    guideAccessibility(app: args["app"] as? String, source: args["source"] as? [String: Double])
+                    guidePermission(.accessibility, app: args["app"] as? String, source: args["source"] as? [String: Double])
                 }
                 result = status()
+            case "screenRecording.request":
+                // The OS can wait for consent. Leave the bridge's event loop responsive.
+                _ = await Task.detached(priority: .userInitiated) { CGRequestScreenCaptureAccess() }.value
+            case "screenRecording.guide":
+                guidePermission(.screenRecording, app: args["app"] as? String, source: args["source"] as? [String: Double])
             case "configure":
                 var bindings: [ShortcutBinding] = []
                 for item in args["bindings"] as? [[String: Any]] ?? [] {
@@ -212,7 +231,10 @@ final class Bridge {
                 result = status()
             case "active":
                 active = args["value"] as? Bool ?? false
-                if !active { destinations.removeAll(); deliveryTask?.cancel(); selectionTask?.cancel() }
+                if !active {
+                    destinations.removeAll(); deliveryTask?.cancel(); selectionTask?.cancel()
+                    lastRecording = nil
+                }
             case "capture":
                 let bundleID = args["applicationBundleID"] as? String
                 let application = bundleID.flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0).first } ?? (bundleID == nil ? NSWorkspace.shared.frontmostApplication : nil)
@@ -270,11 +292,23 @@ final class Bridge {
                 result = ["delivery": "attempted_unverified", "name": name, "dispatchReported": inputEventID != nil && characterCount != nil,
                           "message": "已向写入时的前台输入位置发送一次粘贴。"]
             case "record.start":
-                correction?.stop(); correction = nil
+                correction?.stop(); correction = nil; lastRecording = nil
                 let generation = UUID(); recordingGeneration = generation
-                try await recorder.start(deviceUID: args["device"] as? String ?? "")
+                let taskId = args["taskId"] as? String ?? ""
+                var onSegment: (@Sendable (Data, Int) -> Void)?
+                if args["streamingVad"] as? Bool == true {
+                    onSegment = { [weak self] wav, index in
+                        let encoded = wav.base64EncodedString()
+                        DispatchQueue.main.async {
+                            MainActor.assumeIsolated {
+                                self?.emitAudioSegment(taskId: taskId, generation: generation, index: index, audioBase64: encoded)
+                            }
+                        }
+                    }
+                }
+                try await recorder.start(deviceUID: args["device"] as? String ?? "", onSegment: onSegment)
                 guard recordingGeneration == generation else { throw EngineError(message: "录音已取消。") }
-                recordingID = args["taskId"] as? String ?? ""
+                recordingID = taskId
                 meter?.invalidate()
                 meter = Timer.scheduledTimer(withTimeInterval: 0.06, repeats: true) { [weak self] _ in
                     MainActor.assumeIsolated { guard let self else { return }; self.send(["event": "meter", "taskId": self.recordingID, "level": self.recorder.level]) }
@@ -283,10 +317,35 @@ final class Bridge {
                 recordingGeneration = UUID()
                 meter?.invalidate(); meter = nil
                 let recording = try recorder.finishWAV()
+                lastRecording = (recordingID, recording.data)
                 let encoded = await Task.detached(priority: .userInitiated) { recording.data.base64EncodedString() }.value
-                result = ["audioBase64": encoded, "seconds": recording.seconds]
+                var finishResult: [String: Any] = [
+                    "audioBase64": encoded,
+                    "seconds": recording.seconds,
+                    "emittedSegments": recording.emittedSegments,
+                ]
+                if let tail = recording.tailData, !tail.isEmpty {
+                    finishResult["tailAudioBase64"] = await Task.detached(priority: .userInitiated) { tail.base64EncodedString() }.value
+                }
+                result = finishResult
             case "record.cancel":
-                recordingGeneration = UUID(); meter?.invalidate(); meter = nil; recorder.cancel()
+                recordingGeneration = UUID(); meter?.invalidate(); meter = nil; lastRecording = nil; recorder.cancel()
+            case "audio.archive":
+                let flacData: Data
+                if let taskId = args["taskId"] as? String, !taskId.isEmpty, let stashed = lastRecording, stashed.taskId == taskId {
+                    lastRecording = nil
+                    let data = stashed.data
+                    flacData = try await Task.detached(priority: .utility) { try Self.encodeFLAC(data: data) }.value
+                } else if let path = args["path"] as? String, !path.isEmpty {
+                    let url = URL(fileURLWithPath: path)
+                    flacData = try await Task.detached(priority: .utility) { try Self.encodeFLAC(from: url) }.value
+                } else if let encoded = args["audioBase64"] as? String, let data = Data(base64Encoded: encoded) {
+                    flacData = try await Task.detached(priority: .utility) { try Self.encodeFLAC(data: data) }.value
+                } else {
+                    throw EngineError(message: "没有可归档的录音数据。")
+                }
+                let encodedFLAC = await Task.detached(priority: .utility) { flacData.base64EncodedString() }.value
+                result = ["audioBase64": encodedFLAC]
             case "screenshot.encode":
                 if let png = args["png"] as? String {
                     let encoded = await Task.detached(priority: .utility) { Self.transcodeScreenshot(png, to: "public.avif") }.value
@@ -308,8 +367,13 @@ final class Bridge {
         } catch { send(["id": id, "ok": false, "error": error.localizedDescription]) }
     }
 
+    private func emitAudioSegment(taskId: String, generation: UUID, index: Int, audioBase64: String) {
+        guard recordingGeneration == generation, recordingID == taskId else { return }
+        send(["event": "audioSegment", "taskId": taskId, "index": index, "audioBase64": audioBase64])
+    }
+
     func shutdown() {
-        correction?.stop(); correction = nil
+        correction?.stop(); correction = nil; lastRecording = nil
         recordingGeneration = UUID(); meter?.invalidate(); recorder.cancel(); trustWatch?.invalidate()
         deliveryTask?.cancel(); selectionTask?.cancel()
         for url in audioFiles { try? FileManager.default.removeItem(at: url) }

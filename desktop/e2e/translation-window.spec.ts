@@ -7,10 +7,12 @@ import { defaultSettings } from '../shared';
 let application: ElectronApplication;
 let translation: Page;
 let directory: string;
+let emptyAcpmDir: string;
 test.beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), 'yanmo-translation-window-'));
+  emptyAcpmDir = await mkdtemp(join(tmpdir(), 'yanmo-empty-acpm-'));
   await writeFile(join(directory, 'settings.json'), JSON.stringify({ ...defaultSettings(), showDock: false }));
-  const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')), YANMO_DATA_DIR: directory };
+  const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')), YANMO_DATA_DIR: directory, YANMO_ACPM_DATA_DIR: emptyAcpmDir };
   delete env.ELECTRON_RUN_AS_NODE;
   application = await electron.launch({ args: process.env.YANMO_QA_APP ? [] : [resolve('.')], env, executablePath: process.env.YANMO_QA_APP });
   await expect.poll(() => application.windows().length).toBe(3);
@@ -20,7 +22,7 @@ test.beforeAll(async () => {
   const window = await application.browserWindow(translation);
   await window.evaluate(window => { window.setPosition(180, 100); window.showInactive(); });
 });
-test.afterAll(async () => { if (application) await application.close(); if (directory) await rm(directory, { recursive: true, force: true }); });
+test.afterAll(async () => { if (application) await application.close(); if (directory) await rm(directory, { recursive: true, force: true }); if (emptyAcpmDir) await rm(emptyAcpmDir, { recursive: true, force: true }); });
 
 test('划词翻译作为普通窗口，切换应用后不强制置顶或跟随所有空间', async () => {
   const window = await application.browserWindow(translation);

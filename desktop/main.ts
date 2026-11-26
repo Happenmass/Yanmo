@@ -1,18 +1,19 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, Menu, nativeImage, safeStorage, screen, shell, systemPreferences, Tray } from 'electron';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { rm, writeFile } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { spawn, ChildProcess } from 'node:child_process';
-import { createInterface } from 'node:readline';
 import { setTimeout as wait } from 'node:timers/promises';
 import { Controller } from './controller';
-import { NativeBridge, BackendClient } from './processes';
+import { NativeBridge } from './processes';
+import { InferenceService } from './inference';
 import { LibraryStore } from './store';
+import { SyncEngine } from './sync-engine';
+import { FileKnownHubStore, SyncPairingService, type SyncSecretsRecord, type SyncSecretStore } from './sync-pairing';
+import type { SyncPlatform } from './sync-crypto';
 import { findUpdate, installOnExit, stageUpdate, UpdateError } from './updates';
-import { probeWindows } from './precheck';
-import { checkWindowsModels, prepareWindowsRuntime, RuntimePaths, runtimeCurrent, runtimePaths } from './windows-runtime';
-import { ACTIONS, Action, AppState, busy, Capability, CAPABILITIES, cocoaNow, defaultSettings, migrateSettings, Page, Settings, WINDOWS_MODELS } from './shared';
+import { AcpmSettings, ACTIONS, Action, AppState, busy, Capability, CAPABILITIES, checkAcpmURL, cocoaNow, defaultSettings, migrateSettings, Page, Settings } from './shared';
 
 let mainWindow: BrowserWindow;
 let overlay: BrowserWindow;
@@ -20,13 +21,11 @@ let translation: BrowserWindow;
 let tray: Tray;
 let trayMenu: Menu | undefined;
 let controller: Controller;
+let syncPairing: SyncPairingService;
+let syncEngine: SyncEngine;
 let quitting = false;
 let initialized = false;
 let trayState = '';
-let preparation: ChildProcess | undefined;
-let runtimePython = '';
-// Windows only: the PyTorch venv under Local AppData.
-let windowsRuntime: RuntimePaths | undefined;
 const root = app.isPackaged ? process.resourcesPath : resolve(__dirname, '..');
 const index = app.isPackaged ? join(app.getAppPath(), 'web/index.html') : join(root, 'web/index.html');
 const indexURL = pathToFileURL(index).href;
@@ -66,6 +65,12 @@ async function createWindows() {
   for (const window of [mainWindow, overlay, translation]) secureWindow(window);
   mainWindow.on('close', event => { if (!quitting) { event.preventDefault(); if (controller?.state.captureAction) void controller.endCapture(); mainWindow.hide(); } });
   mainWindow.on('hide', () => { if (!quitting) updateDock(false); });
+  mainWindow.on('focus', () => {
+    refreshScreenRecordingAccess();
+    if (controller && !busy(controller.state.stage) && !controller.state.checking && !controller.state.acpm.connected) {
+      void controller.checkModels();
+    }
+  });
   translation.on('close', event => { if (!quitting) { event.preventDefault(); translation.hide(); void controller?.closeTranslation(); } });
   await Promise.all([mainWindow.loadFile(index), overlay.loadFile(index, { query: { view: 'overlay' } }), translation.loadFile(index, { query: { view: 'translation' } })]);
   reveal();
@@ -74,17 +79,29 @@ let overlayHide: NodeJS.Timeout | undefined;
 function showOverlay() {
   if (quitting || overlay.isDestroyed()) return;
   clearTimeout(overlayHide); overlayHide = undefined;
-  const width = controller.state.learnedTerms?.length ? 440 : overlaySize.width;
-  const resized = overlay.getSize()[0] !== width;
-  if (resized) overlay.setSize(width, overlaySize.height);
+  const hasPreview = Boolean(controller.state.liveTranscript && busy(controller.state.stage));
+  const width = controller.state.learnedTerms?.length ? 440 : hasPreview ? 380 : overlaySize.width;
+  const height = hasPreview && !controller.state.learnedTerms?.length ? 116 : overlaySize.height;
+  const [curW, curH] = overlay.getSize();
+  const resized = curW !== width || curH !== height;
+  if (resized) overlay.setSize(width, height);
   if (!overlay.isVisible() || resized) {
     const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-    overlay.setPosition(Math.round(workArea.x + (workArea.width - width) / 2), workArea.y + workArea.height - overlaySize.height - overlaySize.bottom);
+    overlay.setPosition(Math.round(workArea.x + (workArea.width - width) / 2), workArea.y + workArea.height - height - overlaySize.bottom);
     overlay.showInactive();
   }
 }
+function refreshScreenRecordingAccess() {
+  if (process.platform !== 'darwin' || !controller || quitting) return;
+  const granted = systemPreferences.getMediaAccessStatus('screen') === 'granted';
+  if (controller.state.screenRecording !== granted) {
+    controller.state.screenRecording = granted;
+    controller.changed();
+  }
+}
 async function captureRecordingScreenshot(): Promise<Buffer | undefined> {
-  if (process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted') return;
+  refreshScreenRecordingAccess();
+  if (process.platform === 'darwin' && !controller.state.screenRecording) return;
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   const { width, height } = display.size;
   const scale = Math.min(display.scaleFactor, 1920 / Math.max(width, height));
@@ -127,10 +144,17 @@ function broadcast(state: AppState) {
 function updateTray() {
   if (quitting || !tray || tray.isDestroyed()) return;
   const state = controller.state;
-  const { asr, text } = state.settings.online;
-  const key = [state.stage, state.settings.voiceTarget, asr.enabled, text.enabled].join(':');
+  const { asr, text } = state.runtime.capabilities;
+  const key = [state.stage, state.settings.voiceTarget, asr, text, state.acpm.connected].join(':');
   if (key === trayState) return;
   trayState = key;
+  const statusLabel = asr === 'unavailable'
+    ? 'AcpmRuntime 未就绪'
+    : text === 'online'
+      ? '文字处理使用在线 API'
+      : text === 'acpm'
+        ? 'AcpmRuntime 本地就绪'
+        : '语音识别就绪（文字待配置）';
   trayMenu = Menu.buildFromTemplate([
     { label: state.stage === 'recording' ? '结束录音' : '开始录音', enabled: !busy(state.stage) || state.stage === 'recording', click: () => void controller.perform('dictation') },
     { label: '口述翻译', enabled: !busy(state.stage) || state.stage === 'recording', click: () => void controller.perform('voiceTranslation') },
@@ -138,7 +162,7 @@ function updateTray() {
     { type: 'separator' }, { label: '打开言墨', click: reveal },
     { label: '设置…', click: () => { controller.setPage('settings'); reveal(); } },
     ...(state.update ? [{ label: '检查更新…', click: showUpdates }] : []),
-    { type: 'separator' }, { label: text.enabled ? '文字处理使用 API' : '文字处理 API 待配置', enabled: false }, { label: '退出言墨', click: () => app.quit() },
+    { type: 'separator' }, { label: statusLabel, enabled: false }, { label: '退出言墨', click: () => app.quit() },
   ]);
 }
 async function importAudio() {
@@ -176,7 +200,7 @@ async function checkUpdates() {
       buttons: ['安装并重启', '稍后'], defaultId: 0, cancelId: 1,
     });
     if (install.response !== 0) { report('已取消安装。'); return; }
-    if (busy(controller.state.stage) || controller.state.checking || preparation) throw new UpdateError('请等当前任务完成，再安装更新。');
+    if (busy(controller.state.stage) || controller.state.checking) throw new UpdateError('请等当前任务完成，再安装更新。');
     await installOnExit(appBundle(), staged);
     scheduled = true;
     app.quit();
@@ -188,72 +212,178 @@ async function checkUpdates() {
     controller.changed();
   }
 }
-async function prepareModels() {
-  if (busy(controller.state.stage) || controller.state.checking || preparation) return;
-  // Windows downloads its models with the PyTorch runtime's Python, so that runtime must exist first.
-  const windows = !!windowsRuntime;
-  if (windows && controller.environment?.environment !== 'ready') throw new Error('请先准备运行环境，再下载模型。');
-  const settings = structuredClone(controller.state.settings);
-  const modelArgs = ['--source', settings.modelSource, '--asr', settings.asrModel];
-  // Windows has no SenseVoice review.
-  const command = windows ? windowsRuntime!.python : runtimePython;
-  const args = ['-B', '-u', '-m', 'backend.prepare_models', ...modelArgs, ...(windows ? ['--without-sensevoice'] : ['--sensevoice', settings.senseVoiceModel])];
-  controller.state.checking = true;
-  controller.notice('正在检查全局缓存，并准备模型（来源：' + (settings.modelSource === 'modelscope' ? 'ModelScope' : 'Hugging Face') + '）…');
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const env: NodeJS.ProcessEnv = { ...process.env, HF_HUB_OFFLINE: '0', HF_HUB_DISABLE_TELEMETRY: '1', PYTHONUNBUFFERED: '1' };
-      delete env.PYTHONHOME; delete env.PYTHONPATH; delete env.VIRTUAL_ENV;
-      const child = spawn(command, args, { cwd: root, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-      preparation = child;
-      child.stderr!.resume();
-      createInterface({ input: child.stdout! }).on('line', line => {
-        try {
-          const value = JSON.parse(line);
-          if (value.event === 'preparing') controller.notice('正在准备模型：' + value.model + '（' + (settings.modelSource === 'modelscope' ? 'ModelScope' : 'Hugging Face') + '）');
-          if (value.event === 'prepared') controller.notice((value.reused ? '已复用全局缓存：' : '已准备：') + value.model);
-        } catch { /* Download diagnostics never enter application history. */ }
-      });
-      child.once('error', reject);
-      child.once('close', code => { preparation = undefined; if (code === 0) resolve(); else reject(new Error('模型准备未完成，请检查模型 ID、下载来源与网络后重试。已完成的缓存会继续复用。')); });
-    });
-    controller.notice('语音识别模型已准备，可在本机识别。');
-  } finally { controller.state.checking = false; controller.changed(); await controller.checkModels(); }
-  // First run goes straight from the download to the Accessibility grant, so FN works when the guide asks for it.
-  if (!windows && !controller.state.settings.onboarded && !controller.state.native.accessibility) await controller.permissions(true, { app: appBundle() });
-}
-async function prepareRuntime() {
-  if (!windowsRuntime || busy(controller.state.stage) || controller.state.checking || preparation) return;
-  controller.state.checking = true; controller.changed();
-  try { await prepareWindowsRuntime(windowsRuntime, runtimePython, message => controller.notice(message)); }
-  finally { controller.state.checking = false; controller.changed(); await controller.checkModels(); }
-  controller.notice('运行环境已就绪，可以下载模型。');
-}
-// API keys are encrypted with safeStorage, whose key lives in the macOS Keychain; the file alone cannot be read elsewhere.
+// Secrets are encrypted with safeStorage, whose key lives in the macOS Keychain; the file alone cannot be read elsewhere.
+type SecretKey = Capability | 'acpm';
+const SECRET_KEYS = new Set<string>(['asr', 'text', 'acpm']);
 const keysPath = () => join(dataDirectory, 'online-keys.json');
-function readOnlineKeys(): Partial<Record<Capability, string>> {
+function readStoredKeys(): Partial<Record<SecretKey, string>> {
   if (!existsSync(keysPath())) return {};
   try {
     const stored = JSON.parse(readFileSync(keysPath(), 'utf8')) as Record<string, string>;
-    return Object.fromEntries(Object.entries(stored).filter(([capability, value]) => Object.hasOwn(CAPABILITIES, capability) && typeof value === 'string')
-      .map(([capability, value]) => [capability, safeStorage.decryptString(Buffer.from(value, 'base64'))]));
+    return Object.fromEntries(Object.entries(stored).filter(([name, value]) => SECRET_KEYS.has(name) && typeof value === 'string')
+      .map(([name, value]) => [name, safeStorage.decryptString(Buffer.from(value, 'base64'))])) as Partial<Record<SecretKey, string>>;
   } catch { return {}; }
 }
-function writeOnlineKeys(keys: Partial<Record<Capability, string>>) {
-  if (!safeStorage.isEncryptionAvailable()) throw new Error('无法使用钥匙串加密，API Key 未保存。');
+function writeStoredKeys(keys: Partial<Record<SecretKey, string>>) {
+  if (!safeStorage.isEncryptionAvailable()) throw new Error('无法使用钥匙串加密，密钥未保存。');
   const entries = Object.entries(keys).filter(([, value]) => value);
   if (!entries.length) { rmSync(keysPath(), { force: true }); return; }
-  writeFileSync(keysPath(), JSON.stringify(Object.fromEntries(entries.map(([capability, value]) => [capability, safeStorage.encryptString(value!).toString('base64')]))), { mode: 0o600 });
+  writeFileSync(keysPath(), JSON.stringify(Object.fromEntries(entries.map(([name, value]) => [name, safeStorage.encryptString(value!).toString('base64')]))), { mode: 0o600 });
+}
+function onlineKeysFrom(keys: Partial<Record<SecretKey, string>>): Partial<Record<Capability, string>> {
+  return { ...(keys.asr ? { asr: keys.asr } : {}), ...(keys.text ? { text: keys.text } : {}) };
+}
+const syncIdentityPath = () => join(dataDirectory, 'sync-identity.json');
+const safeStorageSyncSecretStore: SyncSecretStore = {
+  load(): SyncSecretsRecord | null {
+    const filePath = syncIdentityPath();
+    if (!existsSync(filePath)) return null;
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error('无法使用钥匙串解密同步身份密钥。');
+    }
+    const raw = JSON.parse(readFileSync(filePath, 'utf8')) as { encrypted?: string };
+    if (typeof raw?.encrypted !== 'string' || !raw.encrypted) {
+      throw new Error('同步身份密钥文件已损坏（缺少密文）。');
+    }
+    const decoded = JSON.parse(safeStorage.decryptString(Buffer.from(raw.encrypted, 'base64'))) as SyncSecretsRecord;
+    if (!decoded || typeof decoded.deviceId !== 'string' || !decoded.deviceId || typeof decoded.devicePrivateSeedB64 !== 'string' || !decoded.devicePrivateSeedB64) {
+      throw new Error('同步身份密钥内容无效。');
+    }
+    return decoded;
+  },
+  save(record: SyncSecretsRecord) {
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('无法使用钥匙串加密，同步密钥未保存。');
+    const encrypted = safeStorage.encryptString(JSON.stringify(record)).toString('base64');
+    const filePath = syncIdentityPath();
+    const tmpPath = `${filePath}.tmp`;
+    writeFileSync(tmpPath, JSON.stringify({ version: 1, encrypted }), { encoding: 'utf8', mode: 0o600 });
+    chmodSync(tmpPath, 0o600);
+    renameSync(tmpPath, filePath);
+  },
+};
+const syncPlatform = (): SyncPlatform => (process.platform === 'win32' ? 'windows' : 'macos');
+const syncDeviceName = () => hostname() || (process.platform === 'win32' ? '言墨 Windows' : '言墨 Mac');
+let lastDiscoveredHubIds: string[] = [];
+let lastSpoofedHubIds: string[] = [];
+let syncDebounceTimer: NodeJS.Timeout | undefined;
+let syncPeriodicTimer: NodeJS.Timeout | undefined;
+function scheduleBackgroundSync(delayMs = 3000) {
+  if (syncDebounceTimer) {
+    clearTimeout(syncDebounceTimer);
+    syncDebounceTimer = undefined;
+  }
+  if (quitting || !controller || controller.store.error || !syncPairing || !syncEngine) return;
+  syncDebounceTimer = setTimeout(() => {
+    syncDebounceTimer = undefined;
+    if (quitting || !controller || controller.store.error || !syncPairing || !syncEngine) return;
+    let enabled = false;
+    try {
+      enabled = syncPairing.getStatus().enabled;
+    } catch {
+      return;
+    }
+    if (!enabled) return;
+    void syncEngine.syncAllKnownHubs(undefined, { uploadBlobs: controller.state.settings.syncAutoCacheBlobs })
+      .then(() => { refreshSyncState(); })
+      .catch(() => { /* Background sync stays quiet when hubs are offline. */ });
+  }, Math.max(0, delayMs));
+}
+function refreshSyncState() {
+  if (!controller || !syncPairing) return;
+  try {
+    const status = syncPairing.getStatus();
+    if (!controller.store.error) {
+      const cursors = new Map(controller.store.listHubCursors().map(c => [c.hubInstanceId, c]));
+      status.knownHubs = status.knownHubs.map(hub => {
+        const cursor = cursors.get(hub.hubInstanceId);
+        return cursor
+          ? { ...hub, lastPulledSeq: cursor.lastPulledSeq, lastSyncAtMs: cursor.lastSyncAtMs ?? hub.lastSeenAtMs }
+          : hub;
+      });
+    }
+    status.discoveredHubIds = [...lastDiscoveredHubIds];
+    status.spoofedHubIds = [...lastSpoofedHubIds];
+    controller.state.sync = status;
+    controller.changed();
+  } catch (error) {
+    controller.state.sync = {
+      enabled: false,
+      deviceId: '',
+      knownHubs: [],
+      error: (error as Error).message,
+    };
+    controller.changed();
+  }
 }
 async function saveOnline(value: any) {
   if (!value || !Object.hasOwn(CAPABILITIES, value.capability) || typeof value.enabled !== 'boolean' || typeof value.baseURL !== 'string' || typeof value.model !== 'string' || (value.key !== undefined && (typeof value.key !== 'string' || value.key.length > 1000))) throw new Error('在线模型配置无效。');
   const capability = value.capability as Capability;
-  if (value.key?.trim()) { const keys = { ...readOnlineKeys(), [capability]: value.key.trim() }; writeOnlineKeys(keys); controller.setOnlineKeys(keys); }
+  if (value.key?.trim()) {
+    const keys = { ...readStoredKeys(), [capability]: value.key.trim() };
+    writeStoredKeys(keys);
+    controller.setOnlineKeys(onlineKeysFrom(keys));
+  }
   await controller.updateSettings({ online: { ...controller.state.settings.online, [capability]: { enabled: value.enabled, baseURL: value.baseURL.trim(), model: value.model.trim() } } });
-  controller.notice(value.enabled ? CAPABILITIES[capability] + '将使用 API 模型 ' + value.model.trim() + '。' : (capability === 'asr' ? '语音识别使用本机模型。' : '文字处理 API 未启用。'));
+  controller.notice(value.enabled ? CAPABILITIES[capability] + '将使用 API 模型 ' + value.model.trim() + '。' : (capability === 'asr' ? '语音识别使用 AcpmRuntime。' : '已改回 AcpmRuntime 文字处理。'));
 }
-async function invoke(action: string, value: any) {
+async function saveAcpm(value: any) {
+  if (!value || typeof value !== 'object' || !['local', 'remote'].includes(value.mode) || typeof value.remoteBaseURL !== 'string' || typeof value.asrModel !== 'string' || typeof value.textModel !== 'string' || typeof value.vadEnabled !== 'boolean' || (value.token !== undefined && (typeof value.token !== 'string' || value.token.length > 1000))) {
+    throw new Error('AcpmRuntime 连接配置无效。');
+  }
+  const nextAcpm: AcpmSettings = {
+    mode: value.mode,
+    remoteBaseURL: value.remoteBaseURL.trim(),
+    asrModel: value.asrModel.trim(),
+    textModel: value.textModel.trim(),
+    vadEnabled: value.vadEnabled,
+  };
+  if (nextAcpm.remoteBaseURL) checkAcpmURL(nextAcpm.remoteBaseURL);
+  if (value.token?.trim()) {
+    const keys = { ...readStoredKeys(), acpm: value.token.trim() };
+    writeStoredKeys(keys);
+    controller.setAcpmToken(value.token.trim());
+  }
+  await controller.updateSettings({ acpm: nextAcpm });
+  controller.notice(nextAcpm.mode === 'remote' ? '已保存远程 AcpmRuntime 连接配置。' : '已切换为本机 AcpmRuntime 自动发现。');
+}
+async function invoke(action: string, value: any, sender?: Electron.WebContents) {
   if (!controller || quitting) throw new Error('请等待言墨启动或退出完成。');
+  if (action.startsWith('sync') && sender !== mainWindow?.webContents) {
+    throw new Error('同步设置操作仅限在主窗口中执行。');
+  }
+  const sanitizeDeviceName = (raw: unknown) => {
+    if (typeof raw !== 'string') return syncDeviceName();
+    const clean = raw.trim();
+    if (!clean) return syncDeviceName();
+    if (clean.length > 100) throw new Error('设备名称过长。');
+    return clean;
+  };
+  const sanitizeScopes = (raw: unknown): ('inference' | 'yanmo.sync')[] | undefined => {
+    if (raw === undefined) return undefined;
+    if (!Array.isArray(raw) || raw.length === 0 || raw.some(s => s !== 'inference' && s !== 'yanmo.sync')) {
+      throw new Error('设备权限配置无效。');
+    }
+    return [...new Set(raw)] as ('inference' | 'yanmo.sync')[];
+  };
+  const sanitizeAdvertiseAddrs = (raw: unknown): string[] | undefined => {
+    if (raw === undefined) return undefined;
+    if (!Array.isArray(raw) || raw.length > 16 || raw.some(a => typeof a !== 'string' || !a.trim() || a.length > 256)) {
+      throw new Error('广播地址列表无效。');
+    }
+    return raw.map(a => a.trim());
+  };
+  const confirmReplaceSpaceIfEnabled = async (): Promise<boolean> => {
+    if (!syncPairing.getStatus().enabled) return false;
+    const choice = await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      message: '当前已加入个人同步空间。若目标空间不同，将继续并重置本机同步进度；是否继续？',
+      buttons: ['取消', '确认切换'],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (choice.response !== 1) throw new Error('已取消切换同步空间。');
+    return true;
+  };
   switch (action) {
     case 'page': controller.setPage(value as Page); break;
     case 'clearNotice': controller.notice(''); break;
@@ -263,13 +393,26 @@ async function invoke(action: string, value: any) {
     case 'import': await importAudio(); break;
     case 'check': await controller.checkModels(); break;
     case 'checkUpdates': await checkUpdates(); break;
-    case 'prepareModels': await prepareModels(); break;
-    case 'prepareRuntime': await prepareRuntime(); break;
-    case 'permissions': {
+    case 'acpmSave': await saveAcpm(value); break;
+    case 'acpmTokenClear': {
+      const keys = readStoredKeys();
+      delete keys.acpm;
+      writeStoredKeys(keys);
+      controller.setAcpmToken('');
+      if (controller.state.settings.acpm.mode === 'remote') await controller.checkModels();
+      controller.notice('已删除 AcpmRuntime Token。');
+      break;
+    }
+    case 'permissions':
+    case 'screenRecordingGuide': {
+      if (action === 'screenRecordingGuide' && !canRequestScreenRecording()) break;
       // The guide panel flies from the clicked button; renderer rects are relative to the window content.
       const bounds = mainWindow.getContentBounds();
       const source = value && ['x', 'y', 'width', 'height'].every(key => Number.isFinite(value[key])) ? { x: bounds.x + value.x, y: bounds.y + value.y, width: value.width, height: value.height } : undefined;
-      await controller.permissions(true, { app: appBundle(), source }); break;
+      const guide = { app: appBundle(), source };
+      if (action === 'permissions') await controller.permissions(true, guide);
+      else await controller.native.call('screenRecording.guide', guide);
+      break;
     }
     case 'settings': {
       if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('设置值无效。');
@@ -277,18 +420,23 @@ async function invoke(action: string, value: any) {
         const choice = await dialog.showMessageBox(mainWindow, { type: 'warning', message: '超期文稿及其录音和截屏将从本机永久删除。', buttons: ['取消', '更改并删除超期文稿'], defaultId: 0, cancelId: 0 });
         if (choice.response !== 1) return;
       }
-      await controller.updateSettings(value); break;
+      await controller.updateSettings(value);
+      if ('keepHistory' in value || 'saveRecordingScreenshot' in value) refreshScreenRecordingAccess();
+      break;
     }
-    case 'screenRecordingSettings': {
-      if (process.platform === 'darwin' && controller.state.settings.keepHistory && controller.state.settings.saveRecordingScreenshot) {
-        await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
-      }
+    case 'screenRecordingRequest': {
+      if (!canRequestScreenRecording()) break;
+      refreshScreenRecordingAccess();
+      if (controller.state.screenRecording) break;
+      await controller.native.call('screenRecording.request');
+      refreshScreenRecordingAccess();
       break;
     }
     case 'capture': await controller.beginCapture(value); break;
     case 'captureEnd': await controller.endCapture(); break;
     case 'captureSave': await controller.saveCaptured(value); break;
     case 'shortcutRemove': if (value && Object.hasOwn(ACTIONS, value.action) && typeof value.id === 'string') await controller.removeShortcut(value.action, value.id); break;
+    case 'shortcutReset': if (Object.hasOwn(ACTIONS, value)) await controller.resetShortcut(value as Action); break;
     case 'select': if (typeof value === 'string') controller.select(value); break;
     case 'draft': if (value && typeof value.text === 'string') controller.updateDraft(value.id, value.text); break;
     case 'deleteManuscript': {
@@ -312,9 +460,131 @@ async function invoke(action: string, value: any) {
     case 'online': await saveOnline(value); break;
     case 'onlineKeyClear': {
       if (!Object.hasOwn(CAPABILITIES, value)) throw new Error('在线模型配置无效。');
-      const keys = readOnlineKeys(); delete keys[value as Capability]; writeOnlineKeys(keys); controller.setOnlineKeys(keys); controller.notice('已删除' + CAPABILITIES[value as Capability] + '的 API Key。'); break;
+      const keys = readStoredKeys(); delete keys[value as Capability]; writeStoredKeys(keys); controller.setOnlineKeys(onlineKeysFrom(keys)); controller.notice('已删除' + CAPABILITIES[value as Capability] + '的 API Key。'); break;
     }
     case 'login': app.setLoginItemSettings({ openAtLogin: value === true }); controller.state.launchAtLogin = app.getLoginItemSettings().openAtLogin; controller.changed(); break;
+    case 'syncStatus': {
+      refreshSyncState();
+      return controller.state.sync;
+    }
+    case 'syncEnableLocal': {
+      const status = await syncPairing.enableOnLocalHub(sanitizeDeviceName(value?.deviceName), syncPlatform());
+      syncEngine.ensureConfigured();
+      refreshSyncState();
+      return controller.state.sync ?? status;
+    }
+    case 'syncCreateInvite': {
+      const scopes = sanitizeScopes(value?.scopes);
+      const advertiseAddrs = sanitizeAdvertiseAddrs(value?.advertiseAddrs);
+      const hubId = typeof value?.hubId === 'string' && value.hubId.trim() ? value.hubId.trim() : undefined;
+      return await syncPairing.createInvitePairing({ scopes, hubId, advertiseAddrs });
+    }
+    case 'syncRedeemInvite': {
+      if (typeof value?.qr !== 'string' || !value.qr.trim()) throw new Error('请提供邀请配对二维码内容。');
+      const allowReplaceSpace = await confirmReplaceSpaceIfEnabled();
+      const status = await syncPairing.redeemInvitePairing(value.qr, sanitizeDeviceName(value?.deviceName), syncPlatform(), { allowReplaceSpace });
+      syncEngine.ensureConfigured();
+      refreshSyncState();
+      return controller.state.sync ?? status;
+    }
+    case 'syncCreateJoinWait': {
+      const advertiseAddrs = sanitizeAdvertiseAddrs(value?.advertiseAddrs);
+      return await syncPairing.createJoinWaitPairing({ advertiseAddrs });
+    }
+    case 'syncCompleteJoinWait': {
+      if (typeof value?.sessionId !== 'string' || !value.sessionId.trim()) throw new Error('缺少配对会话 ID。');
+      const allowReplaceSpace = await confirmReplaceSpaceIfEnabled();
+      const status = await syncPairing.completeJoinWaitOnNewDevice(value.sessionId.trim(), sanitizeDeviceName(value?.deviceName), syncPlatform(), { allowReplaceSpace });
+      syncEngine.ensureConfigured();
+      refreshSyncState();
+      return controller.state.sync ?? status;
+    }
+    case 'syncExportRecoveryCode': {
+      const choice = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        message: '恢复码可完全访问并解密您的个人同步空间，请妥善保管并勿发送给他人。确认查看恢复码？',
+        buttons: ['取消', '显示恢复码'],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      if (choice.response !== 1) throw new Error('已取消导出恢复码。');
+      return { recoveryCode: syncPairing.exportRecoveryCode() };
+    }
+    case 'syncRestoreRecoveryCode': {
+      if (typeof value?.code !== 'string' || !value.code.trim()) throw new Error('请输入恢复码。');
+      const allowReplaceSpace = await confirmReplaceSpaceIfEnabled();
+      const status = await syncPairing.restoreFromRecoveryCode(value.code, sanitizeDeviceName(value?.deviceName), syncPlatform(), {
+        registerLocal: value?.registerLocal !== false,
+        allowReplaceSpace,
+      });
+      syncEngine.ensureConfigured();
+      refreshSyncState();
+      return controller.state.sync ?? status;
+    }
+    case 'syncDiscoverHubs': {
+      const rawTimeout = typeof value?.timeoutMs === 'number' && Number.isFinite(value.timeoutMs)
+        ? Math.min(15_000, Math.max(500, Math.floor(value.timeoutMs)))
+        : undefined;
+      const result = await syncPairing.discoverKnownHubs(rawTimeout);
+      lastDiscoveredHubIds = result.matched.map(m => m.hubInstanceId);
+      lastSpoofedHubIds = [...result.spoofedHubIds];
+      refreshSyncState();
+      return result;
+    }
+    case 'syncNow': {
+      const uploadBlobs = typeof value?.uploadBlobs === 'boolean'
+        ? value.uploadBlobs
+        : controller.state.settings.syncAutoCacheBlobs;
+      const result = typeof value?.hubId === 'string' && value.hubId.trim()
+        ? await syncEngine.syncWithHub(value.hubId.trim(), undefined, { uploadBlobs })
+        : await syncEngine.syncAllKnownHubs(undefined, { uploadBlobs });
+      refreshSyncState();
+      return result;
+    }
+    case 'syncUploadBlobs': {
+      if (typeof value?.manuscriptId !== 'string' || !value.manuscriptId.trim()) throw new Error('缺少文稿 ID。');
+      return await syncEngine.uploadManuscriptBlobs(value.manuscriptId.trim(), typeof value?.hubId === 'string' && value.hubId.trim() ? value.hubId.trim() : undefined);
+    }
+    case 'syncSetHubUrl': {
+      if (typeof value?.hubId !== 'string' || !value.hubId.trim()) throw new Error('缺少同步节点 ID。');
+      const url = typeof value?.manualRemoteUrl === 'string' ? value.manualRemoteUrl.trim() : '';
+      const status = syncPairing.setHubManualUrl(value.hubId.trim(), url);
+      refreshSyncState();
+      return controller.state.sync ?? status;
+    }
+    case 'syncDisable': {
+      const choice = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        message: '停用并清除本机同步配置？本机已保存的文稿与词库仍保留，但本机同步密钥和已配对节点状态将被移除。',
+        buttons: ['取消', '停用同步'],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      if (choice.response !== 1) throw new Error('已取消停用同步。');
+      syncPairing.disableSync();
+      controller.store.resetSyncMetadata();
+      lastDiscoveredHubIds = [];
+      lastSpoofedHubIds = [];
+      refreshSyncState();
+      return controller.state.sync;
+    }
+    case 'syncListDevices':
+      return await syncPairing.listDevices(typeof value?.hubId === 'string' && value.hubId.trim() ? value.hubId.trim() : undefined);
+    case 'syncUpdateDevice': {
+      if (typeof value?.deviceId !== 'string' || !value.deviceId.trim()) throw new Error('缺少设备 ID。');
+      const patch: { device_name?: string; scopes?: ('inference' | 'yanmo.sync')[] } = {};
+      if (value?.deviceName !== undefined) {
+        if (typeof value.deviceName !== 'string' || !value.deviceName.trim() || value.deviceName.trim().length > 100) {
+          throw new Error('设备名称无效。');
+        }
+        patch.device_name = value.deviceName.trim();
+      }
+      if (value?.scopes !== undefined) patch.scopes = sanitizeScopes(value.scopes);
+      return await syncPairing.updateDevice(value.deviceId.trim(), patch, typeof value?.hubId === 'string' && value.hubId.trim() ? value.hubId.trim() : undefined);
+    }
+    case 'syncRevokeDevice':
+      if (typeof value?.deviceId !== 'string' || !value.deviceId.trim()) throw new Error('缺少设备 ID。');
+      return await syncPairing.revokeDevice(value.deviceId.trim(), typeof value?.hubId === 'string' && value.hubId.trim() ? value.hubId.trim() : undefined);
     default: throw new Error('未知的言墨操作。');
   }
 }
@@ -324,7 +594,12 @@ ipcMain.handle('yanmo:manuscriptAttachments', async (event, id: unknown) => {
     throw new Error('无效的文稿附件请求。');
   }
   if (controller.state.selectedID !== id) return {};
-  const attachments = controller.store.getAttachments(id);
+  let attachments = controller.store.getAttachments(id);
+  if ((!attachments.audio?.byteLength || !attachments.screenshot?.byteLength) && syncEngine) {
+    try {
+      attachments = await syncEngine.ensureManuscriptAttachments(id);
+    } catch { /* On-demand sync remains best-effort; local attachments still return. */ }
+  }
   if (process.platform === 'darwin' && attachments.screenshot) {
     const screenshot = Buffer.from(attachments.screenshot);
     if (screenshot.toString('ascii', 4, 12) === 'ftypavif') {
@@ -357,49 +632,78 @@ ipcMain.handle('yanmo:dailyUsage', async (event, day: unknown) => {
 });
 ipcMain.handle('yanmo:action', async (event, action, value) => {
   authorize(event.sender.id, event.senderFrame?.url);
-  try { await invoke(action, value); return { ok: true }; }
+  try {
+    const data = await invoke(action, value, event.sender);
+    return data === undefined ? { ok: true } : { ok: true, data };
+  }
   catch (error) { controller?.notice((error as Error).message); return { ok: false, error: (error as Error).message }; }
 });
 function authorize(senderID: number, url?: string) {
   if (!url?.startsWith(indexURL) || ![mainWindow, overlay, translation].some(window => window && !window.isDestroyed() && window.webContents.id === senderID)) throw new Error('无效的界面请求。');
+}
+function canRequestScreenRecording() {
+  const { keepHistory, saveRecordingScreenshot } = controller.state.settings;
+  return process.platform === 'darwin' && keepHistory && saveRecordingScreenshot;
 }
 
 app.whenReady().then(async () => {
   if (process.platform !== 'darwin' && process.platform !== 'win32') throw new Error('言墨目前只支持 Mac 与 Windows。');
   const windows = process.platform === 'win32';
   const bridgePath = app.isPackaged ? join(root, windows ? 'native/YanmoBridge.exe' : 'native/YanmoBridge') : join(root, '.build/release/YanmoBridge');
-  // The Win32 helper arrives in P2; until then the runtime pre-check runs via scripts/check-windows-runtime.mts.
   if (!existsSync(bridgePath)) throw new Error(windows ? 'Windows 系统桥接尚未接入，当前开发版先提供 Mac。' : '缺少系统桥接，请重新构建言墨。');
-  const python = process.env.YANMO_PYTHON || join(root, windows ? 'python/python.exe' : 'python/bin/python3.12');
-  const developmentPython = join(root, windows ? 'runtime/windows/python/python.exe' : 'runtime/macos/python/bin/python3.12');
   const native = new NativeBridge(bridgePath);
   await native.start();
-  let defaults: Settings = windows ? { ...defaultSettings(), ...WINDOWS_MODELS } : defaultSettings();
+  let defaults: Settings = defaultSettings();
   if (!windows && !process.env.YANMO_DATA_DIR) {
     try { defaults = migrateSettings(await native.call('legacySettings')); } catch { /* Invalid legacy settings never overwrite the source. */ }
   }
   const store = new LibraryStore(dataDirectory, defaults, process.env.YANMO_DATA_DIR ? undefined : join(app.getPath('appData'), 'Yanmo/library.json'));
-  runtimePython = existsSync(python) ? python : developmentPython;
-  const backend = new BackendClient(runtimePython, root, 3600000, join(dataDirectory, "diagnostics"), store.error ? undefined : store.dbPath);
-  controller = new Controller(store, native, backend);
+  const inference = new InferenceService({
+    promptsDir: join(root, 'engine'),
+    diagnosticsDir: join(dataDirectory, 'diagnostics'),
+    usage: store.error ? undefined : store,
+    archiveAudio: async (audio, taskId) => {
+      if (typeof audio === 'string') {
+        const res = await native.call<{ audioBase64?: string }>('audio.archive', { path: audio });
+        return res.audioBase64 ? Buffer.from(res.audioBase64, 'base64') : undefined;
+      }
+      const res = await native.call<{ audioBase64?: string }>('audio.archive', { taskId }).catch(async () =>
+        native.call<{ audioBase64?: string }>('audio.archive', { audioBase64: audio.toString('base64') }),
+      );
+      return res.audioBase64 ? Buffer.from(res.audioBase64, 'base64') : undefined;
+    },
+  });
+  controller = new Controller(store, native, inference);
+  controller.state.platform = windows ? 'windows' : 'mac';
   controller.captureRecordingScreenshot = captureRecordingScreenshot;
+  refreshScreenRecordingAccess();
+  native.on('permissions', refreshScreenRecordingAccess);
   if (app.isPackaged && !windows && process.arch === 'arm64') controller.state.update = { version: app.getVersion(), busy: false, message: '' };
-  if (windows) {
-    // Multi-GB runtime stays in Local AppData, not the roaming profile.
-    const paths = windowsRuntime = runtimePaths(join(process.env.LOCALAPPDATA || app.getPath('appData'), 'Yanmo'), root);
-    controller.state.platform = 'windows';
-    controller.windowsPrecheck = async () => {
-      const environment = await probeWindows({ python: paths.python, current: runtimeCurrent(paths) });
-      // The bundled Python serves online-only processing; local inference runs on the PyTorch venv.
-      backend.usePython(environment.environment === 'ready' ? paths.python : runtimePython);
-      return environment;
-    };
-    controller.windowsModels = settings => checkWindowsModels(paths, root, settings);
-  }
   controller.ownSelection = async () => mainWindow?.isFocused() ? String(await mainWindow.webContents.executeJavaScript(
     `(() => { const field = document.activeElement; return field && 'selectionStart' in field && field.selectionEnd > field.selectionStart ? field.value.slice(field.selectionStart, field.selectionEnd) : String(getSelection() || ''); })()`)) : '';
   controller.state.launchAtLogin = app.getLoginItemSettings().openAtLogin;
-  controller.setOnlineKeys(readOnlineKeys());
+  const storedKeys = readStoredKeys();
+  controller.setOnlineKeys(onlineKeysFrom(storedKeys));
+  controller.setAcpmToken(storedKeys.acpm || '');
+  const hubStore = new FileKnownHubStore(dataDirectory);
+  const acpmDataDir = process.env.YANMO_ACPM_DATA_DIR || undefined;
+  syncPairing = new SyncPairingService({
+    secretStore: safeStorageSyncSecretStore,
+    hubStore,
+    dataDir: acpmDataDir,
+  });
+  syncEngine = new SyncEngine({
+    store,
+    secretStore: safeStorageSyncSecretStore,
+    hubStore,
+    dataDir: acpmDataDir,
+    onLibraryUpdated: () => controller.reloadLibraryFromStore(),
+  });
+  try {
+    if (!store.error) syncEngine.ensureConfigured();
+  } catch { /* Sync remains unconfigured if keychain is unavailable. */ }
+  store.onLocalPersisted = () => scheduleBackgroundSync(3000);
+  refreshSyncState();
   controller.on('state', broadcast);
   controller.on('meter', value => { if (overlay && !overlay.isDestroyed()) overlay.webContents.send('yanmo:meter', value); });
   controller.on('reveal', reveal);
@@ -433,6 +737,17 @@ app.whenReady().then(async () => {
     { label: '窗口', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { label: '打开言墨', click: reveal }] },
   ]));
   await controller.initialize();
+  try {
+    if (!store.error) store.gcExpiredTombstones();
+  } catch { /* Tombstone GC stays best-effort on startup. */ }
+  scheduleBackgroundSync(4000);
+  syncPeriodicTimer = setInterval(() => {
+    try {
+      if (!store.error) store.gcExpiredTombstones();
+    } catch { /* Ignore periodic GC failures. */ }
+    scheduleBackgroundSync(0);
+  }, 5 * 60_000);
+  syncPeriodicTimer.unref();
   if (!app.isPackaged && process.argv.includes('--preview-overlay')) { showOverlay(); setTimeout(() => overlay.hide(), 5000); }
   const importIndex = process.argv.indexOf('--import-audio');
   if (importIndex >= 0 && process.argv[importIndex + 1]) await controller.importAudio(resolve(process.argv[importIndex + 1]));
@@ -442,6 +757,7 @@ app.on('window-all-closed', () => {});
 app.on('before-quit', event => {
   if (quitting) return;
   event.preventDefault(); quitting = true;
-  preparation?.kill('SIGTERM');
+  if (syncDebounceTimer) { clearTimeout(syncDebounceTimer); syncDebounceTimer = undefined; }
+  if (syncPeriodicTimer) { clearInterval(syncPeriodicTimer); syncPeriodicTimer = undefined; }
   if (controller) void controller.shutdown().finally(() => app.exit(0)); else app.exit(0);
 });

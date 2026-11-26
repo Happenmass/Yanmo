@@ -2,44 +2,54 @@
 
 **言语之间，自有笔墨。**
 
-言墨是一款**支持中文、英文和中英混说的语音输入法**，适用于 Apple Silicon Mac。按 **FN** 开始说话，再按一次结束。言墨默认在本机识别语音，通过你配置的文字 API 整理正文，再将结果粘贴到当前输入框。
+言墨是一款**支持中文、英文和中英混说的语音输入法**，适用于 Apple Silicon Mac。按 **FN** 开始说话，再按一次结束。言墨默认通过本机独立的 `AcpmRuntime`（`acpm-desktop`）服务执行语音识别（`qwen3-asr` / CPU VAD）与本地文字处理（`yanmo-correct-4b-cot`），也可按需切换为远程局域网 AcpmRuntime 或兼容 OpenAI 的在线 API，再将结果粘贴到当前输入框。
 
-> Yanmo supports Chinese, English, and mixed Chinese–English dictation on Apple Silicon Macs. Press **FN** to start and stop recording. By default, speech recognition runs on your Mac. Yanmo uses your configured text API for polishing and translation.
+> Yanmo supports Chinese, English, and mixed Chinese–English dictation on Apple Silicon Macs. Press **FN** to start and stop recording. By default, speech recognition, VAD, and text polishing/translation run locally via AcpmRuntime (`acpm-desktop`), with optional remote AcpmRuntime or OpenAI-compatible online API overrides.
 
 ![主窗口](docs/design/main-window-v2.png)
 
 ## 下载安装
 
-从[下载页](https://happenmass.github.io/Yanmo/)或 [GitHub Releases](https://github.com/Happenmass/Yanmo/releases/latest) 下载 `Yanmo-<版本>-mac-arm64.zip`，解压后把 `言墨.app` 拖入「应用程序」。要求 Apple Silicon、macOS 14+。从 0.4.5 或更早版本升级时，请完整退出旧版，再替换整个应用。
+- **Mac 桌面端**：从[下载页](https://happenmass.github.io/Yanmo/)或 [GitHub Releases](https://github.com/Happenmass/Yanmo/releases/latest) 下载 `Yanmo-1.0.0-mac-arm64.zip`，解压后把 `言墨.app` 拖入「应用程序」。要求 Apple Silicon、macOS 14+。从 0.4.5 或更早版本升级时，请完整退出旧版，再替换整个应用。
+- **Android 输入法**：在 [android-v1.15.94-yanmo.18](https://github.com/Happenmass/Yanmo/releases/tag/android-v1.15.94-yanmo.18) 下载签名 APK（`arm64-v8a`，最低 Android 9），详情见 [言墨 Android 说明](android/README.md)。
 
-从 0.4.6 起，可在「设置 → 软件更新」或言墨菜单中检查更新。确认后，言墨会下载并校验 GitHub 安装包，完整退出后替换应用并重新启动。从 0.4.13 起，正式版和原生录音桥接使用同一团队的 Developer ID Application 身份签名。从旧版首次升级时，macOS 可能要求重新授权辅助功能、麦克风或录屏。
+从 0.4.6 起，可在「设置 → 软件更新」或言墨菜单中检查更新。确认后，言墨会下载并校验 GitHub 安装包，完整退出后替换应用并重新启动。从 0.4.13 起，正式版和原生录音桥接使用同一团队的 Developer ID Application 身份签名（团队 ID：`299DDXTQH5`）。`1.0.0` 已通过 Apple 公证并装订票据，首次打开时 Gatekeeper 可直接验证开发者身份，安装包的 SHA-256 见对应版本的 GitHub Release。
 
-0.4.13 已通过 Apple 公证，票据已装订到应用。首次打开时，Gatekeeper 可验证开发者身份。官方签名团队 ID 为 `299DDXTQH5`。安装包的 SHA-256 见对应版本的 GitHub Release。
+## 运行依赖（`acpm-desktop` 与 `acpm`）
 
-从 0.4.5 起，在「设置 → 本地模型」准备本机语音模型，再到「设置 → API 服务」启用「文字整理与翻译」，填写兼容 OpenAI 的服务地址、模型 ID 和服务要求的 API Key。按提示授予麦克风与辅助功能权限。升级时沿用已启用的文字 API 配置。
+言墨软件本身不内置 Python 推理运行时或任何模型权重，本地推理与跨设备加密同步均由独立的 `acpm` 生态组件提供：
+
+- **Mac 桌面端 → 依赖 [acpm-desktop（AcpmRuntime）](https://github.com/Happenmass/acpm-desktop)**（建议 `v0.1.0+`，面向 Apple Silicon / MLX）：
+  - 启动并保持 `AcpmRuntime` 运行，在其中准备好语音识别模型（`qwen3-asr-1.7b` / `qwen3-asr-0.6b`）、CPU VAD（`speech-vad-pyannote`）与本地文字模型（`yanmo-correct-4b-cot`）。
+  - 言墨默认通过 `~/Library/Application Support/acpm-desktop/runtime.json` 同机自动发现连接；也可在「设置 → AcpmRuntime 服务」配置局域网 `acpm.local` / 远程地址与 Bearer Token，或在「设置 → API 服务」为语音识别或文字处理单独开启兼容 OpenAI 的在线 API。
+- **Android 端 → 依赖 [acpm（Android AI SDK）](https://github.com/Happenmass/acpm) 与 `acpm-desktop`**：
+  - **本地端侧听写**依赖同签名的 `acpm` Android AI SDK（建议 `v0.1.2+`，支持高通 HTP 端侧 ASR 推理、热词/光标上下文提示及请求级失败诊断）；也支持连接局域网内的远程服务或开启在线文字 API。
+  - **跨设备加密同步**依赖局域网内运行的 `acpm-desktop`（`AcpmRuntime`）提供的端到端盲密文同步仓节点（mDNS / NSD 自动发现）。
 
 ## 主要功能
 
-- **中英文输入**按口述语言输出。中英混说时，目标是保留句中的中英文片段。若要将口述内容转成指定语言，使用口述翻译。见[双路识别与正文评测](docs/asr-fusion.md)。
+- **1.0.0 架构解耦**：推理引擎与模型权重管理统一交由外部 `AcpmRuntime`（`acpm-desktop`），Mac 安装包体积大幅缩减，应用包内只包含 Electron 与 Swift 原生系统桥接。
+- **自适应半流式 VAD + 链式上下文分段识别（Mac 与 Android 行为一致）**：采用零丢帧连续切分与非对称低底噪追踪（`< 2.5s → 1200ms`、`2.5–15s → 800ms`、`>= 15s → 400ms`、`24s` 单段上限，录音结束自动无条件收尾），前段转写自动串联为后续段上下文。关闭自然整理时，每识别完一段立即写入当前输入框；开启自然整理或语音翻译时，浮层 / 听写条实时展示最新转写并在结束时整段一次润色写入。
+- **端到端加密跨设备同步（Mac ↔ Android）**：基于 `AcpmRuntime` 盲密文仓与 X25519 / Ed25519 / HLC 协议，支持二维码扫码配对、24 词恢复码还原、局域网 mDNS / NSD 自动发现、文稿与加密录音 / 截屏附件秒传与按需拉取、词库增量合并与删除墓碑传播，以及稀疏节能同步策略（默认累积 10 条本地变更或每日 22:00 定时全量同步，并在输入活跃期自动避让）。
+
+- **中英文输入**按口述语言输出。中英混说时，目标是保留句中的中英文片段。若要将口述内容转成指定语言，使用口述翻译。
 - 默认 **FN** 开始或结束语音输入，**FN + Shift** 口述翻译，**FN + 空格**划词翻译，**Esc** 取消。支持自定义多组快捷键和左右纯修饰键。纯修饰键组合全部松开时触发，参与打字或鼠标组合时不触发。更新默认值时保留已保存的自定义配置，设置中可逐项恢复默认。
-- 静音的 200×36 pt 黑墨浮层，显示真实音量、计时、取消和完成；不抢走原输入框焦点。
-- 本机 Qwen3-ASR 先识别语音和语言，检测到中文或英文时由 SenseVoice Small 复核。文字模型结合识别结果、词库和可用上下文生成正文，两路识别结果可在文稿中对照。可选自然整理、保留原话、即时消息或文档风格。
-- 口述翻译直接执行识别→翻译→写入；划词翻译在可拖动的独立宣纸窗口显示，按普通窗口层级切换，不替换选区、不保存历史。
+- 静音的 200×36 pt 黑墨浮层，显示真实音量、计时、取消、完成及半流式实时预览；不抢走原输入框焦点。
+- 默认通过 AcpmRuntime 执行可选 CPU VAD 预检（`speech-vad-pyannote`）与语音识别（`qwen3-asr-1.7b` / `qwen3-asr-0.6b`）。启用自动整理且文字处理可用（AcpmRuntime 本地文字模型或在线文字 API）时，结合词库与可用上下文生成正文；关闭自动整理或文字处理不可用时，直接写入识别原文。自动整理可选自然整理、保留原话、即时消息或文档段落风格。
+- 口述翻译直接执行识别 → 翻译 → 写入；划词翻译在可拖动的独立宣纸窗口显示，按普通窗口层级切换，不替换选区、不保存历史。
 - 两种翻译分别保存目标语言和快捷键，支持英语、简体中文、日语、德语。
 - Markdown 译文排版／源码、代码着色和代码复制；围栏代码与行内代码由程序保护，不执行 HTML 或加载远程图片。
 - 统计首页、20 周落笔日历、文稿搜索／编辑／复制／导出、个人词库及误识别纠正。ASR 优先使用当前应用组和全局高频词，每次最多 64 词。[评测与分组规则](docs/qwen-hotword-capacity-2026-11-17.md)
 - 导入 5 分钟以内的音频、麦克风选择、历史保留周期和登录启动。关闭主窗口后隐藏程序坞图标，仅保留菜单栏及快捷键；菜单栏图标左键打开主窗口，右键打开菜单，重新打开窗口时按偏好恢复程序坞图标。
 - 录音与输入框可读性分离；可读正文只作上下文，读取失败仍正常录音。
 - 正文生成后向当时前台应用的当前焦点粘贴一次，允许途中切换应用、窗口和光标。开启历史记录时保存文稿。导入音频的结果只在文稿页显示。
-- 连续空闲 1 小时退出推理进程；录音开始后后台预加载，连续输入复用已加载模型。
+- 录音开始时向 AcpmRuntime 发送轻量模型与前缀缓存预热请求（`POST /v1/models/prewarm`），模型下载、加载与内存驻留策略统一由 AcpmRuntime 管理。
 
-语音模型下载来源默认 **ModelScope**，准备时先复用完整的全局缓存。SenseVoice Small 共用一份多语言权重，按 Qwen 检测出的中文、英文分别指定 `zh`、`en`；其他语言或未知语言跳过复核。
-
-Electron、Swift 系统桥接和独立 Python/MLX 运行时均随应用包交付，权重另存用户全局缓存。语音识别可另行启用 OpenAI 兼容 API。Windows 主线已有 PyTorch（CUDA）语音识别适配和运行时准备，仍缺 Windows 系统桥接。见[运行时说明](docs/architecture/electron_01_Runtime_运行时与预检查.md)。
+Electron 与 Swift 系统桥接均随应用包交付，不再内置 Python 推理运行时或模型权重。
 
 ## 模块图
 
-桌面端采用 Electron + React，通过 Swift 系统桥接处理快捷键、录音、选区和跨应用写入。独立 Python 后端负责语音识别、整理与翻译。[查看当前完整模块图与源码入口](docs/architecture/current-modules.md) · [架构梳理与分层评审](docs/architecture/architecture-review-2026-11-17.md) · [Mac 实现与验证](docs/electron-mac-2026-10-21.md)
+桌面端采用 Electron + React，通过 Swift 系统桥接处理快捷键、录音、FLAC 归档、选区和跨应用写入。Electron 主进程直接构建提示词并调度外部 AcpmRuntime 或用户显式开启的在线 API。[查看当前完整模块图与源码入口](docs/architecture/current-modules.md) · [Mac 实现与验证](docs/electron-mac-2026-10-21.md)
 
 ```mermaid
 flowchart TB
@@ -50,95 +60,59 @@ flowchart TB
     subgraph APP["② 应用层 · Electron 主进程"]
         IPC["IPC 网关 · main.ts · 窗口 / 菜单栏 / 更新"]
         Ctl["任务控制器 · controller.ts · 状态机 / 取消 / 交付 / 纠词学习"]
-        Store[("LibraryStore · 设置 / 文稿 / 词库")]
-        Keys[("API Key · safeStorage 加密")]
-        Clients["进程客户端 · processes.ts · NativeBridge / BackendClient"]
+        Infer["推理编排 · inference.ts / acpm.ts / prompts.ts · 提示词与调度"]
+        Store[("LibraryStore · 设置 / 文稿 / 词库 / 用量")]
+        Keys[("密钥 · safeStorage 加密")]
+        BridgeClient["进程客户端 · processes.ts · NativeBridge"]
     end
 
     subgraph OS["③ 系统桥接 · Swift YanmoBridge"]
         Hot["快捷键 · 权限 · 设备"]
-        Rec["实时录音 · 内存 WAV / 文件导入"]
+        Rec["实时录音 · 内存 WAV / 导入 / FLAC 归档"]
         AX["辅助功能 · 上下文 / 选区 / 粘贴 / 纠词观察"]
     end
 
-    subgraph SVC["④ 推理服务 · Python backend/"]
-        API["FastAPI · 127.0.0.1 + 随机令牌 · 校验 / 单任务队列 / SSE"]
-        Pipe["任务流水线 · pipeline.py · 识别 → 复核 → 整理或翻译"]
-    end
-
-    subgraph ENG["⑤ 推理引擎 · engine/"]
-        Engine["Engine 门面 · worker.py · 本地/在线路由 · 长度与空正文检查"]
-        Prompt["提示词与载荷 · polish.txt / prompt.txt / fusion.py"]
-        MLX["MLXProvider · Qwen3-ASR + SenseVoice（Mac）"]
-        Torch["TorchProvider · Qwen3-ASR（Windows CUDA）"]
-        Online["online_provider · OpenAI 兼容接口"]
-        Cache["model_cache · 只解析本地缓存"]
-    end
-
-    Models[("用户级模型缓存")]
-    Prep["模型准备进程 · prepare_models.py"]
-    TextAPI["文字 API · 整理 / 保留原话 / 翻译 / 纠词"]
-    ASRAPI["语音识别 API（可选）"]
+    Acpm["AcpmRuntime · acpmd（本机自动发现 / 局域网）<br/>VAD · ASR · LLM（含 prompt_cache_key）"]
+    OnlineASR["可选语音识别 API（OpenAI 兼容）"]
+    OnlineText["可选文字处理 API（OpenAI 兼容）"]
 
     Views <-->|"preload · yanmo:action / yanmo:state"| IPC
     IPC --> Ctl
     Ctl <--> Store
     Keys -.->|"请求时注入"| Ctl
-    Ctl --> Clients
-    Clients <-->|"stdin / stdout 逐行 JSON"| OS
-    Clients -->|"认证 HTTP · 任务参数 + WAV / 文本"| API
-    API -->|"SSE · 阶段 / 转写 / 结果"| Clients
-    API --> Pipe --> Engine
-    Engine --> Prompt
-    Engine -->|"默认本机"| MLX
-    Engine --> Torch
-    Engine --> Online
-    Engine --> Cache
-    Cache --> Models
-    Online -->|"必需"| TextAPI
-    Online -. "显式启用时发送音频" .-> ASRAPI
-    IPC -->|"手动准备模型"| Prep --> Models
+    Ctl --> BridgeClient
+    Ctl --> Infer
+    Infer --> Store
+    BridgeClient <-->|"stdin / stdout 逐行 JSON"| OS
+    Infer -->|"Bearer HTTP · X-AI-Priority: interactive"| Acpm
+    Infer -. "显式启用在线 ASR 时" .-> OnlineASR
+    Infer -. "显式启用在线文字时" .-> OnlineText
 ```
 
-界面只经 preload 调用主进程；应用层分别调用系统桥接和推理服务，不直接执行模型。后端返回阶段、转录、可选压缩录音或归档警告，以及最终正文；文稿与音频由主进程统一提交 SQLite，跨应用写入由系统桥接完成。
+界面只经 preload 调用主进程；应用层分别调用系统桥接与推理服务。文稿、压缩录音（由 `YanmoBridge` 转为 16 kHz 单声道 FLAC）及 LLM 用量由主进程统一提交 SQLite，跨应用写入由系统桥接完成。
 
 ## 构建与启动
 
-使用环境：Apple Silicon、macOS 14+；构建需要 Node.js 24、npm、Xcode Command Line Tools、Python 3 与 uv。当前实测环境为 macOS 26.6.2 / arm64，其他系统版本尚未逐一验收。
+使用环境：Apple Silicon、macOS 14+；构建需要 Node.js 24、npm、Xcode Command Line Tools。当前实测环境为 macOS 26.6.2 / arm64。
 
 ```bash
 npm ci
-uv python install 3.12.12
-npm run runtime:mac
 npm run build
 npm start
 ```
 
-首次进入「设置 → 本地模型」，点击「准备模型」。默认从 ModelScope 准备，也可选择 Hugging Face 或填写完整的本地模型目录。随后在「API 服务」配置文字接口，整理、保留原话及两种翻译共用此接口。
-
-命令行准备模型：
-
-```bash
-runtime/macos/python/bin/python3.12 scripts/prepare-models.py
-# 可选：--source huggingface --asr 模型ID --sensevoice 模型ID
-```
-
-构建包含运行时的应用：
+构建应用包：
 
 ```bash
 npm run package:mac
 open dist-electron/mac-arm64/言墨.app
 ```
 
-产物 `dist-electron/mac-arm64/言墨.app` 可以移出项目目录运行，不需要另外安装 Python、uv 或 Homebrew。当前应用包约 830 MB，不含模型权重。正式构建需要发布团队的 Developer ID Application 证书和私钥。发布机配置好公证钥匙串凭据后，可运行 `APPLE_KEYCHAIN_PROFILE=Yanmo-Notary npm run package:mac` 完成签名和公证，再用 `xcrun stapler validate dist-electron/mac-arm64/言墨.app` 检查票据。
-
-旧 0.3 应用包已移除，当前只使用上述 0.4 应用。`./scripts/build.sh` 同样调用新版打包入口；原 SwiftUI 源码仅保留作迁移对照。
+本机开发包递增构建：`npm run package:mac:local -- <序号>`，产物位于 `dist-local/<基础版本>+local.<序号>/mac-arm64/`。应用包内不再携带 Python 运行时或模型权重。
 
 ## 权限与使用
 
 首次录音由 macOS 请求麦克风权限。FN、纯修饰键与跨应用写入需要在「系统设置 → 隐私与安全性 → 辅助功能」中允许当前的言墨应用；设置页提供权限入口与重新检查。
-
-从旧版 ad-hoc 签名升级后，系统权限可能需要刷新。若系统显示已授权但当前版本仍无法使用，请移除旧条目，重新添加当前应用，再点击重新检查。与其他使用 FN 的软件同时运行时，快捷键可能冲突。
 
 按快捷键开始录音，正文生成后粘贴到当时的当前输入位置；期间可以切换应用、窗口、聊天或光标。输入框不可读时仍正常录音，只是不提供其正文作为上下文。结果同时保留为文稿；导入音频仅生成文稿。
 
@@ -146,60 +120,36 @@ open dist-electron/mac-arm64/言墨.app
 
 ## 隐私、缓存与迁移
 
-- 默认 ASR 为 `mlx-community/Qwen3-ASR-1.7B-8bit`（运行约占 3.5 GB 内存）。内存紧张时可改选 `mlx-community/Qwen3-ASR-0.6B-8bit`（约 1.8 GB）。中英复核使用 `mlx-community/SenseVoiceSmall`，权重约 936 MB。
-- ModelScope 缓存：`~/.cache/codex/models/modelscope/`，可通过 `MODELSCOPE_CACHE` 指定其他用户全局位置；同时复用 SDK 既有缓存与 `~/.cache/huggingface/`。不在项目和安装包中复制权重。
-- Python 后端仅监听 `127.0.0.1` 动态端口，以每次启动的随机密钥认证；主进程通过私有管道取得端口。Renderer 不持有密钥或音频路径。
-- 运行时设置 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`，模型定位只使用本地缓存；显式准备模型在单独进程中执行。
-- 只有显式启用在线语音识别时才会发送音频。文字 API 接收转写或选中的文字，整理任务可同时带上词库与光标上下文。光标上下文默认关闭，启用后可读取前后各最多 300 字。Mac 上在语音写入后 10 秒内按 Enter，当前输入框的可读正文可能与上一段口述一起发送给同一文字 API。模型判断两段对应时才提取纠词词条。SenseVoice 独立识别。
+- 本机默认通过 `~/Library/Application Support/acpm-desktop/runtime.json` 发现运行中的 `AcpmRuntime`（验证 `pid` 存活后使用 `http_base_url` 与随机 `token`）。
+- 仅在用户显式切换为「局域网 / 远程地址」或开启「API 服务」中的在线能力时，才向外部地址发送音频或文本；所有远程 Token 与在线 API Key 均通过 macOS Keychain（`safeStorage`）加密保存，Renderer 不接触密钥或音频文件路径。
 - Electron 数据在 `~/Library/Application Support/Yanmo/electron/`；文件权限为 600，目录为 700，原子保存。
-- SQLite `yanmo.db` 是文稿、压缩录音、截屏、词库和设置的唯一来源。首次迁移旧 JSON 与 v0.3 数据，成功后旧 JSON 仅留作备份；损坏的待迁移源暂停保存，已迁移数据库不再读取旧 JSON。文稿及其附件同一事务提交。
-- 点击「落笔日历」的日期可查看文字 API 用量和各应用发送字数。用量按真实 API 请求记录，应用字数按发送到当前焦点的文本统计。统计表仅保存时间、用量和应用标识等数据，独立于文稿保存及保留时间。旧日期显示未开始记录。
-- 测试可用 `YANMO_DATA_DIR` 指定隔离数据目录，此时不导入个人数据。
-- 开启“在本机保存新文稿”时，识别后的录音压缩为 Opus，随文稿保留；删除文稿或保留期清理同时删除其录音。压缩失败会提示“录音未保存”，正文处理继续；关闭保存不归档新录音，也不删除已有历史。Mac 实时录音在内存中采集和识别，截图也在内存中编码。导入已有音频时，格式转换仍可能产生临时文件。
-- 「设置 → 文字与隐私 → 录音结束时保存截屏」默认关闭。开启文稿保存及此选项后，结束语音输入或口述翻译时保存鼠标所在显示器的一张截屏，长边最多 1920 像素。macOS 需授予屏幕录制权限，支持 AVIF 编码时优先采用 AVIF，其余环境保存压缩 JPEG。无权限或截屏失败时照常处理录音。截屏留在本机，随所属文稿删除或到期清理。关闭截屏不删除旧截图。导入音频和划词翻译不会截屏。
-- 文稿的 `occurred_at` 为保存时间。新实时录音在同一条文稿记录另存 `recording_ended_at_ms`（Unix 毫秒），截图存为可空的 `screenshot_image`。
-- 选中文稿后，正文下方显示现有附件。录音支持播放、暂停和拖动进度，点击截图可放大查看。
-
-自然整理使用 [polish.txt](engine/polish.txt)，程序原样采用 API 返回的正文。遇到空输出、截断、取消或运行失败时，已取得的识别原文可用于重试。手动修改文稿后，后续整理以用户修订为准。见[双路识别与正文生成](docs/asr-fusion.md)。
+- SQLite `yanmo.db` 是文稿、压缩录音、截屏、词库和设置的唯一来源。旧版 OGG/Opus 与新版 FLAC 历史录音均可播放。
+- 点击「落笔日历」的日期可查看文字模型用量和各应用发送字数。
+- 测试可用 `YANMO_DATA_DIR` 指定隔离数据目录，用 `YANMO_ACPM_DATA_DIR` 指定隔离的 AcpmRuntime 发现目录。
+- 开启“在本机保存新文稿”时，识别后的录音由 `YanmoBridge` 压缩为 16 kHz FLAC，随文稿保留；删除文稿或保留期清理同时删除其录音。
+- 自然整理使用 [polish.txt](engine/polish.txt)，程序原样采用模型返回的正文。遇到空输出、截断、取消或运行失败时，已取得的识别原文可用于重试。
 
 ## 开发与验证
 
 ```bash
 npm test
 npm run typecheck
-runtime/macos/python/bin/python3.12 -m unittest discover -s engine -v
-runtime/macos/python/bin/python3.12 -m unittest discover -s backend -v
-runtime/macos/python/bin/python3.12 scripts/evaluate-fusion.py
-runtime/macos/python/bin/python3.12 scripts/check-transcription-language.py
-runtime/macos/python/bin/python3.12 scripts/check-translation-output.py --output /tmp/yanmo-translation-output.json
 swift run YanmoChecks
 swift run YanmoInputChecks
-swift run YanmoLifecycleChecks
+swift run YanmoShortcutChecks
+swift run YanmoBridgeInputChecks
 npm run test:desktop
 ```
 
-不公开辅助功能输入控件的编辑器可用隔离窗口验证，需已有辅助功能授权；测试只粘贴合成文字，验证一次写入、切换窗口后写入新的当前焦点，并自动退出清理：
+不公开辅助功能输入控件的编辑器可用隔离窗口验证，需已有辅助功能授权：
 
 ```bash
 swift build -c release --product YanmoBridge
 node --import tsx scripts/check-opaque-input.mts
 ```
 
-只检查某个已运行应用能否保留录音目标（不读正文、不粘贴）：`node --import tsx scripts/check-input-capture.mts <bundle-id>`。`YANMO_QA_BRIDGE` 可指定打包后的 helper 路径。
-
-下面的界面检查使用合成音频、真实本机 ASR 和模拟文字 API，文稿保存在隔离目录：
-
-```bash
-say -v Tingting -o /tmp/yanmo-synthetic.aiff '今天测试语音输入。预算三千五百元，周五交付，不是周四。'
-YANMO_QA_AUDIO=/tmp/yanmo-synthetic.aiff npm run test:desktop -- desktop/e2e/mac.spec.ts --grep '首页使用真实统计'
-```
-
-设置 `YANMO_QA_APP=/完整路径/言墨.app/Contents/MacOS/言墨` 可检查打包应用。`swift run YanmoShortcutChecks`直接检查监听函数，不向系统发送输入。可选的旧版 `YANMO_QA_NATIVE=1` TextEdit 组合脚本使用 AppleScript，本轮未执行；当前原生交互经 CUA 检查。自动化不代替实体 FN 口述验收。
-
-桌面测试在隔离配置中默认关闭程序坞图标；只有显式设置 `YANMO_QA_DOCK=1` 才运行会反复切换程序坞的系统检查，避免常规回归影响当前桌面。测试结束后应确认没有遗留测试主进程。
-
-视觉与动效依据 [已确认设计](docs/design/README.md)。原生版本的 [输入验证](docs/verification-2026-10-21.md)、[翻译](docs/translation-0.3.md)、[Markdown](docs/markdown-translation-2026-10-21.md) 可作为迁移对照。
+只检查某个已运行应用能否保留录音目标（不读正文、不粘贴）：`node --import tsx scripts/check-input-capture.mts <bundle-id>`。
 
 ## 许可证
 
-项目代码使用 [MIT License](LICENSE)。模型权重和第三方依赖遵循各自许可证；ASR与LLM权重不随代码或应用包分发，轻量离线语种分类器随Python依赖提供。
+项目代码使用 [MIT License](LICENSE)。模型权重与推理运行由用户独立部署的 AcpmRuntime 或所配置在线服务提供。

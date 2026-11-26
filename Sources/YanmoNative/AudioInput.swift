@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import AudioToolbox
 import CoreAudio
+import YanmoCore
 
 public struct AudioInput: Identifiable {
     public var id: String
@@ -35,6 +36,15 @@ public struct AudioInput: Identifiable {
 public struct RecordedWAV: Sendable {
     public let data: Data
     public let seconds: Double
+    public let emittedSegments: Int
+    public let tailData: Data?
+
+    public init(data: Data, seconds: Double, emittedSegments: Int = 0, tailData: Data? = nil) {
+        self.data = data
+        self.seconds = seconds
+        self.emittedSegments = emittedSegments
+        self.tailData = tailData
+    }
 }
 
 /// Per-process input selection; never changes the computer's default microphone.
@@ -44,7 +54,7 @@ public final class AudioRecorder: @unchecked Sendable {
     @MainActor private var generation = UUID()
     @MainActor public var level: Double { session?.capture.level ?? 0 }
 
-    @MainActor public func start(deviceUID: String = "") async throws {
+    @MainActor public func start(deviceUID: String = "", onSegment: (@Sendable (Data, Int) -> Void)? = nil) async throws {
         cancel()
         let ticket = generation
         let allowed = await AVCaptureDevice.requestAccess(for: .audio)
@@ -66,7 +76,7 @@ public final class AudioRecorder: @unchecked Sendable {
         // Capture through an input tap only. An input-only device does not need
         // a mixer or output node, and the microphone never routes to speakers.
         let format = input.outputFormat(forBus: 0)
-        let capture = try WAVCapture(format: format)
+        let capture = try WAVCapture(format: format, onSegment: onSegment)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
             capture.append(buffer)
         }
@@ -104,16 +114,6 @@ public final class AudioRecorder: @unchecked Sendable {
         }
         session.stop()
         return try session.capture.finish()
-    }
-
-    /// The legacy Swift app still supplies a path to its inference engine.
-    @MainActor public func finish() -> URL? {
-        guard let recording = try? finishWAV() else { return nil }
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("yanmo-\(UUID().uuidString).wav")
-        do {
-            try recording.data.write(to: url, options: .atomic)
-            return url
-        } catch { return nil }
     }
 
     @MainActor public func cancel() {
@@ -171,7 +171,14 @@ final class WAVCapture: @unchecked Sendable {
     private let channels: Int
     private let headerSize: Int
     private let framesLimit: Int
-    private let bytesLimit = 160 * 1024 * 1024
+    private let bytesLimit = 120 * 1024 * 1024
+    private let vad: AdaptiveVad
+    private let onSegment: (@Sendable (Data, Int) -> Void)?
+    private let segmentFrameSamples: Int
+    private var vadAccumSq = 0.0
+    private var vadAccumCount = 0
+    private var vadFrameStartSample = 0
+    private var segmentIndex = 0
     private var data: Data
     private var interleaved = [Float]()
     private var frames = 0
@@ -179,7 +186,7 @@ final class WAVCapture: @unchecked Sendable {
     private var closed = false
     private var power = 0.0
 
-    init(format: AVAudioFormat) throws {
+    init(format: AVAudioFormat, onSegment: (@Sendable (Data, Int) -> Void)? = nil) throws {
         let sampleRate = format.sampleRate.rounded()
         let channels = Int(format.channelCount)
         guard sampleRate.isFinite, sampleRate >= 1, sampleRate <= Double(UInt32.max),
@@ -192,12 +199,16 @@ final class WAVCapture: @unchecked Sendable {
         self.channels = channels
         headerSize = channels > 2 ? 80 : 58
         framesLimit = 300 * Int(self.sampleRate)
+        self.vad = AdaptiveVad(sampleRate: Int(self.sampleRate))
+        self.onSegment = onSegment
+        self.segmentFrameSamples = max(1, Int((Double(self.sampleRate) * 0.02).rounded()))
         data = Data(count: headerSize)
     }
 
     var level: Double { lock.withLock { power } }
 
     func append(_ buffer: AVAudioPCMBuffer) {
+        var pendingSegments: [(Data, Int)] = []
         lock.withLock {
             guard failure == nil, !closed, frames < framesLimit, buffer.frameLength > 0 else { return }
             guard Int(buffer.format.channelCount) == channels, buffer.format.sampleRate.rounded() == Double(sampleRate),
@@ -234,6 +245,32 @@ final class WAVCapture: @unchecked Sendable {
                 return sum + Double(sample * sample)
             }
             power = min(1, pow(sqrt(square / Double(count)), 0.65) * 2)
+
+            if onSegment != nil {
+                for frame in 0..<count {
+                    let sample = Double(first[frame * stride])
+                    vadAccumSq += sample * sample
+                    vadAccumCount += 1
+                    if vadAccumCount >= segmentFrameSamples {
+                        let rms = sqrt(vadAccumSq / Double(segmentFrameSamples))
+                        let endSample = vadFrameStartSample + segmentFrameSamples
+                        if let seg = vad.feed(frameRms: rms, frameStartSample: vadFrameStartSample, frameEndSample: endSample),
+                           let segWav = sliceWAV(startFrame: seg.startFrame, endFrame: seg.endFrame) {
+                            let idx = segmentIndex
+                            segmentIndex += 1
+                            pendingSegments.append((segWav, idx))
+                        }
+                        vadFrameStartSample = endSample
+                        vadAccumSq = 0
+                        vadAccumCount = 0
+                    }
+                }
+            }
+        }
+        if let onSegment, !pendingSegments.isEmpty {
+            for (wav, idx) in pendingSegments {
+                onSegment(wav, idx)
+            }
         }
     }
 
@@ -248,37 +285,149 @@ final class WAVCapture: @unchecked Sendable {
             defer { data = Data() }
             if let failure { throw failure }
             guard frames > 0 else { throw EngineError(message: "录音没有生成，请重试。") }
-            var header = Data()
-            func integer<T: FixedWidthInteger>(_ number: T) {
-                var littleEndian = number.littleEndian
-                withUnsafeBytes(of: &littleEndian) { header.append(contentsOf: $0) }
+            let emitted = vad.emittedCount
+            var tailData: Data?
+            if onSegment != nil && emitted > 0, let tail = vad.finish(totalFrames: frames) {
+                tailData = sliceWAV(startFrame: tail.startFrame, endFrame: tail.endFrame)
             }
-            let block = UInt16(channels * MemoryLayout<Float>.size)
-            header.append(contentsOf: "RIFF".utf8)
-            integer(UInt32(data.count - 8))
-            header.append(contentsOf: "WAVEfmt ".utf8)
-            integer(UInt32(channels > 2 ? 40 : 18))
-            integer(UInt16(channels > 2 ? 0xfffe : 3))
-            integer(UInt16(channels))
-            integer(sampleRate)
-            integer(sampleRate * UInt32(block))
-            integer(block)
-            integer(UInt16(32))
-            if channels > 2 {
-                integer(UInt16(22))
-                integer(UInt16(32))
-                integer(UInt32(0)) // The input may not have a speaker-position channel mask.
-                header.append(contentsOf: [3, 0, 0, 0, 0, 0, 16, 0, 128, 0, 0, 170, 0, 56, 155, 113])
-            } else {
-                integer(UInt16(0))
-            }
-            header.append(contentsOf: "fact".utf8)
-            integer(UInt32(4))
-            integer(UInt32(frames))
-            header.append(contentsOf: "data".utf8)
-            integer(UInt32(data.count - headerSize))
+            let header = makeHeader(frameCount: frames, pcmByteCount: data.count - headerSize)
             data.replaceSubrange(0..<headerSize, with: header)
-            return RecordedWAV(data: data, seconds: Double(frames) / Double(sampleRate))
+            return RecordedWAV(
+                data: data,
+                seconds: Double(frames) / Double(sampleRate),
+                emittedSegments: emitted,
+                tailData: tailData
+            )
         }
+    }
+
+    private func sliceWAV(startFrame: Int, endFrame: Int) -> Data? {
+        let clampedStart = max(0, min(frames, startFrame))
+        let clampedEnd = max(clampedStart, min(frames, endFrame))
+        let frameCount = clampedEnd - clampedStart
+        guard frameCount > 0 else { return nil }
+        let frameBytes = channels * MemoryLayout<Float>.size
+        let startByte = headerSize + clampedStart * frameBytes
+        let endByte = headerSize + clampedEnd * frameBytes
+        guard endByte <= data.count, endByte > startByte else { return nil }
+        var wav = makeHeader(frameCount: frameCount, pcmByteCount: endByte - startByte)
+        wav.append(data.subdata(in: startByte..<endByte))
+        return wav
+    }
+
+    private func makeHeader(frameCount: Int, pcmByteCount: Int) -> Data {
+        var header = Data()
+        func integer<T: FixedWidthInteger>(_ number: T) {
+            var littleEndian = number.littleEndian
+            withUnsafeBytes(of: &littleEndian) { header.append(contentsOf: $0) }
+        }
+        let block = UInt16(channels * MemoryLayout<Float>.size)
+        header.append(contentsOf: "RIFF".utf8)
+        integer(UInt32(headerSize + pcmByteCount - 8))
+        header.append(contentsOf: "WAVEfmt ".utf8)
+        integer(UInt32(channels > 2 ? 40 : 18))
+        integer(UInt16(channels > 2 ? 0xfffe : 3))
+        integer(UInt16(channels))
+        integer(sampleRate)
+        integer(sampleRate * UInt32(block))
+        integer(block)
+        integer(UInt16(32))
+        if channels > 2 {
+            integer(UInt16(22))
+            integer(UInt16(32))
+            integer(UInt32(0)) // The input may not have a speaker-position channel mask.
+            header.append(contentsOf: [3, 0, 0, 0, 0, 0, 16, 0, 128, 0, 0, 170, 0, 56, 155, 113])
+        } else {
+            integer(UInt16(0))
+        }
+        header.append(contentsOf: "fact".utf8)
+        integer(UInt32(4))
+        integer(UInt32(frameCount))
+        header.append(contentsOf: "data".utf8)
+        integer(UInt32(pcmByteCount))
+        return header
+    }
+}
+
+public enum AudioArchiver {
+    /// Normalize any AVAudioFile-readable audio into 16 kHz mono 16-bit FLAC for persistent history.
+    public static func encodeFLAC(from inputURL: URL) throws -> Data {
+        let input = try AVAudioFile(forReading: inputURL)
+        guard input.length > 0 else {
+            throw EngineError(message: "录音没有音频帧。")
+        }
+        guard let pcmFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false),
+              let converter = AVAudioConverter(from: input.processingFormat, to: pcmFormat) else {
+            throw EngineError(message: "音频压缩初始化失败。")
+        }
+        let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent("yanmo-archive-\(UUID().uuidString).flac")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        let flacSettings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatFLAC,
+            AVSampleRateKey: 16000,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+        ]
+
+        var totalFramesWritten: AVAudioFrameCount = 0
+        do {
+            // Scope AVAudioFile so it deallocates and flushes the FLAC STREAMINFO header before reading.
+            let output = try AVAudioFile(forWriting: outputURL, settings: flacSettings)
+            let chunkFrames: AVAudioFrameCount = 32768
+            guard let readBuffer = AVAudioPCMBuffer(pcmFormat: input.processingFormat, frameCapacity: chunkFrames),
+                  let convertBuffer = AVAudioPCMBuffer(pcmFormat: pcmFormat, frameCapacity: chunkFrames) else {
+                throw EngineError(message: "音频压缩缓冲区分配失败。")
+            }
+            var eof = false
+            while true {
+                convertBuffer.frameLength = 0
+                var conversionError: NSError?
+                var readFailure: Error?
+                let status = converter.convert(to: convertBuffer, error: &conversionError) { requestedFrames, outStatus in
+                    if eof || input.framePosition >= input.length {
+                        eof = true
+                        outStatus.pointee = .endOfStream
+                        return nil
+                    }
+                    let remaining = AVAudioFrameCount(max(0, input.length - input.framePosition))
+                    let toRead = min(readBuffer.frameCapacity, min(requestedFrames, remaining))
+                    if toRead == 0 {
+                        eof = true
+                        outStatus.pointee = .endOfStream
+                        return nil
+                    }
+                    do {
+                        readBuffer.frameLength = 0
+                        try input.read(into: readBuffer, frameCount: toRead)
+                    } catch {
+                        readFailure = error
+                        eof = true
+                        outStatus.pointee = .endOfStream
+                        return nil
+                    }
+                    if readBuffer.frameLength == 0 {
+                        eof = true
+                        outStatus.pointee = .endOfStream
+                        return nil
+                    }
+                    outStatus.pointee = .haveData
+                    return readBuffer
+                }
+                if let readFailure { throw readFailure }
+                if status == .error, let conversionError { throw conversionError }
+                if convertBuffer.frameLength > 0 {
+                    try output.write(from: convertBuffer)
+                    totalFramesWritten += convertBuffer.frameLength
+                }
+                if status == .endOfStream || (eof && convertBuffer.frameLength == 0) {
+                    break
+                }
+            }
+        }
+        guard totalFramesWritten > 0 else {
+            throw EngineError(message: "音频压缩未产生音频帧。")
+        }
+        return try Data(contentsOf: outputURL)
     }
 }

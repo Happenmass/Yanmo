@@ -5,6 +5,7 @@ import { ACTIONS, Action, AppState, busy, Capability, CAPABILITIES, characterCou
 import { renderMarkdown } from './markdown';
 import { DailyDetails } from './DailyDetails';
 import { ManuscriptAttachments } from './ManuscriptAttachments';
+import { SyncSection } from './SyncSection';
 
 const api = (action: string, args?: unknown) => window.yanmo.invoke(action, args) as Promise<{ ok: boolean; error?: string }>;
 const logoURL = new URL('../../docs/design/logo-v2.png', import.meta.url).href;
@@ -19,7 +20,7 @@ const dateLabel = (value: number) => {
   const month = date.getMonth() + 1;
   return (days === 0 ? '今天 ' : days === 1 ? '昨天 ' : (month <= 10 ? (month === 10 ? '十' : numerals[month]) : '十' + numerals[month - 10]) + '月' + chineseDay(date.getDate()) + ' · ') + clock;
 };
-const pageNames: Record<Page, [string, string]> = { desk: ['书案', '使用概览'], manuscripts: ['文稿', '每一次表达，都有迹可循'], dictionary: ['词库', '让熟悉的名字，准确落笔'], settings: ['设置', '本地模型与输入偏好'] };
+const pageNames: Record<Page, [string, string]> = { desk: ['书案', '使用概览'], manuscripts: ['文稿', '每一次表达，都有迹可循'], dictionary: ['词库', '让熟悉的名字，准确落笔'], settings: ['设置', 'AcpmRuntime 与输入偏好'] };
 function Dot({ ready, children }: { ready: boolean; children: ReactNode }) { return <span className="model-dot"><i className={ready ? 'ready' : ''} />{children}</span>; }
 function BrandMark({ small = false }: { small?: boolean }) { return <img className={'brand-mark' + (small ? ' small' : '')} src={logoURL} alt="" aria-hidden="true" draggable={false}/>; }
 function Mountains() {
@@ -67,7 +68,7 @@ export default function App() {
       <nav aria-label="主导航"><i className="nav-ink" style={{ transform: `translateY(${Object.keys(pageNames).indexOf(state.page) * 57}px)` }}/>{(Object.keys(pageNames) as Page[]).map(page => <button key={page} aria-current={state.page === page ? 'page' : undefined} className={state.page === page ? 'selected' : ''} onClick={() => { setDay(undefined); void api('page', page); }}><span>{pageNames[page][0]}</span></button>)}</nav>
       <div className="sidebar-bottom"><Dot ready={state.runtime.capabilities.asr !== 'unavailable'}>语音识别 · {capabilityLabel[state.runtime.capabilities.asr]}</Dot></div>
     </aside>
-    {guiding ? <main>{modelsReady(state) ? <Onboarding state={state}/> : <ModelSetup state={state}/>}<Mountains /><PaperFibers /></main> : <main><header className="topbar"><span className="page-name">{pageNames[state.page][0]}</span><span className="slash">·</span><span>{state.page === 'desk' && day ? '当日详情' : pageNames[state.page][1]}</span>{state.settings.online.asr.enabled || state.settings.online.text.enabled ? <div className="privacy online"><Cloud size={12} />{state.settings.online.asr.enabled ? '已开启在线语音识别' : '文字处理使用 API'}</div> : <div className="privacy">文字处理 API 待配置</div>}</header>
+    {guiding ? <main>{modelsReady(state) ? <Onboarding state={state}/> : <ModelSetup state={state}/>}<Mountains /><PaperFibers /></main> : <main><header className="topbar"><span className="page-name">{pageNames[state.page][0]}</span><span className="slash">·</span><span>{state.page === 'desk' && day ? '当日详情' : pageNames[state.page][1]}</span>{state.settings.online.asr.enabled || state.settings.online.text.enabled ? <div className="privacy online"><Cloud size={12} />{state.settings.online.asr.enabled ? '已开启在线语音识别' : '文字处理使用在线 API'}</div> : state.acpm.connected ? <div className="privacy">{state.settings.acpm.mode === 'remote' ? 'AcpmRuntime · 局域网' : 'AcpmRuntime · 本机'}</div> : <div className="privacy">AcpmRuntime 未连接</div>}</header>
       <div className="page-content" key={state.page}>{state.page === 'desk' ? <Desk state={state} day={day} onDay={setDay}/> : state.page === 'manuscripts' ? <Manuscripts state={state} /> : state.page === 'dictionary' ? <Dictionary state={state} /> : <Preferences state={state} />}</div>
       {state.notice && <div className="notice" role="status"><span>{state.notice}</span><button className="icon-button" aria-label="关闭提示" onClick={() => void api('clearNotice')}><X size={13}/></button></div>}
       <footer className="footer"><Dot ready={state.runtime.capabilities.asr !== 'unavailable'}>语音识别 · {capabilityLabel[state.runtime.capabilities.asr]}</Dot><span className="footer-divider"/><Dot ready={state.runtime.capabilities.text !== 'unavailable'}>文字整理 · {capabilityLabel[state.runtime.capabilities.text]}</Dot><button className="footer-key" onClick={() => void api('page', 'settings')}>{state.settings.shortcuts.dictation[0] && keycap(state.settings.shortcuts.dictation[0])}<span>语音输入</span></button></footer>
@@ -82,27 +83,48 @@ const guideSteps: { action?: Action; name: string; title: string; caption: strin
   { action: 'voiceTranslation', name: '口述翻译', title: '说中文，写外文。', caption: '照常开口，写进输入框的是译文。', lines: (keys, target) => ['把光标放进输入框，按下 ' + keys + ' 说话', '浮层出现「译」字，表示这一次会翻译', '说完再按一次，' + target + '译文写入光标处'] },
   { name: '翻译弹窗', title: '译文，另起一页。', caption: '划词翻译的结果在独立弹窗里，不改动原文。', lines: () => ['在弹窗顶部切换目标语言，或重新翻译', '「排版 / 源码」切换 Markdown 显示', '复制译文后关闭，译文不会保存'] },
 ];
-const capabilityLabel = { online: '在线', local: '本地就绪', unavailable: '待配置' };
-const modelsReady = (state: AppState) => state.modelsChecked && state.runtime.status === 'online-ready';
+const capabilityLabel = { acpm: 'AcpmRuntime', online: '在线 API', unavailable: '待配置' } as const;
+const modelsReady = (state: AppState) => state.modelsChecked && state.runtime.capabilities.asr !== 'unavailable';
+function asrModelChoices(state: AppState) {
+  const discovered = state.acpm.models.filter(item => item.capability === 'asr');
+  const items = discovered.length
+    ? discovered
+    : [
+        { id: 'qwen3-asr-1.7b', capability: 'asr', displayName: 'Qwen3-ASR 1.7B', installed: false, state: 'STOPPED' },
+        { id: 'qwen3-asr-0.6b', capability: 'asr', displayName: 'Qwen3-ASR 0.6B', installed: false, state: 'STOPPED' },
+      ];
+  if (!items.some(item => item.id === state.settings.acpm.asrModel)) {
+    return [{ id: state.settings.acpm.asrModel, capability: 'asr', displayName: state.settings.acpm.asrModel, installed: false, state: 'STOPPED' }, ...items];
+  }
+  return items;
+}
+function textModelChoices(state: AppState) {
+  const discovered = state.acpm.models.filter(item => item.capability === 'llm');
+  const items = discovered.length
+    ? discovered
+    : [{ id: 'yanmo-correct-4b-cot', capability: 'llm', displayName: 'Yanmo Correct 4B CoT', installed: false, state: 'STOPPED' }];
+  if (!items.some(item => item.id === state.settings.acpm.textModel)) {
+    return [{ id: state.settings.acpm.textModel, capability: 'llm', displayName: state.settings.acpm.textModel, installed: false, state: 'STOPPED' }, ...items];
+  }
+  return items;
+}
 function ModelSetup({ state }: { state: AppState }) {
-  const { settings, models, checking, modelsChecked, runtime } = state;
-  const windows = state.platform === 'windows';
-  // Windows prepares the PyTorch CUDA runtime before any model download; without a supported GPU it stops here.
-  const needsEnvironment = windows && runtime.status === 'local-repair';
-  const unsupported = windows && runtime.capabilities.asr === 'unavailable' && ['recommend-online', 'api-pending'].includes(runtime.status);
+  const { settings, acpm, checking, modelsChecked, runtime } = state;
   const needsASR = runtime.capabilities.asr === 'unavailable';
+  const asrChoices = asrModelChoices(state);
   return <section className="guide"><header className="guide-top"><span>初次见面</span><button className="text-button" onClick={() => void api('settings', { onboarded: true }).then(result => { if (result.ok) void api('page', 'settings'); })}>跳过引导</button></header>
-    <div className="guide-body"><div className="guide-text"><h2 className="brush-reveal">先备好笔墨。</h2><p className="guide-caption">准备语音识别模型，并配置整理和翻译共用的文字处理 API。</p>
+    <div className="guide-body"><div className="guide-text"><h2 className="brush-reveal">先备好笔墨。</h2><p className="guide-caption">言墨通过 AcpmRuntime 提供本地语音识别与文字整理；也可跳过引导在设置中改用远程服务或在线 API。</p>
       {needsASR && <>
-        <label className="inline-setting"><span>下载来源</span><select aria-label="模型下载来源" disabled={checking} value={settings.modelSource} onChange={event => void api('settings', { modelSource: event.target.value })}><option value="modelscope">ModelScope（默认）</option><option value="huggingface">Hugging Face</option></select></label>
-        {unsupported ? <p className="fine-print">{runtime.issues.join(' ')} 可跳过引导，在设置中配置在线语音识别。</p>
-          : needsEnvironment ? <><button className="button primary" disabled={checking} onClick={() => void api('prepareRuntime')}>{checking ? '正在准备运行环境…' : '准备运行环境'}</button>{!checking && <p className="fine-print">{runtime.issues.join(' ')}</p>}</>
-          : <button className="button primary" disabled={checking || !modelsChecked} onClick={() => void api('prepareModels')}>{!modelsChecked ? '正在检查本地环境…' : checking ? '正在准备模型…' : '下载模型'}</button>}
+        {acpm.connected ? <>
+          <p className="fine-print">已连接到 AcpmRuntime，但当前选择的语音识别模型尚未安装。请在 AcpmRuntime「模型」页安装，或切换到已安装的模型。</p>
+          <label className="inline-setting"><span>语音识别模型</span><select aria-label="语音识别模型" disabled={checking} value={settings.acpm.asrModel} onChange={event => void api('settings', { acpm: { ...settings.acpm, asrModel: event.target.value } })}>
+            {asrChoices.map(item => <option key={item.id} value={item.id}>{item.displayName || item.id}{acpm.connected ? `（${item.installed ? '已安装' : '未安装'}）` : ''}</option>)}
+          </select></label>
+        </> : <p className="fine-print">请先启动 AcpmRuntime 并安装语音识别模型（如 qwen3-asr-1.7b 或 qwen3-asr-0.6b），然后点击重新检测。</p>}
+        <button className="button primary" disabled={checking} onClick={() => void api('check')}>{!modelsChecked || checking ? '正在检测 AcpmRuntime…' : '重新检测'}</button>
       </>}
       {state.notice && <p className="fine-print" role="status">{state.notice}</p>}
-    </div><figure className="guide-figure"><div className="model-check"><Dot ready={!needsASR}>语音识别 · {capabilityLabel[runtime.capabilities.asr]}</Dot>{needsASR && !windows && <Dot ready={models.sensevoice}>中英复核 · SenseVoice</Dot>}</div>
-      {runtime.capabilities.text === 'unavailable' && <><p className="fine-print">文字处理使用识别后的文本或选中文字。启用光标上下文后，相关上下文也会发送至此服务。</p><OnlineSetting capability="text" state={state}/></>}
-    </figure></div>
+    </div><figure className="guide-figure"><div className="model-check"><Dot ready={acpm.connected}>AcpmRuntime · {acpm.connected ? '已连接' : '未连接'}</Dot><Dot ready={!needsASR}>语音识别 · {capabilityLabel[runtime.capabilities.asr]}</Dot><Dot ready={runtime.capabilities.text !== 'unavailable'}>文字整理 · {capabilityLabel[runtime.capabilities.text]}</Dot></div></figure></div>
   </section>;
 }
 function Onboarding({ state }: { state: AppState }) {
@@ -114,12 +136,15 @@ function Onboarding({ state }: { state: AppState }) {
   const last = step === guideSteps.length - 1;
   // Without Accessibility the event tap never sees FN, so macOS opens its own 🌐 emoji picker instead.
   const needsGrant = keys.some(shortcutNeedsEventTap) && !state.native.eventTap;
+  const textReady = state.runtime.capabilities.text !== 'unavailable';
+  const textSourceText = state.runtime.capabilities.text === 'online' ? '翻译使用你配置的在线文字处理 API' : state.runtime.capabilities.text === 'acpm' ? '翻译使用 AcpmRuntime 本地文字模型' : '文字处理服务待配置';
   return <section className="guide"><header className="guide-top"><span>初次见面</span><button className="text-button" onClick={() => finish()}>跳过引导</button></header>
     <nav className="guide-rail" aria-label="引导步骤">{guideSteps.map((item, index) => <button key={item.name} aria-current={index === step ? 'step' : undefined} onClick={() => setStep(index)}>{'一二三四'[index]}　{item.name}</button>)}</nav>
     <div className="guide-body" key={step}><div className="guide-text"><h2 className="brush-reveal">{action === 'voiceTranslation' && settings.voiceTarget === 'zh-Hans' ? '说外文，写中文。' : title}</h2><p className="guide-caption">{caption}</p>
       <ol>{lines(keys.length ? keys.map(shortcutLabel).join(' 或 ') : '快捷键', target).map(line => <li key={line}>{line}</li>)}</ol>
       {action ? keys.length ? <div className="key-list">{keys.map((key, index) => <span className="guide-key" key={shortcutID(key)}>{index > 0 && <em>或</em>}{keycap(key)}</span>)}</div> : <button className="text-button red" onClick={() => finish('settings')}>尚未设置快捷键，去设置 →</button>
-        : <Dot ready>翻译使用你配置的文字处理 API</Dot>}
+        : <Dot ready={textReady}>{textSourceText}</Dot>}
+      {step > 0 && !textReady && <p className="fine-print">请在 AcpmRuntime 中安装文字模型，或在设置中启用在线文字处理 API 后试用翻译。</p>}
       {needsGrant && <div className="permission-line guide-permission"><Dot ready={false}>辅助功能 · 待授权</Dot><button className="text-button red" onClick={event => { const { x, y, width, height } = event.currentTarget.getBoundingClientRect(); void api('permissions', { x, y, width, height }); }}>授予权限</button><button className="text-button" onClick={() => void api('check')}>重新检查</button><p className="fine-print">言墨需要辅助功能权限才能接收 {keys.map(shortcutLabel).join('、')}；未授权时按 FN 会打开系统表情面板。</p></div>}
     </div><figure className="guide-figure">{step === 3 ? <GuidePopup/> : <div className="guide-window"><i className="guide-lights" aria-hidden="true"/>
       <PracticeField key={step} select={step === 1} value={step === 1 ? sample : notes} onChange={step === 1 ? setSample : setNotes} placeholder={step === 1 ? '' : keys.length ? '光标已在这里。按 ' + shortcutLabel(keys[0]) + ' 说一句话试试，也可以直接打字。' : '可以直接在这里打字。'}/>
@@ -276,20 +301,50 @@ function Dictionary({ state }: { state: AppState }) {
   </section>;
 }
 
-const ASR_PRESETS = [
-  { id: 'mlx-community/Qwen3-ASR-1.7B-8bit', label: '标准 · Qwen3-ASR 1.7B（默认）', note: '下载约 2.5 GB，运行时约占 3.5 GB 内存，识别最准。' },
-  { id: 'mlx-community/Qwen3-ASR-0.6B-8bit', label: '低内存 · Qwen3-ASR 0.6B', note: '下载约 1 GB，运行时约占 1.8 GB 内存；嘈杂环境和英文、日文等外语的准确率明显较低。' },
-];
-function AsrPreset({ state }: { state: AppState }) {
-  const preset = ASR_PRESETS.find(item => item.id === state.settings.asrModel);
-  return <><label className="inline-setting"><span>语音识别规格</span><select aria-label="语音识别规格" disabled={state.checking} value={preset?.id ?? ''} onChange={event => void api('settings', { asrModel: event.target.value }).then(result => { if (result.ok) void api('check'); })}>
-    {ASR_PRESETS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}{!preset && <option value="">自定义</option>}</select></label>
-    <p className="fine-print">{preset ? preset.note : '使用下方填写的模型 ID。'}切换后若显示待准备，请点击「准备模型」。</p></>;
-}
-function Field({ title, value, name }: { title: string; value: string; name: 'asrModel' | 'senseVoiceModel' }) {
-  const [text, setText] = useState(value);
-  useEffect(() => setText(value), [value]);
-  return <label className="model-field"><span>{title}</span><input value={text} onChange={event => setText(event.target.value)} onBlur={() => { if (text !== value) void api('settings', { [name]: text.trim() }); }} /></label>;
+function AcpmSection({ state }: { state: AppState }) {
+  const { settings, acpm } = state;
+  const saved = settings.acpm;
+  const [mode, setMode] = useState<'local' | 'remote'>(saved.mode);
+  const [remoteBaseURL, setRemoteBaseURL] = useState(saved.remoteBaseURL);
+  const [token, setToken] = useState('');
+  useEffect(() => { setMode(saved.mode); setRemoteBaseURL(saved.remoteBaseURL); }, [saved.mode, saved.remoteBaseURL]);
+  const asrChoices = asrModelChoices(state);
+  const textChoices = textModelChoices(state);
+  const saveConnection = (nextMode: 'local' | 'remote' = mode) => {
+    void api('acpmSave', { ...saved, mode: nextMode, remoteBaseURL, token }).then(result => {
+      if (result.ok) setToken('');
+    });
+  };
+  return <PreferenceSection title="AcpmRuntime 服务">
+    <div className="model-check">
+      <Dot ready={acpm.connected}>AcpmRuntime · {acpm.connected ? (saved.mode === 'remote' ? '已连接（远程）' : '已连接（本机）') : '未连接'}</Dot>
+      <Dot ready={acpm.asrReady}>语音模型{acpm.asrReady ? '就绪' : '未安装'}</Dot>
+      <Dot ready={acpm.textReady}>文字模型{acpm.textReady ? '就绪' : '未安装'}</Dot>
+      <button className="button compact" disabled={state.checking} onClick={() => void api('check')}>{state.checking ? '正在检查…' : '重新检测'}</button>
+    </div>
+    {!acpm.connected && acpm.error && <p className="fine-print red" role="status">{acpm.error}</p>}
+    <label className="inline-setting"><span>连接方式</span><select aria-label="AcpmRuntime 连接方式" value={mode} onChange={event => {
+      const next = event.target.value as 'local' | 'remote';
+      setMode(next);
+      if (next === 'local') saveConnection('local');
+    }}><option value="local">同机自动发现（默认）</option><option value="remote">局域网 / 远程地址</option></select></label>
+    {mode === 'remote' && <div className="online-setting">
+      <label className="model-field"><span>AcpmRuntime 服务地址</span><input value={remoteBaseURL} placeholder="http://acpm.local:18790" spellCheck={false} onChange={event => setRemoteBaseURL(event.target.value)}/></label>
+      <label className="model-field"><span>Bearer Token</span><input type="password" value={token} autoComplete="off" placeholder={state.acpmTokenSaved ? '已保存在钥匙串；输入新值可替换' : '在 AcpmRuntime 设置或菜单栏 ⌥⌘C 复制'} onChange={event => setToken(event.target.value)}/></label>
+      <div className="online-actions">
+        <button className="button compact primary" disabled={!remoteBaseURL.trim()} onClick={() => saveConnection('remote')}>保存连接</button>
+        {state.acpmTokenSaved && <button className="text-button" onClick={() => void api('acpmTokenClear')}>删除 Token</button>}
+      </div>
+    </div>}
+    <label className="inline-setting"><span>语音识别模型</span><select aria-label="语音识别模型" disabled={state.checking} value={saved.asrModel} onChange={event => void api('settings', { acpm: { ...saved, asrModel: event.target.value } })}>
+      {asrChoices.map(item => <option key={item.id} value={item.id}>{item.displayName || item.id}{acpm.connected ? `（${item.installed ? '已安装' : '未安装'}）` : ''}</option>)}
+    </select></label>
+    <label className="inline-setting"><span>文字处理模型</span><select aria-label="文字处理模型" disabled={state.checking} value={saved.textModel} onChange={event => void api('settings', { acpm: { ...saved, textModel: event.target.value } })}>
+      {textChoices.map(item => <option key={item.id} value={item.id}>{item.displayName || item.id}{acpm.connected ? `（${item.installed ? '已安装' : '未安装'}）` : ''}</option>)}
+    </select></label>
+    <CheckSetting title="识别前使用 CPU VAD 检测人声（无语音时跳过识别）" checked={saved.vadEnabled} onChange={value => void api('settings', { acpm: { ...saved, vadEnabled: value } })}/>
+    <p className="fine-print">模型下载、加载与内存驻留策略由 AcpmRuntime 统一管理。</p>
+  </PreferenceSection>;
 }
 function OnlineSetting({ capability, state }: { capability: Capability; state: AppState }) {
   const saved = state.settings.online[capability];
@@ -298,11 +353,11 @@ function OnlineSetting({ capability, state }: { capability: Capability; state: A
   useEffect(() => { setBaseURL(saved.baseURL); setModel(saved.model); }, [saved.baseURL, saved.model]);
   const save = (enabled: boolean) => void api('online', { capability, enabled, baseURL, model, key }).then(result => { if (result.ok) setKey(''); });
   const complete = !!baseURL.trim() && !!model.trim();
-  return <div className="online-setting"><header><strong>{CAPABILITIES[capability]}</strong><Dot ready={saved.enabled}>{saved.enabled ? '已启用' : isASR ? '本机' : '未启用'}</Dot></header>
+  return <div className="online-setting"><header><strong>{CAPABILITIES[capability]}</strong><Dot ready={saved.enabled}>{saved.enabled ? '已启用' : '使用 AcpmRuntime'}</Dot></header>
     <label className="model-field"><span>服务地址（Base URL）</span><input value={baseURL} placeholder="https://api.example.com/v1" spellCheck={false} onChange={event => setBaseURL(event.target.value)}/></label>
     <label className="model-field"><span>模型 ID</span><input value={model} placeholder={capability === 'asr' ? '例如 whisper-1' : '例如 qwen-plus'} spellCheck={false} onChange={event => setModel(event.target.value)}/></label>
     <label className="model-field"><span>API Key</span><input type="password" value={key} autoComplete="off" placeholder={state.onlineKeys[capability] ? '已保存在钥匙串；输入新值可替换' : '本机服务可留空'} onChange={event => setKey(event.target.value)}/></label>
-    <div className="online-actions">{saved.enabled ? <><button className="button compact" onClick={() => save(true)}>保存</button><button className="button compact" onClick={() => save(false)}>{isASR ? '改回本机识别' : '停用 API'}</button></> : <><button className="button compact primary" disabled={!complete} onClick={() => save(true)}>{isASR ? '启用在线语音识别' : '启用文字处理 API'}</button><button className="text-button" onClick={() => save(false)}>仅保存</button></>}{state.onlineKeys[capability] && <button className="text-button" onClick={() => void api('onlineKeyClear', capability)}>删除 API Key</button>}</div>
+    <div className="online-actions">{saved.enabled ? <><button className="button compact" onClick={() => save(true)}>保存</button><button className="button compact" onClick={() => save(false)}>改回 AcpmRuntime</button></> : <><button className="button compact primary" disabled={!complete} onClick={() => save(true)}>{isASR ? '启用在线语音识别' : '启用文字处理 API'}</button><button className="text-button" onClick={() => save(false)}>仅保存</button></>}{state.onlineKeys[capability] && <button className="text-button" onClick={() => void api('onlineKeyClear', capability)}>删除 API Key</button>}</div>
   </div>;
 }
 function CheckSetting({ title, checked, onChange }: { title: string; checked: boolean; onChange: (value: boolean) => void }) { return <label className="check-setting"><input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)}/><span>{title}</span></label>; }
@@ -313,18 +368,30 @@ function Preferences({ state }: { state: AppState }) {
   const settings = state.settings;
   const patch = (value: Partial<Settings>) => void api('settings', value);
   return <div className="preferences page-scroll"><h2>让言墨，顺手一些。</h2><fieldset disabled={busy(state.stage)}>
-    <PreferenceSection title="快捷键与翻译">{(Object.keys(ACTIONS) as Action[]).map(action => <div className="shortcut-editor" key={action}><header><strong>{ACTIONS[action]}</strong>{action !== 'dictation' && <LanguageSelect value={action === 'voiceTranslation' ? settings.voiceTarget : settings.selectionTarget} onChange={language => patch(action === 'voiceTranslation' ? { voiceTarget: language } : { selectionTarget: language })}/>}</header><p>{action === 'dictation' ? '轻按开始，再按结束；Esc 取消。' : action === 'voiceTranslation' ? '说完后翻译成目标语言，并粘贴到原输入框。' : '选中文字后按快捷键，在独立弹窗查看译文。'}</p>{settings.shortcuts[action].map(key => <div className="shortcut-row" key={shortcutID(key)}>{keycap(key)}<span className="spacer"/>{shortcutNeedsEventTap(key) && <Dot ready={state.native.eventTap}>{state.native.eventTap ? '已启用' : '待授权'}</Dot>}<button className="text-button" disabled={!!state.captureAction || (action === 'dictation' && settings.shortcuts[action].length === 1)} onClick={() => void api('shortcutRemove', { action, id: shortcutID(key) })}>移除</button></div>)}{state.captureAction === action ? <ShortcutCapture state={state}/> : <div className="shortcut-actions"><button className="button compact" disabled={!!state.captureAction} onClick={() => void api('capture', action)}>添加快捷键</button><button className="text-button" disabled={!!state.captureAction} onClick={() => patch({ shortcuts: { ...settings.shortcuts, [action]: defaultSettings().shortcuts[action] } })}>恢复默认</button></div>}</div>)}{state.shortcutNotice && <p className="red" role="status">{state.shortcutNotice}</p>}<div className="permission-line"><Dot ready={state.native.accessibility}>辅助功能 · {state.native.accessibility ? '已授权' : '待授权'}</Dot><button className="text-button red" onClick={event => { const { x, y, width, height } = event.currentTarget.getBoundingClientRect(); void api('permissions', { x, y, width, height }); }}>请求权限</button><button className="text-button" onClick={() => void api('check')}>重新检查权限</button></div></PreferenceSection>
+    <PreferenceSection title="快捷键与翻译">{(Object.keys(ACTIONS) as Action[]).map(action => <div className="shortcut-editor" key={action}><header><strong>{ACTIONS[action]}</strong>{action !== 'dictation' && <LanguageSelect value={action === 'voiceTranslation' ? settings.voiceTarget : settings.selectionTarget} onChange={language => patch(action === 'voiceTranslation' ? { voiceTarget: language } : { selectionTarget: language })}/>}</header><p>{action === 'dictation' ? '轻按开始，再按结束；Esc 取消。' : action === 'voiceTranslation' ? '说完后翻译成目标语言，并粘贴到原输入框。' : '选中文字后按快捷键，在独立弹窗查看译文。'}</p>{settings.shortcuts[action].map(key => <div className="shortcut-row" key={shortcutID(key)}>{keycap(key)}<span className="spacer"/>{shortcutNeedsEventTap(key) && <Dot ready={state.native.eventTap}>{state.native.eventTap ? '已启用' : '待授权'}</Dot>}<button className="text-button" disabled={!!state.captureAction || (action === 'dictation' && settings.shortcuts[action].length === 1)} onClick={() => void api('shortcutRemove', { action, id: shortcutID(key) })}>移除</button></div>)}{state.captureAction === action ? <ShortcutCapture state={state}/> : <div className="shortcut-actions"><button className="button compact" disabled={!!state.captureAction} onClick={() => void api('capture', action)}>添加快捷键</button><button className="text-button" disabled={!!state.captureAction} onClick={() => void api('shortcutReset', action)}>恢复默认</button></div>}</div>)}{state.shortcutNotice && <p className="red" role="status">{state.shortcutNotice}</p>}<div className="permission-line"><Dot ready={state.native.accessibility}>辅助功能 · {state.native.accessibility ? '已授权' : '待授权'}</Dot><button className="text-button red" onClick={event => { const { x, y, width, height } = event.currentTarget.getBoundingClientRect(); void api('permissions', { x, y, width, height }); }}>请求权限</button><button className="text-button" onClick={() => void api('check')}>重新检查权限</button></div></PreferenceSection>
     <PreferenceSection title="麦克风"><label className="inline-setting"><span>输入设备</span><select aria-label="输入设备" value={settings.microphone} onChange={event => patch({ microphone: event.target.value })}><option value="">跟随系统</option>{state.native.devices.map(device => <option key={device.id} value={device.id}>{device.name}</option>)}</select></label><p className="fine-print">仅选择言墨使用的输入设备，不更改系统默认麦克风。录音无提示音，不回放麦克风声音。</p></PreferenceSection>
-    <PreferenceSection title="本地模型"><label className="inline-setting"><span>模型下载来源</span><select aria-label="模型下载来源" value={settings.modelSource} onChange={event => patch({ modelSource: event.target.value as Settings['modelSource'] })}><option value="modelscope">ModelScope（默认）</option><option value="huggingface">Hugging Face</option></select></label><AsrPreset state={state}/><Field title="语音识别模型" name="asrModel" value={settings.asrModel}/><Field title="中英复核模型" name="senseVoiceModel" value={settings.senseVoiceModel}/><p className="fine-print">自动识别为中文或英文后，使用 SenseVoice Small 再识别一次；同一模型按语言调用，两路原文用于整理对照。</p><p className="fine-print">语音模型保存在用户全局缓存。空闲 1 小时后释放模型，下次录音时后台准备。</p><button className="button compact prepare-models" disabled={state.checking} onClick={() => void api('prepareModels')}>准备模型</button><div className="model-check"><Dot ready={state.models.asr}>ASR 缓存{state.models.asr ? '完整' : '待准备'}</Dot><Dot ready={state.models.sensevoice}>中英复核缓存{state.models.sensevoice ? '完整' : '待准备'}</Dot><button className="button compact" disabled={state.checking} onClick={() => void api('check')}>{state.checking ? '正在检查…' : '检查本地环境'}</button></div></PreferenceSection>
-    <PreferenceSection title="API 服务"><p className="fine-print">整理和翻译共用一个 OpenAI 兼容文字 API。文字请求可包含转写、词库和已启用的光标上下文。{state.platform === 'mac' && '语音写入后 10 秒内按 Enter，当前输入框的可读正文可能与上一段口述一起交给同一 API 提取词条。'}只有启用在线语音识别时才会发送音频。API Key 加密保存。</p>{(Object.keys(CAPABILITIES) as Capability[]).map(capability => <OnlineSetting key={capability} capability={capability} state={state}/>)}</PreferenceSection>
+    <AcpmSection state={state}/>
+    <SyncSection state={state}/>
+    <PreferenceSection title="API 服务"><p className="fine-print">可按需为语音识别或文字处理单独切换为兼容 OpenAI 的在线 API；未启用时默认使用 AcpmRuntime。文字请求可包含转写、词库和已启用的光标上下文。{state.platform === 'mac' && '语音写入后 10 秒内按 Enter，当前输入框的可读正文可能与上一段口述一起交给同一文字服务提取词条。'}只有启用在线语音识别时才会发送音频。API Key 加密保存。</p>{(Object.keys(CAPABILITIES) as Capability[]).map(capability => <OnlineSetting key={capability} capability={capability} state={state}/>)}</PreferenceSection>
     <PreferenceSection title="文字与隐私">
-      <CheckSetting title="识别后整理语气与标点（纠错仍启用）" checked={settings.polishEnabled} onChange={value => patch({ polishEnabled: value })}/>
+      <CheckSetting title="识别后自动整理" checked={settings.polishEnabled} onChange={value => patch({ polishEnabled: value })}/>
+      <p className="fine-print">关闭自动整理，或 AcpmRuntime 文字模型与在线 API 均不可用时，直接写入语音识别结果。</p>
       <label className="inline-setting"><span>整理风格</span><select aria-label="整理风格" value={settings.style} onChange={event => patch({ style: event.target.value })}>{STYLES.map(style => <option key={style}>{style}</option>)}</select></label>
       <CheckSetting title="读取输入框光标前后各最多 300 字，辅助识别与纠错" checked={settings.readContext} onChange={value => patch({ readContext: value })}/>
       <CheckSetting title="在本机保存新文稿" checked={settings.keepHistory} onChange={value => patch({ keepHistory: value })}/>
       <CheckSetting title="录音结束时保存截屏" checked={settings.saveRecordingScreenshot} onChange={value => patch({ saveRecordingScreenshot: value })}/>
       <p className="fine-print">需同时开启文稿保存。截屏取自结束录音时鼠标所在的屏幕，随文稿留在本机。</p>
-      {settings.keepHistory && settings.saveRecordingScreenshot && state.platform === 'mac' && <p className="fine-print">首次使用请在「屏幕与系统音频录制」中允许言墨，然后重新打开言墨。 <button className="text-button red" onClick={() => void api('screenRecordingSettings')}>打开系统设置</button></p>}
+      {settings.keepHistory && settings.saveRecordingScreenshot && state.platform === 'mac' && <div className="permission-line">
+        <Dot ready={!!state.screenRecording}>录屏权限 · {state.screenRecording ? '已授权' : '待授权'}</Dot>
+        {!state.screenRecording && <>
+          <button className="text-button red" onClick={() => void api('screenRecordingRequest')}>请求录屏权限</button>
+          <button className="text-button" onClick={event => {
+            const { x, y, width, height } = event.currentTarget.getBoundingClientRect();
+            void api('screenRecordingGuide', { x, y, width, height });
+          }}>打开授权引导</button>
+          <p className="fine-print">如果系统未弹出提示，可在授权引导中把言墨拖入系统设置的列表。若系统要求重启言墨，请按提示操作。</p>
+        </>}
+      </div>}
       <label className="inline-setting"><span>文稿保留时间</span><select aria-label="文稿保留时间" value={settings.retention} onChange={event => patch({ retention: Number(event.target.value) })}>{[[0, '一直保留'], [1, '24 小时'], [7, '7 天'], [30, '30 天'], [365, '1 年']].map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
       <p className="fine-print">文稿、压缩录音和截屏按文稿保留时间一同清理。关闭保存不删除已有记录。词库和设置始终仅保存在本机。应用发送字数和文字 API 用量也仅保存在本机，独立于文稿保存及保留时间。</p>
     </PreferenceSection>
@@ -369,9 +436,11 @@ function Overlay({ state }: { state: AppState }) {
   if (shown) last.current = state;
   const view = last.current;
   if (!view) return null;
-  const names: Record<string, string> = { preparing: '准备中…', transcribing: '识别中…', reviewing: '中英复核…', polishing: '整理中…', translating: '翻译中…', inserting: '写入中…' };
+  const names: Record<string, string> = { preparing: '准备中…', transcribing: '识别中…', polishing: '整理中…', translating: '翻译中…', inserting: '写入中…' };
   const phase = view.stage === 'recording' || view.stage === 'success' || view.stage === 'failure' ? view.stage : 'busy';
-  return <div className="overlay-shell"><div key={entry.current} className={'voice-overlay' + (shown ? '' : ' leaving')} title={ACTIONS[view.action] + ' · 完成后写入当前输入位置；Esc 取消'} aria-label="完成后写入当前输入位置"><div className="overlay-phase" key={phase}>
+  const preview = (view.liveTranscript || '').trim();
+  const previewText = preview.length > 34 ? '…' + preview.slice(-34) : preview;
+  return <div className="overlay-shell"><div className="overlay-stack">{previewText && (phase === 'recording' || phase === 'busy') ? <div className={'overlay-preview' + (shown ? '' : ' leaving')} role="status">{previewText}</div> : null}<div key={entry.current} className={'voice-overlay' + (shown ? '' : ' leaving')} title={ACTIONS[view.action] + ' · 完成后写入当前输入位置；Esc 取消'} aria-label="完成后写入当前输入位置"><div className="overlay-phase" key={phase}>
     {phase === 'success' ? <span className="overlay-result"><BrushCheck/>已写入</span>
       : phase === 'failure' ? (view.seconds > 0 && view.draft
         ? <button className="overlay-failure" onClick={() => void api('revealDraft')}>未完成 · 查看文稿</button>
@@ -379,7 +448,7 @@ function Overlay({ state }: { state: AppState }) {
       : <><button className="overlay-cancel" aria-label="取消语音输入" onClick={() => void api('cancel')}><X size={13}/></button>
         {phase === 'recording' ? <><BrushMeter level={view.level}/>{view.action === 'voiceTranslation' && <span className="translation-mark">译</span>}<time>{time(view.seconds)}</time><button className="overlay-finish" aria-label="结束录音并写入" onClick={() => void api('finish')}><BrushCheck/></button></>
           : <><span className="overlay-stage" key={view.stage}>{names[view.stage]}</span><InkDrop/></>}</>}
-  </div></div></div>;
+  </div></div></div></div>;
 }
 /** A check written as one brush stroke, drawn centred on a 26px circle. */
 function BrushCheck() { return <svg className="brush-check" viewBox="0 0 26 26" aria-hidden="true"><path pathLength={1} d="M8.2 13.6Q10.1 14.7 11.6 16.8Q13.7 11.8 17.8 9.2"/></svg>; }
@@ -455,5 +524,5 @@ function Translation({ state }: { state: AppState }) {
   const [sourceMode, setSourceMode] = useState(false), [copied, setCopied] = useState(false);
   const markdown = useMemo(() => renderMarkdown(value.result), [value.result]);
   useEffect(() => { setCopied(false); }, [value.result]);
-  return <div className="translation-window"><div className="translation-titlebar" aria-hidden="true"/><header className="translation-heading"><BrandMark small/><div><h2>划词翻译</h2><p>读懂另一种表达</p></div><span className="spacer"/><span className="local-label"><Cloud size={12}/>API 翻译</span></header><div className="translation-controls"><LanguageSelect value={value.language} disabled={value.loading} onChange={language => void api('translationRetry', language)}/><button className="text-button" disabled={value.loading || !value.source} onClick={() => void api('translationRetry', value.language)}>重新翻译</button><span className="spacer"/><div className="segmented"><button aria-pressed={!sourceMode} onClick={() => setSourceMode(false)}>排版</button><button aria-pressed={sourceMode} onClick={() => setSourceMode(true)}>源码</button></div></div><details className="translation-source"><summary>原文 <span>{count(value.source)} 字</span></summary><pre>{value.source}</pre></details><div className="translation-result">{value.loading ? <div className="translation-loading"><InkDrop/><span>正在翻译…</span></div> : value.error ? <div className="translation-error ink-in" role="alert">{value.error}</div> : sourceMode ? <pre className="markdown-source ink-in">{value.result}</pre> : <div className="markdown" onClick={event => { const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-copy-code]'); if (button) { const code = markdown.codes[Number(button.dataset.copyCode)]; if (code !== undefined) void api('copyText', code).then(() => { button.textContent = '已复制'; setTimeout(() => { button.textContent = '复制代码'; }, 1500); }); } }} dangerouslySetInnerHTML={{ __html: markdown.html }}/>}</div><footer className="translation-footer"><span>译文仅供本次查看，关闭后清除。</span><button className="button primary" disabled={!value.result || value.loading} onClick={() => void api('copyText', value.result).then(() => setCopied(true))}><Copy size={14}/><span className="ink-in" key={String(copied)}>{copied ? '已复制' : '复制译文'}</span></button><button className="button" onClick={() => void api('translationClose')}>关闭</button></footer></div>;
+  return <div className="translation-window"><div className="translation-titlebar" aria-hidden="true"/><header className="translation-heading"><BrandMark small/><div><h2>划词翻译</h2><p>读懂另一种表达</p></div><span className="spacer"/><span className="local-label">{state.runtime.capabilities.text === 'online' ? <><Cloud size={12}/>在线 API 翻译</> : <>AcpmRuntime 本地翻译</>}</span></header><div className="translation-controls"><LanguageSelect value={value.language} disabled={value.loading} onChange={language => void api('translationRetry', language)}/><button className="text-button" disabled={value.loading || !value.source} onClick={() => void api('translationRetry', value.language)}>重新翻译</button><span className="spacer"/><div className="segmented"><button aria-pressed={!sourceMode} onClick={() => setSourceMode(false)}>排版</button><button aria-pressed={sourceMode} onClick={() => setSourceMode(true)}>源码</button></div></div><details className="translation-source"><summary>原文 <span>{count(value.source)} 字</span></summary><pre>{value.source}</pre></details><div className="translation-result">{value.loading ? <div className="translation-loading"><InkDrop/><span>正在翻译…</span></div> : value.error ? <div className="translation-error ink-in" role="alert">{value.error}</div> : sourceMode ? <pre className="markdown-source ink-in">{value.result}</pre> : <div className="markdown" onClick={event => { const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-copy-code]'); if (button) { const code = markdown.codes[Number(button.dataset.copyCode)]; if (code !== undefined) void api('copyText', code).then(() => { button.textContent = '已复制'; setTimeout(() => { button.textContent = '复制代码'; }, 1500); }); } }} dangerouslySetInnerHTML={{ __html: markdown.html }}/>}</div><footer className="translation-footer"><span>译文仅供本次查看，关闭后清除。</span><button className="button primary" disabled={!value.result || value.loading} onClick={() => void api('copyText', value.result).then(() => setCopied(true))}><Copy size={14}/><span className="ink-in" key={String(copied)}>{copied ? '已复制' : '复制译文'}</span></button><button className="button" onClick={() => void api('translationClose')}>关闭</button></footer></div>;
 }

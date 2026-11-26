@@ -1,6 +1,6 @@
 {
   "name": "yanmo",
-  "version": "0.4.13",
+  "version": "1.0.0",
   "private": true,
   "description": "言墨 · 本地语音输入",
   "author": "Yanmo contributors",
@@ -13,8 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test desktop/tests/*.test.ts",
     "test:desktop": "playwright test",
-    "runtime:mac": "python3 scripts/bundle-runtime.py",
-    "package:mac": "npm run build && npm run runtime:mac && electron-builder --mac --arm64 --dir"
+    "package:mac": "npm run build && electron-builder --mac --arm64 --dir",
+    "package:mac:local": "bash scripts/package-mac-local.sh"
   },
   "build": {
     "appId": "org.yanmo.desktop",
@@ -38,25 +38,12 @@
         "to": "native/PermissionFlow_PermissionFlow.bundle"
       },
       {
-        "from": "runtime/macos/python",
-        "to": "python",
-        "filter": ["**/*", "!**/__pycache__/**", "!**/*.pyc"]
-      },
-      {
-        "from": "backend",
-        "to": "backend",
-        "filter": [
-          "**/*.py",
-          "!test_*.py"
-        ]
-      },
-      {
         "from": "engine",
         "to": "engine",
         "filter": [
-          "*.py",
-          "*.txt",
-          "!test_*.py"
+          "polish.txt",
+          "prompt.txt",
+          "correction-terms.txt"
         ]
       }
     ],
@@ -82,14 +69,15 @@
       "identity": "Haipeng Gu (299DDXTQH5)",
       "forceCodeSigning": true,
       "signIgnore": [
-        "(^|/)Contents/Resources/native/YanmoBridge$",
-        "/Contents/Resources/python/.*[.](mat|sav|gif|wav|npy|npz|zip|gz|png|ico|whl|exe)$"
+        "(^|/)Contents/Resources/native/YanmoBridge$"
       ],
       "hardenedRuntime": true,
       "entitlements": "runtime/macos/entitlements.plist",
       "entitlementsInherit": "runtime/macos/entitlements.plist",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "言墨需要录音以识别语音。默认在本机识别；只有启用语音识别 API 时才会发送音频。实时录音在内存中处理。"
+        "NSMicrophoneUsageDescription": "言墨需要录音以识别语音。默认通过本机 AcpmRuntime 识别；只有启用远程服务或在线语音识别 API 时才会通过网络发送音频。实时录音在内存中处理。",
+        "NSScreenCaptureUsageDescription": "启用录音截屏后，言墨会在录音结束时截取一张屏幕画面，随文稿保存在本机。",
+        "NSLocalNetworkUsageDescription": "言墨需要使用本地网络发现并连接你在同一局域网中配对的 AcpmRuntime 节点，以进行加密同步。"
       }
     }
   },

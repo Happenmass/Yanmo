@@ -3,9 +3,11 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { defaultSettings } from '../shared';
+import { startAcpmMock } from './acpm-mock';
 
 test('入库提醒按设计显示，不聚焦，撤销移除本次词条', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'yanmo-learning-ui-'));
+  const acpmMock = await startAcpmMock();
   let application: ElectronApplication | undefined;
   try {
     await writeFile(join(directory, 'settings.json'), JSON.stringify({ ...defaultSettings(), showDock: false }));
@@ -19,7 +21,12 @@ test('入库提醒按设计显示，不聚焦，撤销移除本次词条', async
       };
       require(${JSON.stringify(resolve('.electron/main.cjs'))});
     `);
-    const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),  YANMO_DATA_DIR: directory, YANMO_QA: '1' };
+    const env: Record<string, string> = {
+      ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
+      YANMO_DATA_DIR: directory,
+      YANMO_ACPM_DATA_DIR: acpmMock.dataDir,
+      YANMO_QA: '1',
+    };
     delete env.ELECTRON_RUN_AS_NODE;
     application = await electron.launch({ args: [bootstrap], env });
     const page = await application.firstWindow();
@@ -27,8 +34,7 @@ test('入库提醒按设计显示，不聚焦，撤销移除本次词条', async
     await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).modelsChecked)).toBe(true);
     await application.evaluate(async () => {
       const controller = (globalThis as any).learningController;
-      controller.state.settings.online.text = { enabled: true, baseURL: 'http://127.0.0.1:9/v1', model: 'fixture' };
-      controller.backend.extractCorrectionTerms = async () => ['沈砚'];
+      controller.inference.extractCorrectionTerms = async () => ['沈砚'];
       controller.observation = { id: 'ui-fixture', group: 'global' };
       controller.native.emit('correction', { observationId: 'ui-fixture', original: '明天联系沈言确认方案。', text: '明天联系沈砚确认方案。' });
     });
@@ -55,5 +61,5 @@ test('入库提醒按设计显示，不聚焦，撤销移除本次词条', async
     await expect(overlay.getByRole('status')).toBeVisible();
     await expect(overlay.getByRole('status')).toHaveCount(0, { timeout: 8000 });
     expect(await page.evaluate(async () => (await window.yanmo.state()).library.lexicon.map(t => t.term))).toEqual(['沈砚']);
-  } finally { await application?.close(); await rm(directory, { recursive: true, force: true }); }
+  } finally { await application?.close(); await acpmMock.close(); await rm(directory, { recursive: true, force: true }); }
 });

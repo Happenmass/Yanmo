@@ -90,3 +90,7 @@
 ## 手动纠词自动入库（2026-11-02 已确认并实现）
 
 设计及实现边界见 [方案](correction-learning-v1.md)，设计稿为 [底部提醒](correction-learning-v1.png)。默认观察10秒，底部提醒支持撤销。
+
+## 跨端同步与设备管理（2026-11-25 v2 修订待确认）
+
+设置页「跨端同步」区块、`join_wait` 反向扫码与授权范围选择、mDNS 发现与伪造告警、已绑定 Hub 编辑及跨节点设备吊销管理见 [v2 设计稿](sync-settings-v2.png) 与 [说明、IPC 映射与提示词](sync-settings-v2.md)；[v1 设计稿](sync-settings-v1.png) 与 [v1 说明](sync-settings-v1.md) 留作对照。确认后在 `desktop/renderer/` 实现。

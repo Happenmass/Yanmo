@@ -14,7 +14,8 @@ function fixture() {
 }
 
 function restorePreStatisticsSchema(db: DatabaseSync, version: 0 | 2) {
-  db.exec(`DROP TABLE llm_usage_events; DROP TABLE app_input_events; DELETE FROM settings WHERE key='statistics_started_at_ms';
+  db.exec(`DROP TABLE IF EXISTS sync_state; DROP TABLE IF EXISTS sync_hub_cursors; DROP TABLE IF EXISTS sync_entries; DROP TABLE IF EXISTS sync_hub_acked; DROP TABLE IF EXISTS sync_pruned;
+    DROP TABLE llm_usage_events; DROP TABLE app_input_events; DELETE FROM settings WHERE key='statistics_started_at_ms';
     ALTER TABLE manuscripts DROP COLUMN recording_ended_at_ms; ALTER TABLE manuscripts DROP COLUMN screenshot_image; PRAGMA user_version=${version};`);
 }
 
@@ -137,7 +138,7 @@ test('v1 词条升级后沿用全局，写入一次命中只更新该词条且�
       assert.deepEqual(store.library.lexicon[0], { id: 'old', term: '旧词条', hint: '备注', aliases: ['别名'] });
       const db = new DatabaseSync(path);
       try {
-        assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 4);
+        assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 5);
         db.exec("CREATE TRIGGER reject_unrelated BEFORE UPDATE ON lexicon WHEN old.id = 'other' BEGIN SELECT RAISE(ABORT, 'unrelated term'); END");
         db.exec("CREATE TRIGGER reject_delete BEFORE DELETE ON lexicon BEGIN SELECT RAISE(ABORT, 'term was rewritten'); END");
         Object.assign(store.library.lexicon[0], { group: 'ai_tools', matchCount: 2, lastMatchedAt: 1200, createdAt: 800 });
@@ -167,7 +168,7 @@ test('v2 升级保留文稿和词库，按日查询只合计已知用量及该�
     const store = new LibraryStore(f.directory, defaultSettings());
     try {
       assert.equal(store.error, '');
-      assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 4);
+      assert.equal(db.prepare('PRAGMA user_version').get()?.user_version, 5);
       assert.deepEqual(store.getAudio('synthetic'), Buffer.from('OggS-fixture'));
       assert.equal(store.library.lexicon[0].matchCount, 3);
       assert.equal(store.settings.voiceTarget, 'ja');
@@ -254,5 +255,80 @@ test('v3 升级保留历史录音和统计，从新文稿开始保存录音结�
         assert.equal(db.prepare("SELECT screenshot_image FROM manuscripts WHERE id='live'").get(), undefined);
       } finally { reopened.close(); }
     } finally { db.close(); }
+  } finally { f.close(); }
+});
+
+test('旧版模型设置迁移到 acpm 且 startLlmCall/finishLlmCall 直接写入用量表', () => {
+  const f = fixture();
+  try {
+    const { acpm: _acpm, ...legacySettings } = defaultSettings();
+    writeFileSync(join(f.directory, 'settings.json'), JSON.stringify({
+      ...legacySettings,
+      asrModel: 'mlx-community/Qwen3-ASR-0.6B-8bit',
+      senseVoiceModel: 'mlx-community/SenseVoiceSmall',
+      modelSource: 'huggingface',
+      llmModel: 'old-llm',
+    }));
+    const store = new LibraryStore(f.directory, defaultSettings());
+    try {
+      assert.equal(store.error, '');
+      assert.equal(store.settings.acpm.asrModel, 'qwen3-asr-0.6b');
+      assert.equal(store.settings.acpm.textModel, 'yanmo-correct-4b-cot');
+      assert.equal('asrModel' in store.settings, false);
+      assert.equal('senseVoiceModel' in store.settings, false);
+      assert.equal('modelSource' in store.settings, false);
+      assert.equal('llmModel' in store.settings, false);
+
+      const okCall = store.startLlmCall('polish', 'yanmo-correct-4b-cot');
+      assert.ok(okCall);
+      store.finishLlmCall(okCall, 'response', { prompt_tokens: 18, completion_tokens: 7 });
+
+      const errCall = store.startLlmCall('translate', 'yanmo-correct-4b-cot');
+      store.finishLlmCall(errCall, 'request_error');
+
+      const usage = store.dailyUsage(localDayKey(new Date()));
+      assert.equal(usage.llm.total, 25);
+      assert.equal(usage.llm.unknown, 1);
+      assert.equal(usage.llm.byPurpose.polish, 25);
+      assert.equal(usage.llm.byPurpose.translate, null);
+    } finally { store.close(); }
+  } finally { f.close(); }
+});
+
+test('v4 升级到 v5 保留文稿、录音、截屏、词库、设置与统计并创建同步元数据表', () => {
+  const f = fixture();
+  try {
+    const audioOpus = Buffer.from('fLaC-v4-audio');
+    const screenshotImage = Buffer.from('v4-screenshot');
+    const initial = new LibraryStore(f.directory, defaultSettings());
+    initial.library.manuscripts.push({ ...manuscript('v4-item'), recordingEndedAtMs: 1795584800000 });
+    initial.library.lexicon.push({ id: 'v4-term', term: '言墨', hint: '产品名', aliases: ['Yanmo'], group: 'global', matchCount: 4 });
+    initial.settings.voiceTarget = 'en';
+    initial.persist({ id: 'v4-item', audioOpus, screenshotImage });
+    initial.close();
+
+    const db = new DatabaseSync(join(f.directory, 'yanmo.db'));
+    try {
+      db.exec(`DROP TABLE sync_state; DROP TABLE sync_hub_cursors; DROP TABLE sync_entries; DROP TABLE sync_hub_acked; DROP TABLE sync_pruned; PRAGMA user_version=4;`);
+    } finally { db.close(); }
+
+    const upgraded = new LibraryStore(f.directory, defaultSettings());
+    try {
+      assert.equal(upgraded.error, '');
+      assert.equal(upgraded.library.manuscripts.length, 1);
+      assert.equal(upgraded.library.lexicon[0].term, '言墨');
+      assert.equal(upgraded.settings.voiceTarget, 'en');
+      assert.deepEqual(upgraded.getAudio('v4-item'), audioOpus);
+      assert.deepEqual(Buffer.from(upgraded.getAttachments('v4-item').screenshot!), screenshotImage);
+
+      const checkDb = new DatabaseSync(upgraded.dbPath);
+      try {
+        assert.equal(checkDb.prepare('PRAGMA user_version').get()?.user_version, 5);
+        const tables = checkDb.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r => String(r.name));
+        for (const expected of ['sync_state', 'sync_hub_cursors', 'sync_entries', 'sync_hub_acked', 'sync_pruned']) {
+          assert.ok(tables.includes(expected), `missing table ${expected}`);
+        }
+      } finally { checkDb.close(); }
+    } finally { upgraded.close(); }
   } finally { f.close(); }
 });

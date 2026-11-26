@@ -1,9 +1,13 @@
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, existsSync, renameSync, copyFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { DailyUsage, Library, LLMPurpose, Manuscript, ManuscriptAttachments, Settings, TermGroup, cocoaNow, isTermGroup, localDayDate, manuscriptDate, shiftLocalDay, validateSettings } from './shared';
+import { termGroup, termKey } from './hotwords';
+import { AcpmSettings, DailyUsage, Library, LLMPurpose, Manuscript, ManuscriptAttachments, Settings, Term, TermGroup, cocoaNow, isTermGroup, localDayDate, manuscriptDate, shiftLocalDay, validateSettings } from './shared';
+import { computeBlobId, computeLexiconRecordKey, type SyncCollection } from './sync-crypto';
+import { HlcClock } from './sync-hlc';
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const STATISTICS_START = 'statistics_started_at_ms';
 
 const STATISTICS_SQL = `
@@ -62,6 +66,43 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 `;
 
+const SYNC_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS sync_state (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS sync_hub_cursors (
+  hub_instance_id TEXT PRIMARY KEY,
+  last_pulled_seq INTEGER NOT NULL DEFAULT 0 CHECK(last_pulled_seq >= 0),
+  last_sync_at_ms INTEGER
+) STRICT;
+CREATE TABLE IF NOT EXISTS sync_entries (
+  collection TEXT NOT NULL CHECK(collection IN ('lexicon', 'manuscript')),
+  record_key TEXT NOT NULL,
+  local_id TEXT,
+  version_hlc TEXT NOT NULL,
+  origin_device_id TEXT NOT NULL,
+  deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0, 1)),
+  deleted_at_ms INTEGER,
+  updated_at_ms INTEGER NOT NULL,
+  meta_json TEXT NOT NULL DEFAULT '{}',
+  PRIMARY KEY (collection, record_key)
+) STRICT;
+CREATE INDEX IF NOT EXISTS idx_sync_entries_local ON sync_entries (collection, local_id);
+CREATE TABLE IF NOT EXISTS sync_hub_acked (
+  hub_instance_id TEXT NOT NULL,
+  collection TEXT NOT NULL CHECK(collection IN ('lexicon', 'manuscript')),
+  record_key TEXT NOT NULL,
+  acked_hlc TEXT NOT NULL,
+  PRIMARY KEY (hub_instance_id, collection, record_key)
+) STRICT;
+CREATE TABLE IF NOT EXISTS sync_pruned (
+  manuscript_id TEXT PRIMARY KEY,
+  pruned_at_ms INTEGER NOT NULL,
+  pruned_version_hlc TEXT
+) STRICT;
+`;
+
 export function parseLibrary(value: unknown): Library {
   const library = value as Library;
   if (!library || !Array.isArray(library.manuscripts) || !Array.isArray(library.lexicon)) throw new Error('文稿库格式无效。');
@@ -90,19 +131,83 @@ export interface AppInputEvent {
   eventId: string; occurredAtMs: number; appKey: string; appName: string; characters: number; confirmed: boolean;
 }
 
+export interface StoreSyncConfig {
+  deviceId: string;
+  vaultId: string;
+  keyMacKey: Buffer;
+  nowFn?: () => number;
+}
+
+export interface SyncEntryRow {
+  collection: SyncCollection;
+  recordKey: string;
+  localId: string | null;
+  versionHlc: string;
+  originDeviceId: string;
+  deleted: boolean;
+  deletedAtMs: number | null;
+  updatedAtMs: number;
+  meta: Record<string, unknown>;
+}
+
+export interface SyncHubCursorRow {
+  hubInstanceId: string;
+  lastPulledSeq: number;
+  lastSyncAtMs: number | null;
+}
+
+export interface SyncPrunedRow {
+  manuscriptId: string;
+  prunedAtMs: number;
+  prunedVersionHlc: string | null;
+}
+
+export interface RemoteSyncTxContext {
+  db: DatabaseSync;
+  hlc: HlcClock;
+  nowMs: number;
+  getSyncEntry(collection: SyncCollection, recordKey: string): SyncEntryRow | undefined;
+  upsertSyncEntry(entry: SyncEntryRow): void;
+  getPrunedManuscript(manuscriptId: string): SyncPrunedRow | undefined;
+  clearPrunedManuscript(manuscriptId: string): void;
+  upsertRemoteManuscript(item: Manuscript, deleted: boolean): void;
+  upsertRemoteLexiconTerm(entry: Term, deleted: boolean, matchId?: string): string;
+  markHubAcked(hubInstanceId: string, collection: SyncCollection, recordKey: string, versionHlc: string): void;
+  setHubCursor(hubInstanceId: string, seq: number, syncedAtMs: number): void;
+}
+
 export class LibraryStore {
   readonly dbPath: string;
   error = '';
   library: Library = { manuscripts: [], lexicon: [] };
   settings: Settings;
+  private readonly defaults: Settings;
   private db?: DatabaseSync;
   private savedManuscripts = new Map<string, string>();
   private savedLexicon = new Map<string, string>();
+  private savedLexiconContent = new Map<string, string>();
+  private savedLexiconEntries = new Map<string, Term>();
   private savedSettings = '';
   private audioIds = new Set<string>();
+  private pendingPrunedIds = new Set<string>();
+  private syncConfig: StoreSyncConfig | null = null;
+  private hlcClock: HlcClock | null = null;
+  private _libraryVersion = 0;
+  private _remoteRevision = 0;
+  onRemoteLibraryChanged?: () => void;
+  onLocalPersisted?: () => void;
+
+  get libraryVersion() {
+    return this._libraryVersion;
+  }
+
+  get remoteRevision() {
+    return this._remoteRevision;
+  }
 
   constructor(readonly directory: string, defaults: Settings, legacyLibrary?: string) {
     this.dbPath = join(directory, 'yanmo.db');
+    this.defaults = structuredClone(defaults);
     this.settings = structuredClone(defaults);
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     try {
@@ -144,12 +249,22 @@ export class LibraryStore {
     }
   }
 
+  private migrateSavedSettings(defaults: Settings, raw: Record<string, unknown>): Settings {
+    const { llmModel: _oldLlm, asrModel: oldAsr, senseVoiceModel: _oldSv, modelSource: _oldSource, acpm: savedAcpm, ...rest } = raw;
+    const acpm: AcpmSettings = savedAcpm && typeof savedAcpm === 'object' && !Array.isArray(savedAcpm)
+      ? { ...defaults.acpm, ...(savedAcpm as Partial<AcpmSettings>) }
+      : { ...defaults.acpm };
+    if (!savedAcpm && typeof oldAsr === 'string' && oldAsr.toLowerCase().includes('0.6b')) {
+      acpm.asrModel = 'qwen3-asr-0.6b';
+    }
+    return { ...defaults, ...rest, acpm } as Settings;
+  }
+
   private readLegacy(defaults: Settings, legacyLibrary?: string) {
     const settingsPath = join(this.directory, 'settings.json');
     const libraryPath = join(this.directory, 'library.json');
     if (existsSync(settingsPath)) {
-      const { llmModel: _old, ...saved } = JSON.parse(readFileSync(settingsPath, 'utf8'));
-      this.settings = { ...defaults, ...saved };
+      this.settings = this.migrateSavedSettings(defaults, JSON.parse(readFileSync(settingsPath, 'utf8')));
     } else if (!legacyLibrary || !existsSync(legacyLibrary)) {
       this.settings = { ...defaults, onboarded: false };
     }
@@ -166,8 +281,7 @@ export class LibraryStore {
     const db = this.openDatabase();
     const saved: Record<string, unknown> = {};
     for (const row of db.prepare('SELECT key, value FROM settings WHERE key != ?').all(STATISTICS_START)) saved[String(row.key)] = JSON.parse(String(row.value));
-    const { llmModel: _old, ...settings } = saved;
-    this.settings = { ...defaults, ...settings } as Settings;
+    this.settings = this.migrateSavedSettings(defaults, saved);
     validateSettings(this.settings);
     const endedAt = hasRecordingContext ? 'recording_ended_at_ms' : 'NULL AS recording_ended_at_ms';
     const rows = db.prepare(`SELECT id, date, length(audio_opus) > 0 AS has_audio, seconds, application, original, asr_results, text, polished, user_edited, delivery_note, audio_warning, ${endedAt} FROM manuscripts ORDER BY date DESC`).all();
@@ -224,9 +338,24 @@ export class LibraryStore {
     return JSON.stringify(metadata);
   }
 
+  private lexiconIdentityKey(entry: Pick<Term, 'term' | 'group'>): string {
+    const normalized = termKey(entry.term);
+    return normalized ? `${termGroup(entry.group)}:${normalized}` : '';
+  }
+
+  private lexiconIntentChanged(prev: Term | undefined, next: Term): boolean {
+    if (!prev) return true;
+    return prev.term !== next.term
+      || prev.hint !== next.hint
+      || (prev.group ?? null) !== (next.group ?? null)
+      || JSON.stringify(prev.aliases ?? []) !== JSON.stringify(next.aliases ?? []);
+  }
+
   private remember() {
     this.savedManuscripts = new Map(this.library.manuscripts.map(item => [item.id, this.serialized(item)]));
     this.savedLexicon = new Map(this.library.lexicon.map((entry, index) => [entry.id, JSON.stringify([index, entry])]));
+    this.savedLexiconContent = new Map(this.library.lexicon.map(entry => [entry.id, JSON.stringify(entry)]));
+    this.savedLexiconEntries = new Map(this.library.lexicon.map(entry => [entry.id, structuredClone(entry)]));
     this.savedSettings = JSON.stringify(this.settings);
   }
 
@@ -283,7 +412,12 @@ export class LibraryStore {
         const insert = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');
         for (const [key, value] of Object.entries(this.settings)) insert.run(key, JSON.stringify(value));
       }
+      if (!initialize && this.syncConfig && this.hlcClock) {
+        this.recordLocalSyncChanges(db, ids, termIDs, media);
+      }
       db.exec('COMMIT');
+      this._libraryVersion += 1;
+      this.pendingPrunedIds.clear();
       this.audioIds = new Set([...this.audioIds].filter(id => ids.has(id)));
       if (media?.audioOpus?.byteLength) this.audioIds.add(media.id);
       for (const item of this.library.manuscripts) {
@@ -291,6 +425,7 @@ export class LibraryStore {
         else delete item.hasAudio;
       }
       this.remember();
+      if (!initialize && this.syncConfig) this.onLocalPersisted?.();
     } catch (error) {
       try { db.exec('ROLLBACK'); } catch {}
       throw error;
@@ -309,7 +444,12 @@ export class LibraryStore {
       db.exec(STATISTICS_SQL);
       db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(STATISTICS_START, String(Date.now()));
     }
-    db.exec('ALTER TABLE manuscripts ADD COLUMN recording_ended_at_ms INTEGER; ALTER TABLE manuscripts ADD COLUMN screenshot_image BLOB');
+    if (version < 4) {
+      db.exec('ALTER TABLE manuscripts ADD COLUMN recording_ended_at_ms INTEGER; ALTER TABLE manuscripts ADD COLUMN screenshot_image BLOB');
+    }
+    if (version < 5) {
+      db.exec(SYNC_SCHEMA_SQL);
+    }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   }
 
@@ -322,6 +462,39 @@ export class LibraryStore {
       ON CONFLICT(event_id) DO UPDATE SET delivery_status = 'confirmed'
       WHERE excluded.delivery_status = 'confirmed' AND delivery_status = 'unverified'
     `).run(event.eventId, event.occurredAtMs, event.appKey, event.appName, event.characters, event.confirmed ? 'confirmed' : 'unverified');
+  }
+
+  startLlmCall(purpose: LLMPurpose, model: string): string | undefined {
+    if (this.error || !this.db) return undefined;
+    const callId = randomUUID();
+    try {
+      this.db.prepare(`
+        INSERT INTO llm_usage_events (call_id, started_at_ms, purpose, model, status)
+        VALUES (?, ?, ?, ?, 'pending')
+      `).run(callId, Date.now(), purpose, model);
+      return callId;
+    } catch {
+      return undefined;
+    }
+  }
+
+  finishLlmCall(callId: string | undefined, status: 'response' | 'request_error', usage?: Record<string, unknown>) {
+    if (!callId || this.error || !this.db) return;
+    const count = (value: unknown): number | null =>
+      typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+    const inputTokens = count(usage?.prompt_tokens);
+    const outputTokens = count(usage?.completion_tokens);
+    let total = count(usage?.total_tokens);
+    if (total === null && inputTokens !== null && outputTokens !== null) {
+      const sum = inputTokens + outputTokens;
+      total = Number.isSafeInteger(sum) ? sum : null;
+    }
+    try {
+      this.db.prepare(`
+        UPDATE llm_usage_events SET status = ?, input_tokens = ?, output_tokens = ?, total_tokens = ?
+        WHERE call_id = ?
+      `).run(status, inputTokens, outputTokens, total, callId);
+    } catch { /* Usage tracking never interrupts text generation. */ }
   }
 
   dailyUsage(day: string): DailyUsage {
@@ -376,7 +549,690 @@ export class LibraryStore {
   }
 
   prune() {
-    if (this.settings.retention) this.library.manuscripts = this.library.manuscripts.filter(item => item.date >= cocoaNow() - this.settings.retention * 86400);
+    if (this.settings.retention) {
+      const cutoff = cocoaNow() - this.settings.retention * 86400;
+      const kept: Manuscript[] = [];
+      for (const item of this.library.manuscripts) {
+        if (item.date >= cutoff) kept.push(item);
+        else this.pendingPrunedIds.add(item.id);
+      }
+      this.library.manuscripts = kept;
+    }
+  }
+
+  private nowSyncMs(): number {
+    return Math.floor(this.syncConfig?.nowFn ? this.syncConfig.nowFn() : Date.now());
+  }
+
+  private readSyncEntryRow(db: DatabaseSync, collection: SyncCollection, recordKey: string): SyncEntryRow | undefined {
+    const row = db.prepare(`
+      SELECT collection, record_key, local_id, version_hlc, origin_device_id, deleted, deleted_at_ms, updated_at_ms, meta_json
+      FROM sync_entries WHERE collection = ? AND record_key = ?
+    `).get(collection, recordKey);
+    if (!row) return undefined;
+    let meta: Record<string, unknown> = {};
+    try { meta = JSON.parse(String(row.meta_json || '{}')) as Record<string, unknown>; } catch { meta = {}; }
+    return {
+      collection: row.collection as SyncCollection,
+      recordKey: String(row.record_key),
+      localId: row.local_id === null ? null : String(row.local_id),
+      versionHlc: String(row.version_hlc),
+      originDeviceId: String(row.origin_device_id),
+      deleted: Number(row.deleted) === 1,
+      deletedAtMs: row.deleted_at_ms === null ? null : Number(row.deleted_at_ms),
+      updatedAtMs: Number(row.updated_at_ms),
+      meta,
+    };
+  }
+
+  private writeSyncEntryRow(db: DatabaseSync, entry: SyncEntryRow) {
+    db.prepare(`
+      INSERT INTO sync_entries (collection, record_key, local_id, version_hlc, origin_device_id, deleted, deleted_at_ms, updated_at_ms, meta_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(collection, record_key) DO UPDATE SET
+        local_id=excluded.local_id,
+        version_hlc=excluded.version_hlc,
+        origin_device_id=excluded.origin_device_id,
+        deleted=excluded.deleted,
+        deleted_at_ms=excluded.deleted_at_ms,
+        updated_at_ms=excluded.updated_at_ms,
+        meta_json=excluded.meta_json
+    `).run(
+      entry.collection,
+      entry.recordKey,
+      entry.localId,
+      entry.versionHlc,
+      entry.originDeviceId,
+      entry.deleted ? 1 : 0,
+      entry.deletedAtMs,
+      entry.updatedAtMs,
+      JSON.stringify(entry.meta || {}),
+    );
+  }
+
+  private saveHlcState(db: DatabaseSync, clock: HlcClock) {
+    const snap = clock.snapshot();
+    const upsert = db.prepare('INSERT INTO sync_state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
+    upsert.run('hlc_last_ms', String(snap.lastMs));
+    upsert.run('hlc_counter', String(snap.counter));
+  }
+
+  private detectAudioFormat(bytes: Uint8Array): string {
+    if (bytes.byteLength >= 4) {
+      if (bytes[0] === 0x66 && bytes[1] === 0x4c && bytes[2] === 0x61 && bytes[3] === 0x43) return 'flac';
+      if (bytes[0] === 0x4f && bytes[1] === 0x67 && bytes[2] === 0x67 && bytes[3] === 0x53) return 'ogg';
+      if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) return 'wav';
+    }
+    return 'bin';
+  }
+
+  private detectImageFormat(bytes: Uint8Array): string {
+    if (bytes.byteLength >= 12 && Buffer.from(bytes.subarray(4, 12)).toString('ascii') === 'ftypavif') return 'avif';
+    if (bytes.byteLength >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) return 'jpeg';
+    if (bytes.byteLength >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'png';
+    return 'bin';
+  }
+
+  private buildBlobRef(keyMacKey: Buffer, bytes: Uint8Array, format: string) {
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    return {
+      blob_id: computeBlobId(keyMacKey, sha256),
+      format,
+      size_bytes: bytes.byteLength,
+    };
+  }
+
+  private recordLocalSyncChanges(
+    db: DatabaseSync,
+    currentManuscriptIds: Set<string>,
+    currentTermIds: Set<string>,
+    media?: ManuscriptMedia,
+  ) {
+    const config = this.syncConfig;
+    const clock = this.hlcClock;
+    if (!config || !clock) return;
+    const nowMs = this.nowSyncMs();
+
+    for (const item of this.library.manuscripts) {
+      if (this.savedManuscripts.get(item.id) === this.serialized(item) && media?.id !== item.id) continue;
+      const existing = this.readSyncEntryRow(db, 'manuscript', item.id);
+      const meta: Record<string, unknown> = { ...(existing?.meta ?? {}) };
+      if (!meta.sourceDeviceId) meta.sourceDeviceId = config.deviceId;
+      if (media?.id === item.id) {
+        if (media.audioOpus?.byteLength) {
+          meta.audioBlob = this.buildBlobRef(config.keyMacKey, media.audioOpus, this.detectAudioFormat(media.audioOpus));
+        }
+        if (media.screenshotImage?.byteLength) {
+          meta.screenshotBlob = this.buildBlobRef(config.keyMacKey, media.screenshotImage, this.detectImageFormat(media.screenshotImage));
+        }
+      }
+      this.writeSyncEntryRow(db, {
+        collection: 'manuscript',
+        recordKey: item.id,
+        localId: item.id,
+        versionHlc: clock.tick(),
+        originDeviceId: config.deviceId,
+        deleted: false,
+        deletedAtMs: null,
+        updatedAtMs: nowMs,
+        meta,
+      });
+      db.prepare('DELETE FROM sync_pruned WHERE manuscript_id = ?').run(item.id);
+    }
+
+    for (const oldId of this.savedManuscripts.keys()) {
+      if (currentManuscriptIds.has(oldId)) continue;
+      const existing = this.readSyncEntryRow(db, 'manuscript', oldId);
+      if (this.pendingPrunedIds.has(oldId)) {
+        // Retention pruning is strictly local; never propagate a global deletion tombstone.
+        db.prepare('INSERT OR REPLACE INTO sync_pruned (manuscript_id, pruned_at_ms, pruned_version_hlc) VALUES (?, ?, ?)')
+          .run(oldId, nowMs, existing?.versionHlc ?? null);
+        db.prepare("DELETE FROM sync_entries WHERE collection = 'manuscript' AND record_key = ?").run(oldId);
+        db.prepare("DELETE FROM sync_hub_acked WHERE collection = 'manuscript' AND record_key = ?").run(oldId);
+      } else {
+        this.writeSyncEntryRow(db, {
+          collection: 'manuscript',
+          recordKey: oldId,
+          localId: oldId,
+          versionHlc: clock.tick(),
+          originDeviceId: config.deviceId,
+          deleted: true,
+          deletedAtMs: nowMs,
+          updatedAtMs: nowMs,
+          meta: existing?.meta ?? {},
+        });
+      }
+    }
+
+    const activeTermKeys = new Set<string>();
+    for (const entry of this.library.lexicon) {
+      const idKey = this.lexiconIdentityKey(entry);
+      if (idKey) activeTermKeys.add(idKey);
+    }
+
+    this.library.lexicon.forEach((entry, index) => {
+      if (this.savedLexiconContent.get(entry.id) === JSON.stringify(entry)) return;
+      const oldEntry = this.savedLexiconEntries.get(entry.id);
+      const oldIdKey = oldEntry ? this.lexiconIdentityKey(oldEntry) : '';
+      const newIdKey = this.lexiconIdentityKey(entry);
+      if (oldEntry && oldIdKey && newIdKey && oldIdKey !== newIdKey && !activeTermKeys.has(oldIdKey)) {
+        const oldRk = computeLexiconRecordKey(config.keyMacKey, oldEntry.term, oldEntry.group);
+        const oldMeta = this.readSyncEntryRow(db, 'lexicon', oldRk)?.meta ?? {};
+        this.writeSyncEntryRow(db, {
+          collection: 'lexicon',
+          recordKey: oldRk,
+          localId: null,
+          versionHlc: clock.tick(),
+          originDeviceId: config.deviceId,
+          deleted: true,
+          deletedAtMs: nowMs,
+          updatedAtMs: nowMs,
+          meta: oldMeta,
+        });
+      }
+      if (!newIdKey) return;
+
+      const rk = computeLexiconRecordKey(config.keyMacKey, entry.term, entry.group);
+      const existing = this.readSyncEntryRow(db, 'lexicon', rk);
+      const isRenameOrRevive = !oldEntry || oldIdKey !== newIdKey || Boolean(existing?.deleted);
+      const meta: Record<string, unknown> = existing?.deleted
+        ? (existing.meta.unknownFields ? { unknownFields: existing.meta.unknownFields } : {})
+        : { ...(existing?.meta ?? {}) };
+      const deviceCounts = isRenameOrRevive
+        ? (entry.matchCount ? { [config.deviceId]: entry.matchCount } : {})
+        : { ...(meta.deviceCounts as Record<string, number> | undefined) };
+      if (!isRenameOrRevive && oldEntry) {
+        const prevKnownTotal = oldEntry.matchCount ?? 0;
+        const currentTotal = entry.matchCount ?? 0;
+        const delta = currentTotal - prevKnownTotal;
+        if (delta !== 0) {
+          deviceCounts[config.deviceId] = Math.max(0, (deviceCounts[config.deviceId] ?? 0) + delta);
+        }
+      }
+      meta.deviceCounts = deviceCounts;
+
+      const removedSet = isRenameOrRevive
+        ? new Set<string>()
+        : new Set<string>(Array.isArray(meta.removedAliases) ? meta.removedAliases.map(String) : []);
+      const currentAliases = new Set((entry.aliases ?? []).map(a => termKey(a)).filter(Boolean));
+      if (!isRenameOrRevive && oldEntry) {
+        for (const prevAlias of oldEntry.aliases ?? []) {
+          const ak = termKey(prevAlias);
+          if (ak && !currentAliases.has(ak)) removedSet.add(ak);
+        }
+      }
+      for (const ak of currentAliases) removedSet.delete(ak);
+      meta.removedAliases = [...removedSet].sort();
+      meta.positionHint = index;
+
+      const versionHlc = clock.tick();
+      const intentChanged = isRenameOrRevive || !existing?.meta.intentHlc || this.lexiconIntentChanged(oldEntry, entry);
+      meta.intentHlc = intentChanged ? versionHlc : existing!.meta.intentHlc;
+
+      this.writeSyncEntryRow(db, {
+        collection: 'lexicon',
+        recordKey: rk,
+        localId: entry.id,
+        versionHlc,
+        originDeviceId: config.deviceId,
+        deleted: false,
+        deletedAtMs: null,
+        updatedAtMs: nowMs,
+        meta,
+      });
+    });
+
+    for (const [oldId, oldEntry] of this.savedLexiconEntries.entries()) {
+      if (currentTermIds.has(oldId)) continue;
+      const oldIdKey = this.lexiconIdentityKey(oldEntry);
+      if (!oldIdKey || activeTermKeys.has(oldIdKey)) continue;
+      const oldRk = computeLexiconRecordKey(config.keyMacKey, oldEntry.term, oldEntry.group);
+      const existing = this.readSyncEntryRow(db, 'lexicon', oldRk);
+      this.writeSyncEntryRow(db, {
+        collection: 'lexicon',
+        recordKey: oldRk,
+        localId: null,
+        versionHlc: clock.tick(),
+        originDeviceId: config.deviceId,
+        deleted: true,
+        deletedAtMs: nowMs,
+        updatedAtMs: nowMs,
+        meta: existing?.meta ?? {},
+      });
+    }
+
+    this.saveHlcState(db, clock);
+  }
+
+  configureSync(config: StoreSyncConfig | null) {
+    if (this.error) throw new Error(this.error);
+    this.syncConfig = config;
+    if (!config) {
+      this.hlcClock = null;
+      return;
+    }
+    const db = this.openDatabase();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const storedVaultRow = db.prepare("SELECT value FROM sync_state WHERE key = 'vault_id'").get();
+      const storedVaultId = storedVaultRow ? String(storedVaultRow.value) : '';
+      if (storedVaultId && storedVaultId !== config.vaultId) {
+        db.exec('DELETE FROM sync_entries');
+        db.exec('DELETE FROM sync_hub_cursors');
+        db.exec('DELETE FROM sync_hub_acked');
+        db.exec('DELETE FROM sync_pruned');
+        db.exec("DELETE FROM sync_state WHERE key IN ('hlc_last_ms', 'hlc_counter')");
+      }
+      db.prepare("INSERT INTO sync_state (key, value) VALUES ('vault_id', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+        .run(config.vaultId);
+
+      const lastMsRow = db.prepare("SELECT value FROM sync_state WHERE key = 'hlc_last_ms'").get();
+      const counterRow = db.prepare("SELECT value FROM sync_state WHERE key = 'hlc_counter'").get();
+      const clock = new HlcClock(
+        config.deviceId,
+        {
+          lastMs: lastMsRow ? Number(lastMsRow.value) : 0,
+          counter: counterRow ? Number(counterRow.value) : 0,
+        },
+        config.nowFn,
+      );
+      this.hlcClock = clock;
+      const nowMs = this.nowSyncMs();
+
+      for (const item of this.library.manuscripts) {
+        if (!this.readSyncEntryRow(db, 'manuscript', item.id)) {
+          const att = db.prepare('SELECT audio_opus, screenshot_image FROM manuscripts WHERE id = ?').get(item.id);
+          const meta: Record<string, unknown> = { sourceDeviceId: config.deviceId };
+          if (att?.audio_opus instanceof Uint8Array && att.audio_opus.byteLength) {
+            meta.audioBlob = this.buildBlobRef(config.keyMacKey, att.audio_opus, this.detectAudioFormat(att.audio_opus));
+          }
+          if (att?.screenshot_image instanceof Uint8Array && att.screenshot_image.byteLength) {
+            meta.screenshotBlob = this.buildBlobRef(config.keyMacKey, att.screenshot_image, this.detectImageFormat(att.screenshot_image));
+          }
+          this.writeSyncEntryRow(db, {
+            collection: 'manuscript',
+            recordKey: item.id,
+            localId: item.id,
+            versionHlc: clock.tick(),
+            originDeviceId: config.deviceId,
+            deleted: false,
+            deletedAtMs: null,
+            updatedAtMs: nowMs,
+            meta,
+          });
+        }
+      }
+
+      this.library.lexicon.forEach((entry, index) => {
+        if (!termKey(entry.term)) return;
+        const rk = computeLexiconRecordKey(config.keyMacKey, entry.term, entry.group);
+        if (!this.readSyncEntryRow(db, 'lexicon', rk)) {
+          const versionHlc = clock.tick();
+          this.writeSyncEntryRow(db, {
+            collection: 'lexicon',
+            recordKey: rk,
+            localId: entry.id,
+            versionHlc,
+            originDeviceId: config.deviceId,
+            deleted: false,
+            deletedAtMs: null,
+            updatedAtMs: nowMs,
+            meta: {
+              intentHlc: versionHlc,
+              deviceCounts: entry.matchCount ? { [config.deviceId]: entry.matchCount } : {},
+              removedAliases: [],
+              positionHint: index,
+            },
+          });
+        }
+      });
+
+      this.saveHlcState(db, clock);
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+  }
+
+  resetSyncMetadata() {
+    if (this.error) throw new Error(this.error);
+    const db = this.openDatabase();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.exec('DELETE FROM sync_entries');
+      db.exec('DELETE FROM sync_hub_cursors');
+      db.exec('DELETE FROM sync_hub_acked');
+      db.exec('DELETE FROM sync_pruned');
+      db.exec('DELETE FROM sync_state');
+      db.exec('COMMIT');
+      this.syncConfig = null;
+      this.hlcClock = null;
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+  }
+
+  getHubCursor(hubInstanceId: string): SyncHubCursorRow {
+    if (this.error) throw new Error(this.error);
+    const row = this.openDatabase()
+      .prepare('SELECT hub_instance_id, last_pulled_seq, last_sync_at_ms FROM sync_hub_cursors WHERE hub_instance_id = ?')
+      .get(hubInstanceId);
+    if (!row) return { hubInstanceId, lastPulledSeq: 0, lastSyncAtMs: null };
+    return {
+      hubInstanceId: String(row.hub_instance_id),
+      lastPulledSeq: Number(row.last_pulled_seq),
+      lastSyncAtMs: row.last_sync_at_ms === null ? null : Number(row.last_sync_at_ms),
+    };
+  }
+
+  listHubCursors(): SyncHubCursorRow[] {
+    if (this.error) throw new Error(this.error);
+    return this.openDatabase()
+      .prepare('SELECT hub_instance_id, last_pulled_seq, last_sync_at_ms FROM sync_hub_cursors')
+      .all()
+      .map(row => ({
+        hubInstanceId: String(row.hub_instance_id),
+        lastPulledSeq: Number(row.last_pulled_seq),
+        lastSyncAtMs: row.last_sync_at_ms === null ? null : Number(row.last_sync_at_ms),
+      }));
+  }
+
+  getSyncEntry(collection: SyncCollection, recordKey: string): SyncEntryRow | undefined {
+    if (this.error) throw new Error(this.error);
+    return this.readSyncEntryRow(this.openDatabase(), collection, recordKey);
+  }
+
+  saveCachedAttachments(id: string, media: { audioOpus?: Uint8Array; screenshotImage?: Uint8Array }): boolean {
+    if (this.error) throw new Error(this.error);
+    if (!media.audioOpus?.byteLength && !media.screenshotImage?.byteLength) return false;
+    const db = this.openDatabase();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const exists = db.prepare('SELECT id FROM manuscripts WHERE id = ?').get(id);
+      if (!exists) {
+        db.exec('COMMIT');
+        return false;
+      }
+      db.prepare(`
+        UPDATE manuscripts SET
+          audio_opus = COALESCE(?, audio_opus),
+          screenshot_image = COALESCE(?, screenshot_image)
+        WHERE id = ?
+      `).run(media.audioOpus ?? null, media.screenshotImage ?? null, id);
+      db.exec('COMMIT');
+      if (media.audioOpus?.byteLength) {
+        this.audioIds.add(id);
+        const item = this.library.manuscripts.find(m => m.id === id);
+        if (item) item.hasAudio = true;
+      }
+      return true;
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+  }
+
+  updateManuscriptBlobRefs(
+    id: string,
+    refs: { audioBlob?: Record<string, unknown> | null; screenshotBlob?: Record<string, unknown> | null },
+  ): void {
+    if (this.error) throw new Error(this.error);
+    const db = this.openDatabase();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const existing = this.readSyncEntryRow(db, 'manuscript', id);
+      if (existing) {
+        const meta: Record<string, unknown> = { ...existing.meta };
+        const prevAudio = JSON.stringify(existing.meta.audioBlob ?? null);
+        const prevShot = JSON.stringify(existing.meta.screenshotBlob ?? null);
+        if (refs.audioBlob !== undefined) meta.audioBlob = refs.audioBlob;
+        if (refs.screenshotBlob !== undefined) meta.screenshotBlob = refs.screenshotBlob;
+        const nextAudio = JSON.stringify(meta.audioBlob ?? null);
+        const nextShot = JSON.stringify(meta.screenshotBlob ?? null);
+        if (prevAudio !== nextAudio || prevShot !== nextShot) {
+          const clock = this.hlcClock;
+          this.writeSyncEntryRow(db, {
+            ...existing,
+            versionHlc: clock ? clock.tick() : existing.versionHlc,
+            originDeviceId: this.syncConfig?.deviceId ?? existing.originDeviceId,
+            updatedAtMs: this.nowSyncMs(),
+            meta,
+          });
+          if (clock) this.saveHlcState(db, clock);
+        }
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+  }
+
+  getPendingSyncEntries(hubInstanceId: string, limit = 200): SyncEntryRow[] {
+    if (this.error) throw new Error(this.error);
+    const rows = this.openDatabase().prepare(`
+      SELECT e.collection, e.record_key, e.local_id, e.version_hlc, e.origin_device_id, e.deleted, e.deleted_at_ms, e.updated_at_ms, e.meta_json
+      FROM sync_entries e
+      LEFT JOIN sync_hub_acked a
+        ON a.hub_instance_id = ? AND a.collection = e.collection AND a.record_key = e.record_key
+      WHERE a.acked_hlc IS NULL OR a.acked_hlc < e.version_hlc
+      ORDER BY e.version_hlc ASC
+      LIMIT ?
+    `).all(hubInstanceId, Math.max(1, Math.min(500, Math.floor(limit))));
+    return rows.map(row => {
+      let meta: Record<string, unknown> = {};
+      try { meta = JSON.parse(String(row.meta_json || '{}')) as Record<string, unknown>; } catch { meta = {}; }
+      return {
+        collection: row.collection as SyncCollection,
+        recordKey: String(row.record_key),
+        localId: row.local_id === null ? null : String(row.local_id),
+        versionHlc: String(row.version_hlc),
+        originDeviceId: String(row.origin_device_id),
+        deleted: Number(row.deleted) === 1,
+        deletedAtMs: row.deleted_at_ms === null ? null : Number(row.deleted_at_ms),
+        updatedAtMs: Number(row.updated_at_ms),
+        meta,
+      };
+    });
+  }
+
+  markHubAcked(hubInstanceId: string, acks: { collection: SyncCollection; recordKey: string; versionHlc: string }[]) {
+    if (this.error) throw new Error(this.error);
+    if (!acks.length) return;
+    const db = this.openDatabase();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const stmt = db.prepare(`
+        INSERT INTO sync_hub_acked (hub_instance_id, collection, record_key, acked_hlc)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(hub_instance_id, collection, record_key) DO UPDATE SET
+          acked_hlc = CASE WHEN excluded.acked_hlc > sync_hub_acked.acked_hlc THEN excluded.acked_hlc ELSE sync_hub_acked.acked_hlc END
+      `);
+      for (const item of acks) {
+        stmt.run(hubInstanceId, item.collection, item.recordKey, item.versionHlc);
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+  }
+
+  setHubCursor(hubInstanceId: string, seq: number, syncedAtMs: number) {
+    if (this.error) throw new Error(this.error);
+    this.openDatabase().prepare(`
+      INSERT INTO sync_hub_cursors (hub_instance_id, last_pulled_seq, last_sync_at_ms)
+      VALUES (?, ?, ?)
+      ON CONFLICT(hub_instance_id) DO UPDATE SET
+        last_pulled_seq = excluded.last_pulled_seq,
+        last_sync_at_ms = excluded.last_sync_at_ms
+    `).run(hubInstanceId, Math.max(0, Math.floor(seq)), syncedAtMs);
+  }
+
+  applyRemoteSyncTransaction(fn: (ctx: RemoteSyncTxContext) => void) {
+    if (this.error) throw new Error(this.error);
+    if (!this.syncConfig || !this.hlcClock) {
+      throw new Error('同步引擎尚未配置本地存储。');
+    }
+    const db = this.openDatabase();
+    const clock = this.hlcClock;
+    const nowMs = this.nowSyncMs();
+    let libraryChanged = false;
+
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const ctx: RemoteSyncTxContext = {
+        db,
+        hlc: clock,
+        nowMs,
+        getSyncEntry: (collection, recordKey) => this.readSyncEntryRow(db, collection, recordKey),
+        upsertSyncEntry: (entry) => this.writeSyncEntryRow(db, entry),
+        getPrunedManuscript: (manuscriptId) => {
+          const row = db.prepare('SELECT manuscript_id, pruned_at_ms, pruned_version_hlc FROM sync_pruned WHERE manuscript_id = ?').get(manuscriptId);
+          if (!row) return undefined;
+          return {
+            manuscriptId: String(row.manuscript_id),
+            prunedAtMs: Number(row.pruned_at_ms),
+            prunedVersionHlc: row.pruned_version_hlc === null ? null : String(row.pruned_version_hlc),
+          };
+        },
+        clearPrunedManuscript: (manuscriptId) => {
+          db.prepare('DELETE FROM sync_pruned WHERE manuscript_id = ?').run(manuscriptId);
+        },
+        upsertRemoteManuscript: (item, deleted) => {
+          libraryChanged = true;
+          if (deleted) {
+            db.prepare('DELETE FROM manuscripts WHERE id = ?').run(item.id);
+            return;
+          }
+          db.prepare(`
+            INSERT INTO manuscripts (id, date, occurred_at, audio_opus, seconds, application, original, asr_results, text, polished, user_edited, delivery_note, audio_warning, recording_ended_at_ms, screenshot_image)
+            VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            ON CONFLICT(id) DO UPDATE SET
+              date=excluded.date,
+              occurred_at=excluded.occurred_at,
+              seconds=excluded.seconds,
+              application=excluded.application,
+              original=excluded.original,
+              asr_results=excluded.asr_results,
+              text=excluded.text,
+              polished=excluded.polished,
+              user_edited=excluded.user_edited,
+              delivery_note=excluded.delivery_note,
+              audio_warning=excluded.audio_warning,
+              recording_ended_at_ms=COALESCE(excluded.recording_ended_at_ms, manuscripts.recording_ended_at_ms)
+          `).run(
+            item.id,
+            item.date,
+            manuscriptDate(item.date).toISOString(),
+            item.seconds,
+            item.application,
+            item.original,
+            JSON.stringify(item.asrResults || []),
+            item.text,
+            item.polished ? 1 : 0,
+            item.userEdited ? 1 : 0,
+            item.deliveryNote ?? null,
+            item.audioWarning ?? null,
+            item.recordingEndedAtMs ?? null,
+          );
+        },
+        upsertRemoteLexiconTerm: (entry, deleted, matchId) => {
+          libraryChanged = true;
+          let targetId = matchId ?? entry.id;
+          if (deleted) {
+            db.prepare('DELETE FROM lexicon WHERE id = ?').run(targetId);
+            return targetId;
+          }
+          let existingRow = db.prepare('SELECT position FROM lexicon WHERE id = ?').get(targetId);
+          if (!matchId && existingRow) {
+            targetId = randomUUID();
+            existingRow = undefined;
+          }
+          const nextPosition = existingRow
+            ? Number(existingRow.position)
+            : Number(db.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM lexicon').get()!.pos);
+          db.prepare(`
+            INSERT INTO lexicon (id, term, hint, aliases, position, app_group, match_count, last_matched_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              term=excluded.term,
+              hint=excluded.hint,
+              aliases=excluded.aliases,
+              app_group=excluded.app_group,
+              match_count=excluded.match_count,
+              last_matched_at=excluded.last_matched_at,
+              created_at=excluded.created_at
+          `).run(
+            targetId,
+            entry.term,
+            entry.hint,
+            JSON.stringify(entry.aliases || []),
+            nextPosition,
+            entry.group ?? null,
+            entry.matchCount ?? 0,
+            entry.lastMatchedAt ?? null,
+            entry.createdAt ?? null,
+          );
+          return targetId;
+        },
+        markHubAcked: (hubInstanceId, collection, recordKey, versionHlc) => {
+          db.prepare(`
+            INSERT INTO sync_hub_acked (hub_instance_id, collection, record_key, acked_hlc)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(hub_instance_id, collection, record_key) DO UPDATE SET
+              acked_hlc = CASE WHEN excluded.acked_hlc > sync_hub_acked.acked_hlc THEN excluded.acked_hlc ELSE sync_hub_acked.acked_hlc END
+          `).run(hubInstanceId, collection, recordKey, versionHlc);
+        },
+        setHubCursor: (hubInstanceId, seq, syncedAtMs) => {
+          db.prepare(`
+            INSERT INTO sync_hub_cursors (hub_instance_id, last_pulled_seq, last_sync_at_ms)
+            VALUES (?, ?, ?)
+            ON CONFLICT(hub_instance_id) DO UPDATE SET
+              last_pulled_seq = excluded.last_pulled_seq,
+              last_sync_at_ms = excluded.last_sync_at_ms
+          `).run(hubInstanceId, Math.max(0, Math.floor(seq)), syncedAtMs);
+        },
+      };
+
+      fn(ctx);
+      this.saveHlcState(db, clock);
+      db.exec('COMMIT');
+
+      if (libraryChanged) {
+        this.readDatabase(this.defaults);
+        this.remember();
+        this._libraryVersion += 1;
+        this._remoteRevision += 1;
+        this.onRemoteLibraryChanged?.();
+      }
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+  }
+
+  gcExpiredTombstones(maxAgeMs = 90 * 86_400 * 1000, nowMs = this.nowSyncMs()): number {
+    if (this.error) throw new Error(this.error);
+    const db = this.openDatabase();
+    const cutoff = nowMs - maxAgeMs;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const expired = db.prepare('SELECT collection, record_key FROM sync_entries WHERE deleted = 1 AND deleted_at_ms IS NOT NULL AND deleted_at_ms < ?').all(cutoff);
+      const delEntry = db.prepare('DELETE FROM sync_entries WHERE collection = ? AND record_key = ?');
+      const delAck = db.prepare('DELETE FROM sync_hub_acked WHERE collection = ? AND record_key = ?');
+      for (const row of expired) {
+        delEntry.run(row.collection, row.record_key);
+        delAck.run(row.collection, row.record_key);
+      }
+      db.exec('COMMIT');
+      return expired.length;
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
   }
 
   close() {

@@ -22,21 +22,21 @@
       <a href="#faq">常见问题</a>
       <a href="https://github.com/Happenmass/Yanmo">GitHub</a>
     </nav>
-    <a class="seal small" href="https://github.com/Happenmass/Yanmo/releases/download/v0.4.13/Yanmo-0.4.13-mac-arm64.zip">下载</a>
+    <a class="seal small" href="https://github.com/Happenmass/Yanmo/releases/download/v1.0.0/Yanmo-1.0.0-mac-arm64.zip">下载</a>
   </header>
 
   <main id="top">
     <!-- 首屏 -->
     <section class="hero">
-      <p class="eyebrow">中英文语音输入 · Mac</p>
+      <p class="eyebrow">中英文语音输入 · Mac & Android</p>
       <h1 class="write"><span>言语之间，</span><span>自有笔墨。</span></h1>
       <p class="kai lead">按下 FN，开口说话，文字落进任何输入框。</p>
-      <p class="muted">支持中文、英文和中英混说。默认在 Mac 上识别语音，整理和翻译使用你配置的文字 API。</p>
+      <p class="muted">支持中文、英文和中英混说。默认由本机 AcpmRuntime（acpm-desktop）执行语音识别与文字整理，支持自适应半流式分段与端到端跨设备同步。</p>
       <div class="actions">
-        <a class="seal" href="https://github.com/Happenmass/Yanmo/releases/download/v0.4.13/Yanmo-0.4.13-mac-arm64.zip">下载 Mac 版 · 0.4.13</a>
-        <a class="link" href="https://github.com/Happenmass/Yanmo/releases/tag/v0.4.13">安装说明与校验</a>
+        <a class="seal" href="https://github.com/Happenmass/Yanmo/releases/download/v1.0.0/Yanmo-1.0.0-mac-arm64.zip">下载 Mac 版 · 1.0.0</a>
+        <a class="link" href="https://github.com/Happenmass/Yanmo/releases/tag/v1.0.0">安装说明与校验</a>
       </div>
-      <p class="fine">Apple Silicon · macOS 14+ · 2026-11-17 更新 · 开源免费</p>
+      <p class="fine">Apple Silicon · macOS 14+ · 2026-11-26 更新 · 开源免费</p>
 
       <div class="flow" aria-hidden="true">
         <svg viewBox="0 0 1200 260" preserveAspectRatio="xMidYMid meet">
@@ -137,11 +137,11 @@
         <div class="stamp" aria-label="本机"><span>本</span><span>机</span></div>
       </div>
       <ul class="ledger">
-        <li><i></i>语音识别<span>Qwen3-ASR</span><em>本地 · MLX</em></li>
-        <li><i></i>双路复核<span>SenseVoice Small</span><em>本地 · MLX</em></li>
-        <li><i></i>整理与翻译<span>OpenAI 兼容接口</span><em>使用你配置的文字 API</em></li>
+        <li><i></i>语音识别<span>Qwen3-ASR</span><em>AcpmRuntime · 本机 MLX</em></li>
+        <li><i></i>停顿分段<span>AdaptiveVad + Pyannote</span><em>半流式 · 链式上下文</em></li>
+        <li><i></i>整理与翻译<span>yanmo-correct-4b-cot</span><em>AcpmRuntime 或在线 API</em></li>
       </ul>
-      <p class="kai muted">文字 API 接收转写或选中的文字。整理任务可带上词库与已启用的光标上下文。只有启用在线语音识别时才发送音频。</p>
+      <p class="kai muted">默认通过本机 AcpmRuntime（acpm-desktop）完成 VAD、ASR 与文字整理，录音和文稿不经第三方服务器；Android 端搭配同签名 acpm AI SDK，并可通过局域网 AcpmRuntime 盲密文仓实现端到端加密同步。</p>
     </section>
 
     <!-- 随处落笔 -->
@@ -164,12 +164,12 @@
     <!-- 常见问题 -->
     <section class="faq" id="faq">
       <h2>常见问题</h2>
-      <details><summary>首次打开被系统拦截怎么办？</summary><div><p>0.4.13 已通过 Apple 公证，应用内附公证票据。如系统提示异常，请核对下载来源和 GitHub Release 中的 SHA-256。官方签名团队 ID 为 299DDXTQH5。</p></div></details>
-      <details><summary>首次使用需要配置什么？</summary><div><p>在「设置 → 本地模型」准备语音识别模型，默认从 ModelScope 下载并复用已有缓存。在「设置 → API 服务」填写并启用一个 OpenAI 兼容文字接口，包括服务地址、模型 ID 和服务要求的 API Key。按提示允许麦克风和辅助功能权限。</p></div></details>
-      <details><summary>需要联网吗？会上传录音吗？</summary><div><p>首次下载语音模型和访问远程文字 API 需要联网。默认语音识别在 Mac 上运行。只有主动启用在线语音识别时，才会把音频发给所配置的语音服务。</p></div></details>
-      <details><summary>对电脑有什么要求？</summary><div><p>需要 Apple Silicon（M 系列芯片）及 macOS 14 或更高版本。语音模型首次单独下载。</p></div></details>
-      <details><summary>支持 Windows 吗？</summary><div><p>Windows 版正在开发中，暂不能使用。</p></div></details>
-      <details><summary>收费吗？</summary><div><p>言墨免费，采用 MIT 开源协议。API 费用由你选择的服务商决定。</p></div></details>
+      <details><summary>首次打开被系统拦截怎么办？</summary><div><p>1.0.0 已由官方团队 ID 299DDXTQH5 签名并通过 Apple 公证，应用内附公证票据。如系统提示异常，请核对下载来源和 GitHub Release 中的 SHA-256。</p></div></details>
+      <details><summary>首次使用需要安装和配置什么？</summary><div><p>Mac 端需独立安装并运行 <a href="https://github.com/Happenmass/acpm-desktop">AcpmRuntime（acpm-desktop）</a>，在其中准备好语音模型（如 qwen3-asr）与文字模型（yanmo-correct-4b-cot），或按需在「设置 → API 服务」开启兼容 OpenAI 的在线接口。Android 端端侧听写需配套安装同签名 <a href="https://github.com/Happenmass/acpm">acpm AI SDK</a>。</p></div></details>
+      <details><summary>需要联网吗？会上传录音吗？</summary><div><p>默认全部在本地或局域网自有节点运行，不会上传录音。仅当显式启用在线语音识别或在线文字 API 时才会向对应服务发送请求。</p></div></details>
+      <details><summary>对电脑有什么要求？</summary><div><p>Mac 版需要 Apple Silicon（M 系列芯片）及 macOS 14 或更高版本，搭配 AcpmRuntime 本地服务运行。</p></div></details>
+      <details><summary>支持 Android 或其他平台吗？</summary><div><p>已发布 Android 输入法正式版（支持高通 HTP 端侧听写及 Mac ↔ Android 端到端加密同步），可在 GitHub Releases 下载；Windows 版仍在开发中。</p></div></details>
+      <details><summary>收费吗？</summary><div><p>言墨免费，采用 MIT 开源协议（Android 版按 GNU GPL v3 发布）。若使用第三方在线 API，费用由所选服务商决定。</p></div></details>
     </section>
 
     <!-- 收尾 -->
@@ -177,9 +177,9 @@
       <div class="cta-bg"><img src="assets/ink-mountains.jpg" alt=""></div>
       <div class="cta-text">
         <h2 class="write"><span>开口，</span><span>即成文。</span></h2>
-        <p class="kai">本机语音识别 · 自选文字 API</p>
+        <p class="kai">AcpmRuntime 本地推理 · 跨设备端到端同步</p>
         <div class="actions">
-          <a class="seal" href="https://github.com/Happenmass/Yanmo/releases/download/v0.4.13/Yanmo-0.4.13-mac-arm64.zip">下载 Mac 版 · 0.4.13</a>
+          <a class="seal" href="https://github.com/Happenmass/Yanmo/releases/download/v1.0.0/Yanmo-1.0.0-mac-arm64.zip">下载 Mac 版 · 1.0.0</a>
           <a class="link" href="https://github.com/Happenmass/Yanmo">在 GitHub 查看源码</a>
         </div>
       </div>

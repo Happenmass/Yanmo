@@ -172,6 +172,106 @@ struct Checks {
         let inert = SelectionMarkdown.fromHTML("<h1>Safe</h1><script>secret()</script><img src='https://example.com/pixel'><button>Copy</button><a href='javascript:alert(1)'>Label</a>") ?? ""
         try require(inert == "# Safe\n\nLabel", "Scripts, controls, remote resources and unsafe link targets must be dropped")
         print("PASS: inert HTML conversion and entity/resource exclusion")
-        print("13 core checks passed")
+
+        // AdaptiveVad Balanced Tier checks
+        do {
+            let sr = 16_000
+            let step = 320 // 20 ms
+            func feedFrames(_ vad: AdaptiveVad, startSample: inout Int, count: Int, rms: Double) -> [VadSegment] {
+                var out: [VadSegment] = []
+                for _ in 0..<count {
+                    if let s = vad.feed(frameRms: rms, frameStartSample: startSample, frameEndSample: startSample + step) {
+                        out.append(s)
+                    }
+                    startSample += step
+                }
+                return out
+            }
+
+            // 1. Transient (<260ms) noise burst ignored on silence
+            let v1 = AdaptiveVad(sampleRate: sr)
+            var pos1 = 0
+            try require(feedFrames(v1, startSample: &pos1, count: 5, rms: 0.003).isEmpty, "calibration silence")
+            try require(feedFrames(v1, startSample: &pos1, count: 8, rms: 0.08).isEmpty, "160ms burst must not emit")
+            try require(feedFrames(v1, startSample: &pos1, count: 70, rms: 0.003).isEmpty, "1400ms silence after short burst must discard it")
+
+            // 2. Short utterance (<2.5s) requires 1200ms pause (not 800ms)
+            let v2 = AdaptiveVad(sampleRate: sr)
+            var pos2 = 0
+            _ = feedFrames(v2, startSample: &pos2, count: 4, rms: 0.003)
+            _ = feedFrames(v2, startSample: &pos2, count: 50, rms: 0.08) // 1.0s speech
+            try require(feedFrames(v2, startSample: &pos2, count: 45, rms: 0.003).isEmpty, "900ms pause on 1s utterance must wait until 1200ms")
+            let segs2 = feedFrames(v2, startSample: &pos2, count: 20, rms: 0.003)
+            try require(segs2.count == 1 && segs2[0].speechMs == 1000, "1200ms pause emits short utterance with contiguous post-pad")
+            try require(segs2[0].startFrame == 0 && segs2[0].endFrame == 4 * step + 50 * step + Int(0.32 * Double(sr)), "contiguous padding bounds")
+
+            // 3. Medium utterance (2.5-15s) splits at 800ms; long utterance (>=15s) splits at 400ms; 24s hard cap
+            let v3 = AdaptiveVad(sampleRate: sr)
+            var pos3 = 0
+            _ = feedFrames(v3, startSample: &pos3, count: 4, rms: 0.003)
+            _ = feedFrames(v3, startSample: &pos3, count: 200, rms: 0.08) // 4.0s speech
+            try require(feedFrames(v3, startSample: &pos3, count: 35, rms: 0.003).isEmpty, "700ms silence on 4s utterance waits for 800ms")
+            let segs3 = feedFrames(v3, startSample: &pos3, count: 10, rms: 0.003)
+            try require(segs3.count == 1, "medium utterance splits at 800ms")
+
+            let v4 = AdaptiveVad(sampleRate: sr)
+            var pos4 = 0
+            _ = feedFrames(v4, startSample: &pos4, count: 4, rms: 0.003)
+            _ = feedFrames(v4, startSample: &pos4, count: 800, rms: 0.08) // 16.0s speech
+            let segs4 = feedFrames(v4, startSample: &pos4, count: 22, rms: 0.003) // 440ms pause >= 400ms
+            try require(segs4.count == 1, "long >=15s utterance splits at 400ms")
+
+            let v5 = AdaptiveVad(sampleRate: sr)
+            var pos5 = 0
+            _ = feedFrames(v5, startSample: &pos5, count: 4, rms: 0.003)
+            let segs5 = feedFrames(v5, startSample: &pos5, count: 1250, rms: 0.08) // 25s continuous speech
+            try require(segs5.count == 1 && segs5[0].endFrame - segs5[0].startFrame == 24 * sr, "24s hard cap splits cleanly")
+
+            // 4. Quiet fallback when emittedCount == 0
+            let v6 = AdaptiveVad(sampleRate: sr)
+            var pos6 = 0
+            _ = feedFrames(v6, startSample: &pos6, count: 20, rms: 0.002)
+            let fallback = v6.finish(totalFrames: pos6)
+            try require(fallback == VadSegment(startFrame: 0, endFrame: pos6, speechMs: 400), "zero-emitted finish falls back to full clip")
+
+            // 5. Quiet mic speech (0.0045 tapering to 0.003) must stay intact without mid-sentence dropout
+            let v7 = AdaptiveVad(sampleRate: sr)
+            var pos7 = 0
+            _ = feedFrames(v7, startSample: &pos7, count: 5, rms: 0.0008)
+            var quietOut = feedFrames(v7, startSample: &pos7, count: 40, rms: 0.0045)
+            quietOut.append(contentsOf: feedFrames(v7, startSample: &pos7, count: 30, rms: 0.0030))
+            quietOut.append(contentsOf: feedFrames(v7, startSample: &pos7, count: 25, rms: 0.0042))
+            try require(quietOut.isEmpty, "quiet MacBook Pro speech must not split prematurely mid-sentence")
+            let quietFinish = v7.finish(totalFrames: pos7)
+            try require(quietFinish?.startFrame == 0 && quietFinish?.endFrame == pos7, "quiet speech flushes whole clip intact")
+
+            // 6. Contiguous zero-drop split across pause + soft short tail (<260ms), vs silent tail
+            let v8 = AdaptiveVad(sampleRate: sr)
+            var pos8 = 0
+            var all8: [VadSegment] = []
+            all8.append(contentsOf: feedFrames(v8, startSample: &pos8, count: 10, rms: 0.0008))
+            all8.append(contentsOf: feedFrames(v8, startSample: &pos8, count: 50, rms: 0.005)) // 1.0s speech
+            all8.append(contentsOf: feedFrames(v8, startSample: &pos8, count: 65, rms: 0.0008)) // 1.3s pause -> seg 0
+            all8.append(contentsOf: feedFrames(v8, startSample: &pos8, count: 6, rms: 0.005)) // 120ms soft short tail (<260ms)
+            if let tail8 = v8.finish(totalFrames: pos8) {
+                all8.append(tail8)
+            }
+            try require(all8.count == 2, "contiguous split plus soft short tail emits two segments")
+            try require(all8[0].startFrame == 0 && all8[1].startFrame == all8[0].endFrame && all8[1].endFrame == pos8,
+                        "zero dropped frames across contiguous segments and short tail")
+
+            let v9 = AdaptiveVad(sampleRate: sr)
+            var pos9 = 0
+            var emitted9: [VadSegment] = []
+            emitted9.append(contentsOf: feedFrames(v9, startSample: &pos9, count: 5, rms: 0.0007))
+            emitted9.append(contentsOf: feedFrames(v9, startSample: &pos9, count: 50, rms: 0.008))
+            emitted9.append(contentsOf: feedFrames(v9, startSample: &pos9, count: 65, rms: 0.0007))
+            emitted9.append(contentsOf: feedFrames(v9, startSample: &pos9, count: 20, rms: 0.0006))
+            try require(emitted9.count == 1 && v9.finish(totalFrames: pos9) == nil, "dead-silence tail after pause returns nil")
+
+            print("PASS: AdaptiveVad balanced thresholds, contiguous split, quiet tracking and tail flush")
+        }
+
+        print("14 core checks passed")
     }
 }

@@ -6,17 +6,22 @@ import { execFileSync } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import { defaultSettings } from '../shared';
+import { startAcpmMock, type AcpmMockHandle } from './acpm-mock';
 
 let application: ElectronApplication;
 let page: Page;
 let directory: string;
 let textAPI: Server | undefined;
+let acpmMock: AcpmMockHandle | undefined;
 const textRequests: string[] = [];
 const errors: string[] = [];
 test.describe.configure({ mode: 'serial' });
 test.beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), 'yanmo-electron-qa-'));
   const settings = { ...defaultSettings(), showDock: false };
+  if (!process.env.YANMO_QA_AUDIO) {
+    acpmMock = await startAcpmMock();
+  }
   if (process.env.YANMO_QA_AUDIO || process.env.YANMO_QA_NATIVE === '1') {
     textAPI = createServer((request, response) => {
       textRequests.push(request.url || '');
@@ -36,7 +41,12 @@ test.beforeAll(async () => {
     settings.online.text = { enabled: true, baseURL: `http://127.0.0.1:${address.port}/v1`, model: 'fixture' };
   }
   await writeFile(join(directory, 'settings.json'), JSON.stringify(settings));
-  const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')), YANMO_DATA_DIR: directory, YANMO_QA: '1' };
+  const env: Record<string, string> = {
+    ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
+    YANMO_DATA_DIR: directory,
+    YANMO_QA: '1',
+    ...(acpmMock ? { YANMO_ACPM_DATA_DIR: acpmMock.dataDir } : {}),
+  };
   delete env.ELECTRON_RUN_AS_NODE;
   const args = process.env.YANMO_QA_APP ? [] : [resolve('.')];
   if (process.env.YANMO_QA_AUDIO) args.push('--import-audio', process.env.YANMO_QA_AUDIO);
@@ -49,19 +59,17 @@ test.beforeAll(async () => {
   await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).modelsChecked)).toBe(true);
   await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).checking)).toBe(false);
 });
-test.afterAll(async () => { if (application) await application.close(); textAPI?.close(); if (directory) await rm(directory, { recursive: true, force: true }); });
+test.afterAll(async () => { if (application) await application.close(); textAPI?.close(); await acpmMock?.close(); if (directory) await rm(directory, { recursive: true, force: true }); });
 
 test('首页使用真实统计，保留已确认的书案布局', async () => {
   if (process.env.YANMO_QA_AUDIO) {
     await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).library.manuscripts.length), { timeout: 150000 }).toBe(1);
     const state = await page.evaluate(() => window.yanmo.state());
     expect(state.draft).toMatch(/周五/); expect(state.draft).toContain('3500'); expect(state.draft).not.toContain('三千五百'); expect(state.draft).toMatch(/不是周四/);
-    expect(state.asrResults.map(result => result.engine_name)).toEqual(['Qwen3-ASR', 'SenseVoice Small']);
+    expect(state.asrResults).toHaveLength(1);
     expect(state.asrResults[0].language).toBe('Chinese');
     expect(textRequests).toEqual(['/v1/chat/completions']);
     expect(state.library.manuscripts[0].asrResults).toEqual(state.asrResults);
-    await page.locator('.original summary').click();
-    await expect(page.locator('.original')).toContainText('SenseVoice Small');
     await page.getByRole('button', { name: '书案', exact: true }).click();
   }
   await expect(page.getByText('言语之间，自有笔墨。')).toBeVisible();
@@ -69,6 +77,40 @@ test('首页使用真实统计，保留已确认的书案布局', async () => {
   await expect(page.locator('.calendar-day')).toHaveCount(140);
   await expect(page.locator('.desk').getByRole('button', { name: '开始录音' })).toHaveCount(0);
   await page.screenshot({ path: '/tmp/yanmo-electron-desk.png', animations: 'disabled' });
+});
+test('截屏设置提供录屏权限请求和拖拽授权引导', async () => {
+  await application.evaluate(({ app, systemPreferences }) => {
+    const getStatus = systemPreferences.getMediaAccessStatus.bind(systemPreferences);
+    systemPreferences.getMediaAccessStatus = type => type === 'screen' ? 'denied' : getStatus(type);
+    Object.assign(app, { restoreScreenRecordingTest: () => {
+      systemPreferences.getMediaAccessStatus = getStatus;
+    } });
+  });
+  const request = page.getByRole('button', { name: '请求录屏权限' });
+  const guide = page.getByRole('button', { name: '打开授权引导' });
+  const toggle = page.getByLabel('录音结束时保存截屏', { exact: true });
+  try {
+    await page.getByRole('button', { name: '设置', exact: true }).click();
+    await toggle.click();
+    await expect(toggle).toBeChecked();
+    await expect(request).toBeVisible({ timeout: 2000 });
+    await expect(guide).toBeVisible();
+    await application.evaluate(({ systemPreferences }) => {
+      const getStatus = systemPreferences.getMediaAccessStatus;
+      systemPreferences.getMediaAccessStatus = type => type === 'screen' ? 'granted' : getStatus(type);
+    });
+    const nativeWindow = await application.browserWindow(page);
+    await nativeWindow.evaluate(window => window.emit('focus'));
+    await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).screenRecording)).toBe(true);
+    await expect(page.getByText('录屏权限 · 已授权', { exact: true })).toBeVisible();
+    await expect(request).toHaveCount(0);
+    await expect(guide).toHaveCount(0);
+    await toggle.click();
+    await expect(toggle).not.toBeChecked();
+    await page.getByRole('button', { name: '书案', exact: true }).click();
+  } finally {
+    await application.evaluate(({ app }) => (app as typeof app & { restoreScreenRecordingTest: () => void }).restoreScreenRecordingTest());
+  }
 });
 test('词库类别切换、页内搜索及词条改组', async () => {
   await page.getByRole('button', { name: '词库', exact: true }).click();
@@ -113,7 +155,7 @@ test('词库类别切换、页内搜索及词条改组', async () => {
   await tabs.getByRole('tab', { name: '全部', exact: true }).click();
   await expect(page.getByText('从一个熟悉的名字开始。')).toBeVisible();
 });
-test('设置、两个翻译目标和模型环境状态', async () => {
+test('设置、两个翻译目标和 AcpmRuntime 服务状态', async () => {
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.getByRole('combobox', { name: '目标语言' }).nth(0).selectOption('ja');
   await page.getByRole('combobox', { name: '目标语言' }).nth(1).selectOption('zh-Hans');
@@ -121,13 +163,13 @@ test('设置、两个翻译目标和模型环境状态', async () => {
   await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).settings.voiceTarget)).toBe('ja');
   const state = await page.evaluate(() => window.yanmo.state());
   expect(state.settings.selectionTarget).toBe('zh-Hans'); expect(state.settings.style).toBe('即时消息');
-  expect(state.models.asr).toBe(true); expect(state.models.sensevoice).toBe(true); expect(state.models.metal).toBe(true);
-  expect(state.settings.modelSource).toBe('modelscope');
+  expect(state.acpm.connected).toBe(true); expect(state.acpm.asrReady).toBe(true);
   const contextSetting = page.getByRole('checkbox', { name: '读取输入框光标前后各最多 300 字，辅助识别与纠错', exact: true });
   await contextSetting.click();
   await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).settings.readContext)).toBe(true);
   await expect(contextSetting).toBeChecked();
-  await expect(page.getByRole('textbox', { name: '中英复核模型', exact: true })).toHaveValue('mlx-community/SenseVoiceSmall');
+  await expect(page.getByRole('combobox', { name: '语音识别模型', exact: true })).toHaveValue('qwen3-asr-1.7b');
+  await expect(page.getByRole('combobox', { name: '文字处理模型', exact: true })).toHaveValue('yanmo-correct-4b-cot');
   await page.screenshot({ path: '/tmp/yanmo-electron-settings.png', animations: 'disabled' });
 });
 test('界面未启用 Node 或页面网络访问', async () => {

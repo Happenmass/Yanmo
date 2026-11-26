@@ -3,6 +3,16 @@ import { Maximize2, Pause, Play, X } from 'lucide-react';
 
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 
+function detectAudioMime(data: Uint8Array): string {
+  if (data.length >= 4) {
+    if (data[0] === 0x4f && data[1] === 0x67 && data[2] === 0x67 && data[3] === 0x53) return 'audio/ogg';
+    if (data[0] === 0x66 && data[1] === 0x4c && data[2] === 0x61 && data[3] === 0x43) return 'audio/flac';
+    if (data[0] === 0x52 && data[1] === 0x49 && data[2] === 0x46 && data[3] === 0x46) return 'audio/wav';
+    if (data[0] === 0x1a && data[1] === 0x45 && data[2] === 0xdf && data[3] === 0xa3) return 'audio/webm';
+  }
+  return 'audio/ogg';
+}
+
 export function ManuscriptAttachments({ id }: { id: string }) {
   const [urls, setURLs] = useState<{ audio?: string; screenshot?: string }>({});
   const [failed, setFailed] = useState(false);
@@ -19,7 +29,7 @@ export function ManuscriptAttachments({ id }: { id: string }) {
     window.yanmo.manuscriptAttachments(id).then(({ audio, screenshot }) => {
       if (!active) return;
       setURLs({
-        audio: audio && createURL(audio, 'audio/ogg'),
+        audio: audio && createURL(audio, detectAudioMime(audio)),
         screenshot: screenshot && createURL(screenshot),
       });
     }).catch(() => { if (active) setFailed(true); });

@@ -4,30 +4,33 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { defaultSettings, shortcutLabel } from '../shared';
+import { startAcpmMock } from './acpm-mock';
 
 function savedSettings(directory: string) {
   const db = new DatabaseSync(join(directory, 'yanmo.db'), { readOnly: true });
   try { return Object.fromEntries(db.prepare('SELECT key, value FROM settings').all().map(row => [String(row.key), JSON.parse(String(row.value))])); }
   finally { db.close(); }
 }
+
 // JSON is only a migration fixture; assertions read the authoritative database.
-test('首次使用引导依次介绍四项功能，完成后可在设置中重新查看', async () => {
+test('首次使用引导依次介绍四项功能，完成后可在设置中重新查看并切换 AcpmRuntime 模型', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'yanmo-guide-qa-'));
+  const acpmMock = await startAcpmMock();
   await writeFile(join(directory, 'settings.json'), JSON.stringify({ ...defaultSettings(), showDock: false, onboarded: false }));
-  const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')), YANMO_DATA_DIR: directory, YANMO_QA: '1' };
+  const env: Record<string, string> = {
+    ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
+    YANMO_DATA_DIR: directory,
+    YANMO_ACPM_DATA_DIR: acpmMock.dataDir,
+    YANMO_QA: '1',
+  };
   delete env.ELECTRON_RUN_AS_NODE;
   const application = await electron.launch({ args: process.env.YANMO_QA_APP ? [] : [resolve('.')], env, executablePath: process.env.YANMO_QA_APP, cwd: tmpdir() });
   try {
     const page = await application.firstWindow();
     const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
     const rail = page.getByRole('navigation', { name: '引导步骤' });
-    await expect(page.getByRole('heading', { name: '先备好笔墨。' })).toBeVisible();
-    await expect(rail).toHaveCount(0);
-    await expect(page.getByRole('button', { name: '启用文字处理 API' })).toBeDisabled();
-    await page.getByRole('textbox', { name: '服务地址（Base URL）' }).fill('http://127.0.0.1:9/v1');
-    await page.getByRole('textbox', { name: '模型 ID' }).fill('fixture');
-    await page.getByRole('button', { name: '启用文字处理 API' }).click();
     await expect(rail).toBeVisible();
+    expect(await page.evaluate(async () => (await window.yanmo.state()).settings.online.text.enabled)).toBe(false);
     await expect(page.locator('.sidebar')).toHaveAttribute('inert', '');
     // The guide asks for Accessibility exactly when FN cannot be captured yet.
     await expect.poll(() => page.evaluate(async () => (await window.yanmo.state()).checking)).toBe(false);
@@ -57,6 +60,7 @@ test('首次使用引导依次介绍四项功能，完成后可在设置中重�
     await rail.getByRole('button', { name: /语音输入/ }).click();
     await expect(page.locator('.guide-text kbd')).toHaveText(defaultSettings().shortcuts.dictation.map(shortcutLabel));
     await rail.getByRole('button', { name: /翻译弹窗/ }).click();
+    await expect(page.getByText('翻译使用 AcpmRuntime 本地文字模型')).toBeVisible();
     await page.getByRole('button', { name: '开始落笔' }).click();
     await expect(page.getByText('言语之间，自有笔墨。')).toBeVisible();
     await expect.poll(async () => savedSettings(directory).onboarded).toBe(true);
@@ -71,39 +75,44 @@ test('首次使用引导依次介绍四项功能，完成后可在设置中重�
     for (let index = 0; index < 3; index++) await page.locator('.shortcut-editor').nth(index).getByRole('button', { name: '恢复默认' }).click();
     await expect(page.locator('.shortcut-row kbd')).toHaveText(['FN', 'FN + Shift', 'FN + 空格']);
     await expect.poll(async () => savedSettings(directory).shortcuts).toEqual(defaultSettings().shortcuts);
-    // The low-memory ASR preset only swaps the model ID; the default stays 1.7B.
-    const preset = page.getByRole('combobox', { name: '语音识别规格' });
-    await expect(preset).toHaveValue('mlx-community/Qwen3-ASR-1.7B-8bit');
-    await preset.selectOption({ label: '低内存 · Qwen3-ASR 0.6B' });
-    await expect.poll(async () => savedSettings(directory).asrModel).toBe('mlx-community/Qwen3-ASR-0.6B-8bit');
-    if (process.env.YANMO_QA_SHOTS) await page.locator('.preference-section', { hasText: '本地模型' }).screenshot({ path: join(process.env.YANMO_QA_SHOTS, 'asr-preset.png'), animations: 'disabled' });
-    await expect(page.getByRole('textbox', { name: '语音识别模型' })).toHaveValue('mlx-community/Qwen3-ASR-0.6B-8bit');
-    await expect(preset).toBeEnabled();
-    await preset.selectOption('mlx-community/Qwen3-ASR-1.7B-8bit');
-    await expect.poll(async () => savedSettings(directory).asrModel).toBe(defaultSettings().asrModel);
+    // Switch AcpmRuntime ASR model between 1.7B and 0.6B.
+    const asrSelect = page.getByRole('combobox', { name: '语音识别模型' });
+    await expect(asrSelect).toHaveValue('qwen3-asr-1.7b');
+    await asrSelect.selectOption('qwen3-asr-0.6b');
+    await expect.poll(async () => savedSettings(directory).acpm.asrModel).toBe('qwen3-asr-0.6b');
+    if (process.env.YANMO_QA_SHOTS) await page.locator('.preference-section', { hasText: 'AcpmRuntime 服务' }).screenshot({ path: join(process.env.YANMO_QA_SHOTS, 'asr-preset.png'), animations: 'disabled' });
+    await expect(asrSelect).toBeEnabled();
+    await asrSelect.selectOption('qwen3-asr-1.7b');
+    await expect.poll(async () => savedSettings(directory).acpm.asrModel).toBe(defaultSettings().acpm.asrModel);
     await page.getByRole('button', { name: '重新查看引导 →' }).click();
     await expect(rail).toBeVisible();
     await page.getByRole('button', { name: '跳过引导' }).click();
     await expect(page.getByText('言语之间，自有笔墨。')).toBeVisible();
     expect(errors).toEqual([]);
-  } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
+  } finally { await application.close(); await acpmMock.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
-test('首次使用时模型未就绪，先停在模型准备页而非快捷键引导', async () => {
+test('首次使用时 AcpmRuntime 未连接或模型未就绪，先停在准备页而非快捷键引导', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'yanmo-setup-qa-'));
-  await writeFile(join(directory, 'settings.json'), JSON.stringify({ ...defaultSettings(), showDock: false, onboarded: false, asrModel: 'yanmo-qa/missing-asr' }));
-  const env: Record<string, string> = { ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')), YANMO_DATA_DIR: directory, YANMO_QA: '1' };
+  const emptyAcpmDir = await mkdtemp(join(tmpdir(), 'yanmo-empty-acpm-'));
+  await writeFile(join(directory, 'settings.json'), JSON.stringify({ ...defaultSettings(), showDock: false, onboarded: false }));
+  const env: Record<string, string> = {
+    ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
+    YANMO_DATA_DIR: directory,
+    YANMO_ACPM_DATA_DIR: emptyAcpmDir,
+    YANMO_QA: '1',
+  };
   delete env.ELECTRON_RUN_AS_NODE;
   const application = await electron.launch({ args: process.env.YANMO_QA_APP ? [] : [resolve('.')], env, executablePath: process.env.YANMO_QA_APP, cwd: tmpdir() });
   try {
     const page = await application.firstWindow();
     const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
     await expect(page.getByRole('heading', { name: '先备好笔墨。' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '下载模型' })).toBeEnabled({ timeout: 60000 });
+    await expect(page.getByRole('button', { name: '重新检测' })).toBeEnabled({ timeout: 60000 });
     await expect(page.getByRole('navigation', { name: '引导步骤' })).toHaveCount(0);
     if (process.env.YANMO_QA_SHOTS) await page.screenshot({ path: join(process.env.YANMO_QA_SHOTS, 'model-setup.png'), animations: 'disabled' });
     await page.getByRole('button', { name: '跳过引导' }).click();
     await expect.poll(async () => savedSettings(directory).onboarded).toBe(true);
     expect(errors).toEqual([]);
-  } finally { await application.close(); await rm(directory, { recursive: true, force: true }); }
+  } finally { await application.close(); await rm(directory, { recursive: true, force: true }); await rm(emptyAcpmDir, { recursive: true, force: true }); }
 });
