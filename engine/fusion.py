@@ -75,7 +75,6 @@ def build_polish_payload(request):
     return {
         'INSTRUCTION': request.get('instruction', ''),
         'AUDIO_CONTEXT': {
-            'lexicon': normalize_lexicon(request),
             'application': {'categories': [request.get('category', 'general')], 'name': request.get('application', '言墨')},
             'background_screen_text': request.get('background_screen_text', []),
         },

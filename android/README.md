@@ -56,7 +56,11 @@ Sound Software 的同签名 Binder 接口读取有明确长度的 WAV 描述符�
 - **[acpm（Android AI SDK）](https://github.com/Happenmass/acpm)**（推荐 `v0.1.2+`）：提供高通 HTP 端侧本地听写与 Binder 推理服务，需使用与言墨一致的发布证书签名；支持 `asrHints` 热词/光标上下文提示及按请求 ID 对照的双端失败诊断（旧版 `0.1.1` 可基础本地听写）。
 - **[acpm-desktop（AcpmRuntime）](https://github.com/Happenmass/acpm-desktop)**（推荐 `v0.1.0+`）：作为局域网 / 自建端到端加密同步仓节点，配合言墨「设置 → 跨设备同步」实现 Mac 与 Android 之间的文稿、音频/截屏附件及词库加密同步。
 
-## 新增功能（`yanmo.19`）
+## 新增功能（`yanmo.20`）
+
+- **热词仅用于语音识别（同步 Mac 端）**：个人词库仅作为热词传入本地 ASR（`asrHints` / 流式识别），不再发送至文字后处理（自然整理）语言模型（移除 `AUDIO_CONTEXT.lexicon`），同步最新 `engine/polish.txt` 与 `engine/correction-terms.txt` 提示词。
+
+## 历史功能（`yanmo.19`）
 
 - **高通 HTP 端侧实时流式听写**：搭配支持 `asrStream` 的 AI SDK 时，长按说话期间按 320 ms 分块增量识别并在听写条实时展示已确认文字与半透明临时候选态，VAD 停顿边界无缝收尾并递推上下文；开启自然整理时松手直接并入「正在整理」，不再额外闪过「正在识别」。旧版 AI SDK 自动兼容保留半流式分段路径。
 - **应用内软件更新（「设置 → 软件更新」）**：支持打开应用时按 12 小时节流静默检查，或手动点击检查 GitHub Releases 最新 Android 版（过滤仅匹配 `android-v*-yanmo.*` 标签），下载安装包后严格校验大小、SHA-256 摘要及相同发布签名证书，确认权限后调起系统安装包覆盖升级。

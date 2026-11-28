@@ -325,9 +325,8 @@ public final class VoiceSessionProbe extends Instrumentation {
                     check(payload.getString("CORRECTED").equals("明天跟 凯岑开会。\n"), "correction included text outside dictation");
                     extractionRequests++;
                 } else {
-                    JSONArray lexicon = payload.getJSONObject("AUDIO_CONTEXT").getJSONArray("lexicon");
-                    check(lexicon.length() == 2 && lexicon.getJSONObject(0).getString("term").equals("Kai Chen"),
-                            "active dictionary entry was missing from the text API");
+                    check(!payload.getJSONObject("AUDIO_CONTEXT").has("lexicon"),
+                            "text API must not receive lexicon entries");
                     check(payload.getJSONArray("ASR_RESULTS").getJSONObject(0).getString("transcript").equals(expectedApiRaw),
                             "recognition text changed before text API");
                     JSONObject editor = payload.getJSONObject("context");

@@ -315,7 +315,7 @@ public final class VoiceSession {
                         }
                     });
                     String polished = Polish.generate(app, raw, recording.application, recording.group,
-                            recording.context, recording.terms);
+                            recording.context, Collections.emptyList());
                     if (polished.trim().isEmpty()) {
                         failure = "文字 API 返回空结果";
                         recording.failure(stage, "EMPTY_POLISH_REPLY", "");

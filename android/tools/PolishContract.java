@@ -49,6 +49,8 @@ public final class PolishContract {
         Map<String, ?> generic = config("https://text.example.test/v1/");
         Map<String, ?> deepseek = config("https://api.deepseek.com/v1");
         check(content.equals(Polish.generate(generic, prompt, original, app, Lexicon.AI_TOOLS, editor, terms)), "Changed mixed-language response");
+        JSONObject genericPayload = new JSONObject(new JSONObject(sent).getJSONArray("messages").getJSONObject(1).getString("content"));
+        check(!genericPayload.getJSONObject("AUDIO_CONTEXT").has("lexicon"), "Text API must not receive lexicon entries");
         Files.writeString(output.resolve("generic.json"), sent);
         content = "我想预约周四下午三点。";
         check(content.equals(Polish.generate(deepseek, prompt, original, app, Lexicon.GLOBAL, EditorContext.EMPTY, List.of())), "Changed Chinese response");

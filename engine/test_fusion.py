@@ -96,10 +96,10 @@ class FusionTests(unittest.TestCase):
         payload = build_polish_payload(request)
         self.assertEqual(payload["ASR_RESULTS"], request["asr_results"])
         self.assertEqual(payload["AUDIO_CONTEXT"], {
-            "lexicon": [{"term": "言墨", "hint": "本地语音输入法", "aliases": ["研墨"]}],
             "application": {"categories": ["messaging"], "name": "微信"},
             "background_screen_text": ["言墨项目"],
         })
+        self.assertNotIn("lexicon", payload["AUDIO_CONTEXT"])
         self.assertEqual(payload["context"], {"text_before_cursor": "甲" * 300, "text_after_cursor": "乙" * 300})
         self.assertEqual(payload["INSTRUCTION"], "")
 

@@ -72,7 +72,7 @@ final class Polish {
     }
 
     static String generate(Context app, String original) throws Exception {
-        return generate(app, original, "言墨", Lexicon.GLOBAL, EditorContext.EMPTY, Lexicon.list(app));
+        return generate(app, original, "言墨", Lexicon.GLOBAL, EditorContext.EMPTY, Collections.emptyList());
     }
 
     static String generate(Context app, String original, String application, String group,
@@ -87,17 +87,9 @@ final class Polish {
 
     static String generate(Map<String, ?> preferences, PromptAsset asset, String original, String application,
                            String group, EditorContext editor, List<Lexicon.Entry> lexicon) throws Exception {
-        JSONArray terms = new JSONArray();
-        for (Lexicon.Entry entry : lexicon) {
-            terms.put(new JSONObject()
-                    .put("term", entry.term)
-                    .put("hint", entry.hint == null ? "" : entry.hint)
-                    .put("aliases", new JSONArray(entry.aliases)));
-        }
         String payload = new JSONStringer().object()
                 .key("INSTRUCTION").value("")
                 .key("AUDIO_CONTEXT").object()
-                    .key("lexicon").value(terms)
                     .key("application").object()
                         .key("categories").array().value(Lexicon.GLOBAL.equals(group) ? "general" : group).endArray()
                         .key("name").value(application)
