@@ -10,8 +10,8 @@
 
 ## 下载安装
 
-- **Mac 桌面端**：从[下载页](https://happenmass.github.io/Yanmo/)或 [GitHub Releases](https://github.com/Happenmass/Yanmo/releases/latest) 下载 `Yanmo-1.0.1-mac-arm64.zip`，解压后把 `言墨.app` 拖入「应用程序」。要求 Apple Silicon、macOS 14+。从 0.4.5 或更早版本升级时，请完整退出旧版，再替换整个应用。
-- **Android 输入法**：在 [android-v1.15.94-yanmo.19](https://github.com/Happenmass/Yanmo/releases/tag/android-v1.15.94-yanmo.19) 下载签名 APK（`arm64-v8a`，最低 Android 9），详情见 [言墨 Android 说明](android/README.md)。
+- **Mac 桌面端**：从[下载页](https://happenmass.github.io/Yanmo/)或 [GitHub Releases](https://github.com/Happenmass/Yanmo/releases/latest) 下载 `Yanmo-1.0.2-mac-arm64.zip`，解压后把 `言墨.app` 拖入「应用程序」。要求 Apple Silicon、macOS 14+。从 0.4.5 或更早版本升级时，请完整退出旧版，再替换整个应用。
+- **Android 输入法**：在 [android-v1.15.94-yanmo.20](https://github.com/Happenmass/Yanmo/releases/tag/android-v1.15.94-yanmo.20) 下载签名 APK（`arm64-v8a`，最低 Android 9），详情见 [言墨 Android 说明](android/README.md)。
 
 从 0.4.6 起（Android 从 `yanmo.19` 起），可在「设置 → 软件更新」或言墨菜单中检查更新。确认后，言墨会下载并校验 GitHub 安装包（Mac 校验证书与 SHA-256，Android 校验 SHA-256 与同发布签名），完整退出后替换或调起系统安装器完成更新。正式版和 Mac 原生录音桥接均使用团队 ID `299DDXTQH5` 的 Developer ID Application 身份签名，安装包的 SHA-256 见对应版本的 GitHub Release。
 
@@ -28,6 +28,7 @@
 
 ## 主要功能
 
+- **1.0.2 双端热词边界与纠词门控对齐（Mac 与 Android `yanmo.20`）**：Mac 与 Android 端统一将词库仅用于语音识别（ASR）热词提示，不再传入后处理文字模型；Mac 端纠词自动学习进一步收紧为同应用 PID 与文本实质修改门控，避免无修改直接发送误触发提取。
 - **1.0.1 实时流式 ASR 与无感收尾（Mac 与 Android）**：Mac 与 Android 端均支持热词与光标上下文直传的实时流式识别预览（已确认文本 + 临时候选态）、`stream/finish` 直接复用与松手合并直入「整理中」；Android 端新增「设置 → 软件更新」自动检查与校验升级。
 - **1.0.0 架构解耦**：推理引擎与模型权重管理统一交由外部 `AcpmRuntime`（`acpm-desktop`），Mac 安装包体积大幅缩减，应用包内只包含 Electron 与 Swift 原生系统桥接。
 - **自适应半流式 VAD + 链式上下文分段识别（Mac 与 Android 行为一致）**：采用零丢帧连续切分与非对称低底噪追踪（`< 2.5s → 1200ms`、`2.5–15s → 800ms`、`>= 15s → 400ms`、`24s` 单段上限，录音结束自动无条件收尾），前段转写自动串联为后续段上下文。关闭自然整理时，每识别完一段立即写入当前输入框；开启自然整理或语音翻译时，浮层 / 听写条实时展示最新转写并在结束时整段一次润色写入。
