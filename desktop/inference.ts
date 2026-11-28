@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   AcpmClient,
+  AcpmError,
   AcpmModelDTO,
   friendlyAcpmError,
   normalizeAsrLanguage,
@@ -14,6 +15,7 @@ import {
   buildVerbatimPrompt,
   buildVoiceTranslationPrompt,
   combineBeforeContext,
+  hasCorrectionDiff,
   loadPromptTemplates,
   parseCorrectionTerms,
   PromptTemplates,
@@ -88,6 +90,33 @@ export interface InferenceClient {
     priorTranscript: string,
     signal?: AbortSignal,
   ): Promise<{ text: string; engine: string; language: string | null; languageSource: ASRResult['language_source'] }>;
+  startAsrStream?(
+    payload: InferenceTaskPayload,
+    priorTranscript?: string,
+    signal?: AbortSignal,
+  ): Promise<{ sessionId: string; model: string } | null>;
+  feedAsrStreamChunk?(
+    payload: InferenceTaskPayload,
+    sessionId: string,
+    pcm16Base64: string,
+    signal?: AbortSignal,
+  ): Promise<{ confirmedText: string; provisionalText: string } | null>;
+  resetAsrStream?(
+    payload: InferenceTaskPayload,
+    sessionId: string,
+    priorTranscript?: string,
+    signal?: AbortSignal,
+  ): Promise<void>;
+  finishAsrStream?(
+    payload: InferenceTaskPayload,
+    sessionId: string,
+    options?: { pcm16Base64?: string; closeAfter?: boolean },
+    signal?: AbortSignal,
+  ): Promise<{ text: string; engine: string; language: string | null; languageSource: ASRResult['language_source'] } | null>;
+  closeAsrStream?(
+    payload: InferenceTaskPayload,
+    sessionId: string,
+  ): Promise<void>;
   run(
     payload: InferenceTaskPayload,
     audio: TaskAudio | undefined,
@@ -287,6 +316,147 @@ export class InferenceService implements InferenceClient {
     } finally {
       signal?.removeEventListener('abort', onAbort);
     }
+  }
+
+  async startAsrStream(
+    request: InferenceTaskPayload,
+    priorTranscript = '',
+    signal?: AbortSignal,
+  ): Promise<{ sessionId: string; model: string } | null> {
+    if (request.online.asr) return null;
+    const client = this.createAcpmClient(request.acpm, request.acpmToken);
+    const prompt = buildAsrPrompt(
+      { ...request.context, before: combineBeforeContext(request.context.before, priorTranscript, 300) },
+      request.asr_hotwords,
+    );
+    try {
+      const res = await client.startAsrStream(
+        { model: request.acpm.asrModel, language: 'auto', ...(prompt ? { prompt } : {}) },
+        signal,
+      );
+      this.diagnostic('stream_start', { task_id: request.task_id, ok: true });
+      return { sessionId: res.session_id, model: res.model };
+    } catch (error) {
+      this.diagnostic('stream_start', {
+        task_id: request.task_id,
+        ok: false,
+        error_type: error instanceof Error ? error.name : 'Unknown',
+        ...(error instanceof AcpmError ? { http_status: error.httpStatus } : {}),
+      });
+      if (error instanceof AcpmError && (error.httpStatus === 404 || error.httpStatus === 501)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async feedAsrStreamChunk(
+    request: InferenceTaskPayload,
+    sessionId: string,
+    pcm16Base64: string,
+    signal?: AbortSignal,
+  ): Promise<{ confirmedText: string; provisionalText: string } | null> {
+    if (request.online.asr) return null;
+    const client = this.createAcpmClient(request.acpm, request.acpmToken);
+    try {
+      const res = await client.feedAsrStreamChunk(
+        { model: request.acpm.asrModel, sessionId, pcm16Base64 },
+        signal,
+      );
+      return {
+        confirmedText: res.confirmed_text ?? '',
+        provisionalText: res.provisional_text ?? '',
+      };
+    } catch (error) {
+      if (signal?.aborted) return null;
+      this.diagnostic('stream_chunk_failed', {
+        task_id: request.task_id,
+        error_type: error instanceof Error ? error.name : 'Unknown',
+        ...(error instanceof AcpmError ? { http_status: error.httpStatus } : {}),
+      });
+      throw error;
+    }
+  }
+
+  async resetAsrStream(
+    request: InferenceTaskPayload,
+    sessionId: string,
+    priorTranscript = '',
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (request.online.asr) return;
+    const client = this.createAcpmClient(request.acpm, request.acpmToken);
+    const prompt = buildAsrPrompt(
+      { ...request.context, before: combineBeforeContext(request.context.before, priorTranscript, 300) },
+      request.asr_hotwords,
+    );
+    try {
+      await client.resetAsrStream(
+        { model: request.acpm.asrModel, sessionId, language: 'auto', ...(prompt ? { prompt } : {}) },
+        signal,
+      );
+    } catch (error) {
+      if (signal?.aborted) return;
+      if (error instanceof AcpmError && (error.httpStatus === 404 || error.httpStatus === 501)) return;
+      throw error;
+    }
+  }
+
+  async finishAsrStream(
+    request: InferenceTaskPayload,
+    sessionId: string,
+    options: { pcm16Base64?: string; closeAfter?: boolean } = {},
+    signal?: AbortSignal,
+  ): Promise<{ text: string; engine: string; language: string | null; languageSource: ASRResult['language_source'] } | null> {
+    if (request.online.asr || !sessionId) return null;
+    const client = this.createAcpmClient(request.acpm, request.acpmToken);
+    const started = Date.now();
+    this.diagnostic('model_start', { task_id: request.task_id, command: 'stream_finish', provider: 'acpm' });
+    try {
+      const res = await client.finishAsrStream(
+        {
+          model: request.acpm.asrModel,
+          sessionId,
+          pcm16Base64: options.pcm16Base64,
+          closeAfter: options.closeAfter,
+        },
+        signal,
+      );
+      const text = String(res.text ?? '').trim();
+      const detectedLanguage = normalizeAsrLanguage(res.language);
+      this.diagnostic('model_complete', {
+        task_id: request.task_id,
+        command: 'stream_finish',
+        elapsed_ms: Date.now() - started,
+        output_chars: text.length,
+      });
+      return {
+        text,
+        engine: request.acpm.asrModel,
+        language: detectedLanguage,
+        languageSource: detectedLanguage ? 'detected' : 'unknown',
+      };
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      this.diagnostic('stream_finish_failed', {
+        task_id: request.task_id,
+        error_type: error instanceof Error ? error.name : 'Unknown',
+        ...(error instanceof AcpmError ? { http_status: error.httpStatus } : {}),
+      });
+      if (error instanceof AcpmError && (error.httpStatus === 404 || error.httpStatus === 501)) {
+        return null;
+      }
+      throw new Error(friendlyAcpmError(error));
+    }
+  }
+
+  async closeAsrStream(request: InferenceTaskPayload, sessionId: string): Promise<void> {
+    if (request.online.asr || !sessionId) return;
+    const client = this.createAcpmClient(request.acpm, request.acpmToken);
+    await client.closeAsrStream(
+      { model: request.acpm.asrModel, sessionId },
+      AbortSignal.timeout(2000),
+    ).catch(() => {});
   }
 
   private async onlineTranscribe(
@@ -686,6 +856,7 @@ export class InferenceService implements InferenceClient {
       let processed = false;
       const promptBase = {
         ...request.context,
+        lexicon: [],
         text: original,
         asr_results: candidates,
         target_language: request.target_language,
@@ -819,7 +990,7 @@ export class InferenceService implements InferenceClient {
     transcript?: string,
     signal?: AbortSignal,
   ): Promise<string[]> {
-    if (original === corrected || !corrected.trim()) return [];
+    if (!hasCorrectionDiff(original, corrected)) return [];
     const payload: Record<string, string> = { ORIGINAL: original, CORRECTED: corrected };
     if (transcript) payload.ASR = transcript;
     const onlineText = settings.online.text.enabled
@@ -843,7 +1014,7 @@ export class InferenceService implements InferenceClient {
       'normal',
       signal ?? new AbortController().signal,
     );
-    return parseCorrectionTerms(generated.text, corrected);
+    return parseCorrectionTerms(generated.text, corrected, original);
   }
 
   async cancel(taskId: string): Promise<void> {

@@ -10,10 +10,10 @@
 
 ## 下载安装
 
-- **Mac 桌面端**：从[下载页](https://happenmass.github.io/Yanmo/)或 [GitHub Releases](https://github.com/Happenmass/Yanmo/releases/latest) 下载 `Yanmo-1.0.0-mac-arm64.zip`，解压后把 `言墨.app` 拖入「应用程序」。要求 Apple Silicon、macOS 14+。从 0.4.5 或更早版本升级时，请完整退出旧版，再替换整个应用。
-- **Android 输入法**：在 [android-v1.15.94-yanmo.18](https://github.com/Happenmass/Yanmo/releases/tag/android-v1.15.94-yanmo.18) 下载签名 APK（`arm64-v8a`，最低 Android 9），详情见 [言墨 Android 说明](android/README.md)。
+- **Mac 桌面端**：从[下载页](https://happenmass.github.io/Yanmo/)或 [GitHub Releases](https://github.com/Happenmass/Yanmo/releases/latest) 下载 `Yanmo-1.0.1-mac-arm64.zip`，解压后把 `言墨.app` 拖入「应用程序」。要求 Apple Silicon、macOS 14+。从 0.4.5 或更早版本升级时，请完整退出旧版，再替换整个应用。
+- **Android 输入法**：在 [android-v1.15.94-yanmo.19](https://github.com/Happenmass/Yanmo/releases/tag/android-v1.15.94-yanmo.19) 下载签名 APK（`arm64-v8a`，最低 Android 9），详情见 [言墨 Android 说明](android/README.md)。
 
-从 0.4.6 起，可在「设置 → 软件更新」或言墨菜单中检查更新。确认后，言墨会下载并校验 GitHub 安装包，完整退出后替换应用并重新启动。从 0.4.13 起，正式版和原生录音桥接使用同一团队的 Developer ID Application 身份签名（团队 ID：`299DDXTQH5`）。`1.0.0` 已通过 Apple 公证并装订票据，首次打开时 Gatekeeper 可直接验证开发者身份，安装包的 SHA-256 见对应版本的 GitHub Release。
+从 0.4.6 起（Android 从 `yanmo.19` 起），可在「设置 → 软件更新」或言墨菜单中检查更新。确认后，言墨会下载并校验 GitHub 安装包（Mac 校验证书与 SHA-256，Android 校验 SHA-256 与同发布签名），完整退出后替换或调起系统安装器完成更新。正式版和 Mac 原生录音桥接均使用团队 ID `299DDXTQH5` 的 Developer ID Application 身份签名，安装包的 SHA-256 见对应版本的 GitHub Release。
 
 ## 运行依赖（`acpm-desktop` 与 `acpm`）
 
@@ -28,6 +28,7 @@
 
 ## 主要功能
 
+- **1.0.1 实时流式 ASR 与无感收尾（Mac 与 Android）**：Mac 与 Android 端均支持热词与光标上下文直传的实时流式识别预览（已确认文本 + 临时候选态）、`stream/finish` 直接复用与松手合并直入「整理中」；Android 端新增「设置 → 软件更新」自动检查与校验升级。
 - **1.0.0 架构解耦**：推理引擎与模型权重管理统一交由外部 `AcpmRuntime`（`acpm-desktop`），Mac 安装包体积大幅缩减，应用包内只包含 Electron 与 Swift 原生系统桥接。
 - **自适应半流式 VAD + 链式上下文分段识别（Mac 与 Android 行为一致）**：采用零丢帧连续切分与非对称低底噪追踪（`< 2.5s → 1200ms`、`2.5–15s → 800ms`、`>= 15s → 400ms`、`24s` 单段上限，录音结束自动无条件收尾），前段转写自动串联为后续段上下文。关闭自然整理时，每识别完一段立即写入当前输入框；开启自然整理或语音翻译时，浮层 / 听写条实时展示最新转写并在结束时整段一次润色写入。
 - **端到端加密跨设备同步（Mac ↔ Android）**：基于 `AcpmRuntime` 盲密文仓与 X25519 / Ed25519 / HLC 协议，支持二维码扫码配对、24 词恢复码还原、局域网 mDNS / NSD 自动发现、文稿与加密录音 / 截屏附件秒传与按需拉取、词库增量合并与删除墓碑传播，以及稀疏节能同步策略（默认累积 10 条本地变更或每日 22:00 定时全量同步，并在输入活跃期自动避让）。
@@ -35,7 +36,7 @@
 - **中英文输入**按口述语言输出。中英混说时，目标是保留句中的中英文片段。若要将口述内容转成指定语言，使用口述翻译。
 - 默认 **FN** 开始或结束语音输入，**FN + Shift** 口述翻译，**FN + 空格**划词翻译，**Esc** 取消。支持自定义多组快捷键和左右纯修饰键。纯修饰键组合全部松开时触发，参与打字或鼠标组合时不触发。更新默认值时保留已保存的自定义配置，设置中可逐项恢复默认。
 - 静音的 200×36 pt 黑墨浮层，显示真实音量、计时、取消、完成及半流式实时预览；不抢走原输入框焦点。
-- 默认通过 AcpmRuntime 执行可选 CPU VAD 预检（`speech-vad-pyannote`）与语音识别（`qwen3-asr-1.7b` / `qwen3-asr-0.6b`）。启用自动整理且文字处理可用（AcpmRuntime 本地文字模型或在线文字 API）时，结合词库与可用上下文生成正文；关闭自动整理或文字处理不可用时，直接写入识别原文。自动整理可选自然整理、保留原话、即时消息或文档段落风格。
+- 默认通过 AcpmRuntime 执行可选 CPU VAD 预检（`speech-vad-pyannote`）与语音识别（`qwen3-asr-1.7b` / `qwen3-asr-0.6b`）。启用自动整理且文字处理可用（AcpmRuntime 本地文字模型或在线文字 API）时，结合可用上下文生成正文；关闭自动整理或文字处理不可用时，直接写入识别原文。自动整理可选自然整理、保留原话、即时消息或文档段落风格。
 - 口述翻译直接执行识别 → 翻译 → 写入；划词翻译在可拖动的独立宣纸窗口显示，按普通窗口层级切换，不替换选区、不保存历史。
 - 两种翻译分别保存目标语言和快捷键，支持英语、简体中文、日语、德语。
 - Markdown 译文排版／源码、代码着色和代码复制；围栏代码与行内代码由程序保护，不执行 HTML 或加载远程图片。

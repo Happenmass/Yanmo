@@ -141,7 +141,6 @@ export function buildPolishPayload(request: PromptRequestInput) {
   return {
     INSTRUCTION: request.instruction ?? '',
     AUDIO_CONTEXT: {
-      lexicon: normalizeLexicon(request),
       application: {
         categories: [request.category || 'general'],
         name: request.application || '言墨',
@@ -346,7 +345,84 @@ export function buildVoiceTranslationPrompt(
   return { system, payload, promptCacheKey: `yanmo-translate-voice-${language}` };
 }
 
-export function parseCorrectionTerms(output: string, corrected: string): string[] {
+const INVISIBLE_CORRECTION_CHARS = /[\u200B\u200C\u200D\u2060\uFEFF\uFFFC]/gu;
+const TRAILING_SENTENCE_PUNCTUATION = /[。！？.!?]+$/u;
+const LATIN_WORD_CHAR = /^(?:[A-Za-z0-9_]|(?=[\u00C0-\u024F])[\p{Lu}\p{Ll}\p{Lt}\p{Nd}])$/u;
+const CJK_KANA_HANGUL_CHAR = /^[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\u{20000}-\u{2EBEF}\u3040-\u30FF\u31F0-\u31FF\uAC00-\uD7AF\u1100-\u11FF]$/u;
+
+export function normalizeCorrectionText(text: string): string {
+  return text
+    .replace(INVISIBLE_CORRECTION_CHARS, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\u00A0/g, ' ')
+    .normalize('NFC')
+    .trim();
+}
+
+function stripTrailingSentencePunctuation(text: string): string {
+  const stripped = text.replace(TRAILING_SENTENCE_PUNCTUATION, '');
+  return stripped.length > 0 ? stripped : text;
+}
+
+function isShortPlainPhrase(text: string): boolean {
+  return [...text].length <= 4 && !/[\s\p{P}]/u.test(text);
+}
+
+function isJoinedBoundary(left: string, right: string, shortPlain: boolean): boolean {
+  return (LATIN_WORD_CHAR.test(left) && LATIN_WORD_CHAR.test(right))
+    || (shortPlain && CJK_KANA_HANGUL_CHAR.test(left) && CJK_KANA_HANGUL_CHAR.test(right));
+}
+
+function containsAtSafeBoundary(draft: string, original: string): boolean {
+  const chars = [...original];
+  const firstOrig = chars[0];
+  const lastOrig = chars.at(-1);
+  if (!firstOrig || !lastOrig) return false;
+  const shortPlain = isShortPlainPhrase(original);
+  let pos = 0;
+  while (pos <= draft.length - original.length) {
+    const idx = draft.indexOf(original, pos);
+    if (idx === -1) break;
+    const before = idx > 0 ? [...draft.slice(0, idx)].at(-1) : undefined;
+    const afterIdx = idx + original.length;
+    const after = afterIdx < draft.length ? [...draft.slice(afterIdx)][0] : undefined;
+    const leftJoined = before !== undefined && isJoinedBoundary(before, firstOrig, shortPlain);
+    const prevOrig = chars.length >= 2 ? chars[chars.length - 2] : undefined;
+    const dottedToken = lastOrig === '.' && prevOrig !== undefined && after !== undefined
+      && LATIN_WORD_CHAR.test(prevOrig) && LATIN_WORD_CHAR.test(after);
+    const rightJoined = dottedToken || (after !== undefined && isJoinedBoundary(lastOrig, after, shortPlain));
+    if (!leftJoined && !rightJoined) return true;
+    pos = idx + 1;
+  }
+  return false;
+}
+
+export function hasCorrectionDiff(original: string, corrected: string): boolean {
+  const normOriginal = normalizeCorrectionText(original);
+  const normCorrected = normalizeCorrectionText(corrected);
+  if (!normOriginal || !normCorrected) return false;
+  if (normCorrected === normOriginal) return false;
+  if (stripTrailingSentencePunctuation(normCorrected) === stripTrailingSentencePunctuation(normOriginal)) {
+    return false;
+  }
+  if (containsAtSafeBoundary(normCorrected, normOriginal)) return false;
+  return true;
+}
+
+function countOccurrences(haystack: string, needle: string): number {
+  if (!needle) return 0;
+  let count = 0;
+  let pos = 0;
+  while (pos <= haystack.length - needle.length) {
+    const idx = haystack.indexOf(needle, pos);
+    if (idx === -1) break;
+    count += 1;
+    pos = idx + needle.length;
+  }
+  return count;
+}
+
+export function parseCorrectionTerms(output: string, corrected: string, original?: string): string[] {
   let terms: unknown;
   try {
     terms = JSON.parse(output);
@@ -356,14 +432,23 @@ export function parseCorrectionTerms(output: string, corrected: string): string[
   if (!Array.isArray(terms) || terms.length > 10 || terms.some(term => typeof term !== 'string')) {
     throw new Error('词库提取结果格式无效。');
   }
+  const normOriginal = original !== undefined ? normalizeCorrectionText(original) : undefined;
+  const normCorrected = original !== undefined ? normalizeCorrectionText(corrected) : undefined;
   const unique: string[] = [];
   const seen = new Set<string>();
   for (const raw of terms) {
     const term = raw.trim();
-    if (term.length >= 1 && term.length <= 64 && !/[\r\n]/.test(term) && corrected.includes(term) && !seen.has(term)) {
-      seen.add(term);
-      unique.push(term);
+    if (term.length < 1 || term.length > 64 || /[\r\n]/.test(term) || !corrected.includes(term) || seen.has(term)) {
+      continue;
     }
+    if (normOriginal !== undefined && normCorrected !== undefined) {
+      const normTerm = normalizeCorrectionText(term);
+      if (!normTerm || countOccurrences(normCorrected, normTerm) <= countOccurrences(normOriginal, normTerm)) {
+        continue;
+      }
+    }
+    seen.add(term);
+    unique.push(term);
   }
   return unique;
 }

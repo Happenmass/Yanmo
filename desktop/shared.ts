@@ -115,7 +115,7 @@ export interface AppState {
   screenRecording?: boolean;
   learnedTerms?: string[];
   page: Page; stage: Stage; action: Action; settings: Settings; library: Library;
-  selectedID: string | null; draft: string; original: string; liveTranscript?: string; notice: string;
+  selectedID: string | null; draft: string; original: string; liveTranscript?: string; liveProvisional?: string; notice: string;
   asrResults: ASRResult[];
   seconds: number; level: number; destinationName: string; checking: boolean; modelsChecked: boolean; overlayVisible: boolean;
   acpm: AcpmRuntimeInfo; acpmTokenSaved: boolean;

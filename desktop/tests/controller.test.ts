@@ -1,15 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Controller } from '../controller';
 import { LibraryStore } from '../store';
 import { AcpmRuntimeInfo, checkOnlineURL, defaultAcpmInfo, defaultSettings, localDayKey, TaskEvent } from '../shared';
 import { NativeBridge } from '../processes';
-import { InferenceClient, InferenceTaskPayload, OnlineSecrets } from '../inference';
+import { InferenceClient, InferenceService, InferenceTaskPayload, OnlineSecrets } from '../inference';
 
 class Native extends EventEmitter {
   calls: string[] = [];
@@ -29,6 +30,11 @@ class MockInference implements InferenceClient {
   mode = 'failure';
   done?: () => void;
   transcribeSegment?: InferenceClient['transcribeSegment'];
+  startAsrStream?: InferenceClient['startAsrStream'];
+  feedAsrStreamChunk?: InferenceClient['feedAsrStreamChunk'];
+  resetAsrStream?: InferenceClient['resetAsrStream'];
+  finishAsrStream?: InferenceClient['finishAsrStream'];
+  closeAsrStream?: InferenceClient['closeAsrStream'];
   requests: InferenceTaskPayload[] = [];
   prewarms: string[] = [];
   correctionRequests: { original: string; corrected: string; model: string; acpmToken: string }[] = [];
@@ -434,7 +440,29 @@ test('开始新录音会使旧纠词事件失效', async () => {
   } finally { await value.close(); }
 });
 
-test('控制器发送统一 lexicon 字段并把归档音频随文稿存入数据库', async () => {
+test('无实质人工修改的纠词事件（零宽字符、仅删句末标点、前后已有文本）不触发提取', async () => {
+  const value = fixture(false, true);
+  try {
+    value.inference.mode = 'acpm';
+    const cases = [
+      { original: '明天联系沈砚。', text: '\u200B明天联系\uFEFF沈砚。\uFFFC' },
+      { original: '明天联系沈砚。', text: '明天联系沈砚' },
+      { original: '明天联系沈砚。', text: '@张三 明天联系沈砚。\n顺便发我' },
+    ];
+    for (const sample of cases) {
+      await value.controller.perform('dictation', { name: 'Slack', category: 'messaging' });
+      await new Promise(resolve => setTimeout(resolve, 380));
+      await value.controller.finishRecording();
+      const id = value.native.arguments.filter(x => x.command === 'insert').at(-1)!.args.observationId;
+      value.native.emit('correction', { observationId: id, ...sample });
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    assert.equal(value.inference.correctionRequests.length, 0);
+    assert.equal(value.controller.state.library.lexicon.length, 0);
+  } finally { await value.close(); }
+});
+
+test('控制器仅向 ASR 发送热词、不向后纠错发送 lexicon 并把归档音频随文稿存入数据库', async () => {
   const value = fixture(); value.inference.mode = 'acpm';
   try {
     value.controller.saveTerm({ term: '言墨', hint: '本地语音输入法', aliases: ['研墨'] });
@@ -445,7 +473,7 @@ test('控制器发送统一 lexicon 字段并把归档音频随文稿存入数�
     const context = value.inference.requests[0].context;
     assert.equal(context.application, '微信');
     assert.deepEqual(value.inference.requests[0].asr_hotwords, ['言墨']);
-    assert.deepEqual(context.lexicon, [{ term: '言墨', hint: '本地语音输入法', aliases: ['研墨'] }]);
+    assert.deepEqual(context.lexicon, []);
 
     const item = value.controller.state.library.manuscripts[0];
     assert.equal(item.hasAudio, true);
@@ -483,9 +511,7 @@ test('实际任务只发本组与全局热词，成功口述给未入选的规�
     const request = value.inference.requests[0];
     assert.equal(request.asr_hotwords!.length, 64);
     assert.equal(request.asr_hotwords!.includes('Claude Code'), false);
-    assert.deepEqual(request.context.lexicon.filter((item: { term: string }) => item.term === 'Claude Code'), [
-      { term: 'Claude Code', hint: '工具说明', aliases: ['克劳德'] },
-    ]);
+    assert.deepEqual(request.context.lexicon, []);
     const disk = new LibraryStore(value.directory, defaultSettings());
     try {
       assert.equal(disk.library.manuscripts.length, 0);
@@ -785,4 +811,391 @@ test('半流式分段识别：关闭自然整理时每段直接写入，结束�
     assert.deepEqual(polishInserts, ['第一句，第二句。']);
     assert.equal(polishCase.controller.state.liveTranscript, '');
   } finally { await polishCase.close(); }
+});
+
+test('流式预览在段内聚合分块并在 VAD 分段边界清理重设，最终仍由段落最终转写与 4B 润色收尾', async () => {
+  const { controller, native, inference, close } = fixture();
+  inference.mode = 'acpm';
+  let chunkCalls = 0;
+  let releaseFirstChunk!: () => void;
+  const eventsOrder: string[] = [];
+  let resets = 0;
+  let closes = 0;
+  let releaseReset!: () => void;
+  const resetGate = new Promise<void>(resolve => { releaseReset = resolve; });
+  let firstChunkResolve!: () => void;
+  const firstChunkStarted = new Promise<void>(resolve => { firstChunkResolve = resolve; });
+  inference.startAsrStream = async () => ({ sessionId: 'sess-preview', model: 'qwen3-asr-1.7b' });
+  inference.feedAsrStreamChunk = async (_payload, sessionId, pcm16Base64) => {
+    assert.equal(sessionId, 'sess-preview');
+    chunkCalls += 1;
+    eventsOrder.push(`chunk:${chunkCalls}`);
+    if (chunkCalls === 1) {
+      firstChunkResolve();
+      await new Promise<void>(r => { releaseFirstChunk = r; });
+      return { confirmedText: '明天', provisionalText: '去' };
+    }
+    if (chunkCalls === 2) {
+      // Coalesced second+third chunks arrive combined
+      const decodedBytes = Buffer.from(pcm16Base64, 'base64').length;
+      assert.equal(decodedBytes, 8);
+      return { confirmedText: '明天去', provisionalText: '上海' };
+    }
+    // Segment 1 chunk must wait until resetAsrStream completes
+    assert.equal(resets, 1);
+    return { confirmedText: '顺便带伞', provisionalText: '吧' };
+  };
+  inference.resetAsrStream = async (_payload, sessionId) => {
+    assert.equal(sessionId, 'sess-preview');
+    eventsOrder.push('reset:start');
+    await resetGate;
+    resets += 1;
+    eventsOrder.push('reset:done');
+  };
+  inference.closeAsrStream = async (_payload, sessionId) => {
+    assert.equal(sessionId, 'sess-preview');
+    closes += 1;
+  };
+  inference.transcribeSegment = async () => ({
+    text: '明天去北京。',
+    engine: 'qwen3-asr-1.7b',
+    language: 'Chinese',
+    languageSource: 'detected',
+  });
+  inference.run = async (request, _audio, emit) => {
+    inference.requests.push(request);
+    emit({ event: 'transcript', task_id: request.task_id, text: request.text, asr_results: request.asr_results });
+    emit({ event: 'result', task_id: request.task_id, text: '明天去北京！', processed: true });
+  };
+  const origCall = native.call.bind(native);
+  native.call = async (command, args = {}) => {
+    if (command === 'record.finish') {
+      return { path: '/s.wav', seconds: 2, emittedSegments: 1 };
+    }
+    if (command === 'insert') {
+      return { delivery: 'confirmed', name: '文本编辑', appKey: 'com.apple.TextEdit' };
+    }
+    return origCall(command, args);
+  };
+
+  try {
+    await controller.perform('dictation', {});
+    const startCall = native.arguments.find(c => c.command === 'record.start');
+    assert.equal(startCall?.args.livePreview, true);
+    const taskId = String(startCall?.args.taskId);
+
+    native.emit('audioPreviewChunk', { taskId, segmentIndex: 0, pcm16Base64: Buffer.from([1, 2, 3, 4]).toString('base64') });
+    await firstChunkStarted;
+    // Queue two more chunks while request #1 is in flight -> should coalesce into 8 bytes in request #2
+    native.emit('audioPreviewChunk', { taskId, segmentIndex: 0, pcm16Base64: Buffer.from([5, 6, 7, 8]).toString('base64') });
+    native.emit('audioPreviewChunk', { taskId, segmentIndex: 0, pcm16Base64: Buffer.from([9, 10, 11, 12]).toString('base64') });
+    releaseFirstChunk();
+    await new Promise(resolve => setTimeout(resolve, 40));
+
+    assert.equal(chunkCalls, 2);
+    assert.equal(controller.state.liveTranscript, '明天去');
+    assert.equal(controller.state.liveProvisional, '上海');
+
+    // Stale segmentIndex chunk is ignored, then real audioSegment commits authoritative text & resets preview
+    native.emit('audioPreviewChunk', { taskId, segmentIndex: 99, pcm16Base64: Buffer.from([1, 2]).toString('base64') });
+    native.emit('audioSegment', { taskId, index: 0, audioBase64: Buffer.from('wav-0').toString('base64') });
+    // Segment 1 preview arrives while reset is still in flight -> must wait for resetAsrStream
+    native.emit('audioPreviewChunk', { taskId, segmentIndex: 1, pcm16Base64: Buffer.from([13, 14]).toString('base64') });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(chunkCalls, 2);
+    releaseReset();
+    await new Promise(resolve => setTimeout(resolve, 40));
+
+    assert.equal(resets, 1);
+    assert.equal(chunkCalls, 3);
+    assert.deepEqual(eventsOrder.slice(-3), ['reset:start', 'reset:done', 'chunk:3']);
+    assert.equal(controller.state.liveTranscript, '明天去北京。顺便带伞');
+    assert.equal(controller.state.liveProvisional, '吧');
+
+    await controller.finishRecording();
+    assert.equal(closes, 1);
+    assert.equal(controller.state.draft, '明天去北京！');
+    assert.equal(controller.state.liveProvisional, '');
+
+    // Cancel also aborts preview and closes stream
+    await controller.perform('dictation', {});
+    await controller.cancel();
+    assert.equal(closes, 2);
+    assert.equal(controller.state.liveProvisional, '');
+  } finally { await close(); }
+});
+
+test('流式 ASR 直接复用 finishAsrStream 结果，附带 tail PCM16 与增量前文上下文并跳过冗余整段 WAV 识别', async () => {
+  const { controller, native, inference, close } = fixture();
+  inference.mode = 'acpm';
+  let startPrior: string | undefined;
+  const resetPriors: string[] = [];
+  const finishCalls: { closeAfter?: boolean; pcmBytes: number }[] = [];
+  let wavSegmentCalls = 0;
+  let closeCalls = 0;
+  let chunkCalls = 0;
+  let releaseChunk!: () => void;
+  let chunkStarted!: () => void;
+  const firstChunkWait = new Promise<void>(r => { chunkStarted = r; });
+
+  inference.startAsrStream = async (_payload, priorTranscript) => {
+    startPrior = priorTranscript;
+    return { sessionId: 'sess-reuse', model: 'qwen3-asr-1.7b' };
+  };
+  inference.feedAsrStreamChunk = async () => {
+    chunkCalls += 1;
+    if (chunkCalls === 1) {
+      chunkStarted();
+      await new Promise<void>(r => { releaseChunk = r; });
+      return { confirmedText: '第一段', provisionalText: '用言' };
+    }
+    return { confirmedText: '第二段', provisionalText: '直接' };
+  };
+  inference.resetAsrStream = async (_payload, _sessionId, priorTranscript) => {
+    resetPriors.push(priorTranscript ?? '');
+  };
+  inference.finishAsrStream = async (_payload, sessionId, options) => {
+    assert.equal(sessionId, 'sess-reuse');
+    const pcmBytes = options?.pcm16Base64 ? Buffer.from(options.pcm16Base64, 'base64').length : 0;
+    finishCalls.push({ closeAfter: options?.closeAfter, pcmBytes });
+    if (finishCalls.length === 1) {
+      return { text: '第一段用言墨。', engine: 'qwen3-asr-1.7b', language: 'zh', languageSource: 'detected' };
+    }
+    return { text: '第二段直接收尾。', engine: 'qwen3-asr-1.7b', language: 'zh', languageSource: 'detected' };
+  };
+  inference.closeAsrStream = async () => {
+    closeCalls += 1;
+  };
+  inference.transcribeSegment = async () => {
+    wavSegmentCalls += 1;
+    return { text: 'should-not-run', engine: 'qwen3-asr-1.7b', language: 'zh', languageSource: 'detected' };
+  };
+  inference.run = async (request, _audio, emit) => {
+    inference.requests.push(request);
+    emit({ event: 'transcript', task_id: request.task_id, text: request.text, asr_results: request.asr_results });
+    emit({ event: 'result', task_id: request.task_id, text: request.text, processed: true });
+  };
+  const origCall = native.call.bind(native);
+  native.call = async (command, args = {}) => {
+    if (command === 'record.finish') {
+      return {
+        path: '/tail.wav',
+        seconds: 1.8,
+        emittedSegments: 1,
+        tailAudioBase64: Buffer.from('wav-tail').toString('base64'),
+        tailPreviewPcm16Base64: Buffer.from([21, 22, 23, 24]).toString('base64'),
+      };
+    }
+    if (command === 'insert') {
+      return { delivery: 'confirmed', name: 'Notes', appKey: 'com.apple.Notes' };
+    }
+    return origCall(command, args);
+  };
+
+  const stages: string[] = [];
+  const polishingTranscripts: string[] = [];
+  controller.on('state', state => {
+    if (stages.at(-1) !== state.stage) stages.push(state.stage);
+    if (state.stage === 'polishing' && state.liveTranscript) polishingTranscripts.push(state.liveTranscript);
+  });
+
+  try {
+    await controller.perform('dictation', {});
+    assert.equal(startPrior, '');
+    const taskId = String(native.arguments.find(c => c.command === 'record.start')?.args.taskId);
+
+    native.emit('audioPreviewChunk', { taskId, segmentIndex: 0, pcm16Base64: Buffer.from([1, 2, 3, 4]).toString('base64') });
+    await firstChunkWait;
+    // Buffered pending chunk + VAD segment tail PCM16 must coalesce into first finishAsrStream(closeAfter=false)
+    native.emit('audioPreviewChunk', { taskId, segmentIndex: 0, pcm16Base64: Buffer.from([5, 6]).toString('base64') });
+    native.emit('audioSegment', {
+      taskId,
+      index: 0,
+      audioBase64: Buffer.from('wav-0').toString('base64'),
+      tailPreviewPcm16Base64: Buffer.from([7, 8, 9, 10]).toString('base64'),
+    });
+    // Segment 1 preview arrives while finish(seg 0) & reset are still pending
+    native.emit('audioPreviewChunk', { taskId, segmentIndex: 1, pcm16Base64: Buffer.from([11, 12]).toString('base64') });
+    releaseChunk();
+    await new Promise(resolve => setTimeout(resolve, 40));
+
+    assert.equal(wavSegmentCalls, 0);
+    assert.deepEqual(resetPriors, ['第一段用言墨。']);
+    assert.equal(finishCalls.length, 1);
+    assert.deepEqual(finishCalls[0], { closeAfter: false, pcmBytes: 6 });
+
+    await controller.finishRecording();
+    assert.equal(wavSegmentCalls, 0);
+    assert.equal(closeCalls, 0);
+    assert.equal(finishCalls.length, 2);
+    assert.deepEqual(finishCalls[1], { closeAfter: true, pcmBytes: 4 });
+    assert.equal(inference.requests.length, 1);
+    assert.equal(inference.requests[0].pretranscribed, true);
+    assert.equal(inference.requests[0].text, '第一段用言墨。第二段直接收尾。');
+    assert.equal(stages.includes('transcribing'), false);
+    assert.ok(stages.includes('polishing'));
+    assert.equal(polishingTranscripts.includes('第一段用言墨。第二段直接收尾。第二段'), false);
+    assert.equal(polishingTranscripts.at(-1), '第一段用言墨。第二段直接收尾。');
+  } finally { await close(); }
+});
+
+test('finishAsrStream 失败或返回空文本时自动回退整段 WAV 识别并关闭会话', async () => {
+  const { controller, native, inference, close } = fixture();
+  inference.mode = 'acpm';
+  let closeCalls = 0;
+
+  inference.startAsrStream = async () => ({ sessionId: 'sess-fallback', model: 'qwen3-asr-1.7b' });
+  inference.feedAsrStreamChunk = async () => ({ confirmedText: '半句', provisionalText: '' });
+  inference.finishAsrStream = async () => {
+    throw new Error('stream finish failed');
+  };
+  inference.closeAsrStream = async () => {
+    closeCalls += 1;
+  };
+  inference.run = async (request, _audio, emit) => {
+    inference.requests.push(request);
+    emit({ event: 'stage', task_id: request.task_id, stage: 'transcribing' });
+    emit({ event: 'transcript', task_id: request.task_id, text: '完整兜底结果。', asr_results: [] });
+    emit({ event: 'stage', task_id: request.task_id, stage: 'polishing' });
+    emit({ event: 'result', task_id: request.task_id, text: '完整兜底结果。', processed: true });
+  };
+  const origCall = native.call.bind(native);
+  native.call = async (command, args = {}) => {
+    if (command === 'record.finish') {
+      return {
+        audioBase64: Buffer.from('wav-short').toString('base64'),
+        seconds: 0.9,
+        emittedSegments: 0,
+        tailPreviewPcm16Base64: Buffer.from([1, 2, 3, 4]).toString('base64'),
+      };
+    }
+    if (command === 'insert') {
+      return { delivery: 'confirmed', name: 'Notes', appKey: 'com.apple.Notes' };
+    }
+    return origCall(command, args);
+  };
+
+  const stages: string[] = [];
+  controller.on('state', state => {
+    if (stages.at(-1) !== state.stage) stages.push(state.stage);
+  });
+
+  try {
+    await controller.perform('dictation', {});
+    const taskId = String(native.arguments.find(c => c.command === 'record.start')?.args.taskId);
+    native.emit('audioPreviewChunk', { taskId, segmentIndex: 0, pcm16Base64: Buffer.from([1, 2]).toString('base64') });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await controller.finishRecording();
+    assert.equal(closeCalls, 1);
+    assert.equal(inference.requests.length, 1);
+    assert.equal(Boolean(inference.requests[0].pretranscribed), false);
+    assert.equal(controller.state.draft, '完整兜底结果。');
+    assert.ok(stages.includes('transcribing'));
+  } finally { await close(); }
+});
+
+test('Controller 搭配真实 InferenceService 类实例时，audioPreviewChunk 不因 this 解绑报错，能持续刷新流式预览并直接复用 stream/finish', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'yanmo-real-infer-ctrl-'));
+  const seenUrls: string[] = [];
+  let polishingLiveTranscript: string | undefined;
+  const server = createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => {
+      seenUrls.push(req.url!);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (req.url === '/v1/models') {
+        res.end(JSON.stringify({
+          models: [
+            { id: 'qwen3-asr-1.7b', capability: 'asr', display_name: 'Qwen3-ASR 1.7B', installed: true, state: 'WARM' },
+            { id: 'yanmo-correct-4b-cot', capability: 'llm', display_name: 'Yanmo 4B', installed: true, state: 'WARM' },
+            { id: 'speech-vad-pyannote', capability: 'vad', display_name: 'VAD', installed: true, state: 'WARM' },
+          ],
+        }));
+      } else if (req.url === '/v1/models/prewarm') {
+        res.end(JSON.stringify({ models: [] }));
+      } else if (req.url === '/v1/audio/transcriptions/stream/start') {
+        res.end(JSON.stringify({ session_id: 'live-sess-1', model: 'qwen3-asr-1.7b', sample_rate: 16000 }));
+      } else if (req.url === '/v1/audio/transcriptions/stream/chunk') {
+        res.end(JSON.stringify({ session_id: 'live-sess-1', confirmed_text: '实时预览', provisional_text: '中', language: 'Chinese', decode_ms: 8 }));
+      } else if (req.url === '/v1/audio/transcriptions/stream/finish') {
+        res.end(JSON.stringify({ session_id: 'live-sess-1', text: '实时预览完成。', language: 'Chinese', decode_ms: 10 }));
+      } else if (req.url === '/v1/chat/completions') {
+        polishingLiveTranscript = controller.state.liveTranscript;
+        res.end(JSON.stringify({ choices: [{ message: { content: '实时预览完成！' }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 6, total_tokens: 16 } }));
+      } else {
+        res.end(JSON.stringify({ ok: true }));
+      }
+    });
+  });
+
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const port = (server.address() as { port: number }).port;
+  const native = new Native();
+  const origCall = native.call.bind(native);
+  native.call = async (command, args = {}) => {
+    if (command === 'record.finish') {
+      return {
+        audioBase64: Buffer.from('wav-full').toString('base64'),
+        seconds: 1.2,
+        emittedSegments: 0,
+        tailPreviewPcm16Base64: Buffer.from([1, 2, 3, 4]).toString('base64'),
+      };
+    }
+    if (command === 'insert') {
+      return { delivery: 'confirmed', name: 'Notes', appKey: 'com.apple.Notes' };
+    }
+    return origCall(command, args);
+  };
+
+  const settings = defaultSettings();
+  settings.acpm = { ...settings.acpm, mode: 'remote', remoteBaseURL: `http://127.0.0.1:${port}` };
+  settings.keepHistory = false;
+  const store = new LibraryStore(dir, settings);
+  const inference = new InferenceService({ promptsDir: resolve(__dirname, '../../engine') });
+  const controller = new Controller(store, native as unknown as NativeBridge, inference);
+  controller.setAcpmToken('tok');
+
+  try {
+    const stages: string[] = [];
+    const seenLiveTranscripts: string[] = [];
+    controller.on('state', state => {
+      if (stages.at(-1) !== state.stage) stages.push(state.stage);
+      if (state.liveTranscript) seenLiveTranscripts.push(state.liveTranscript);
+    });
+    await controller.checkModels();
+    await controller.perform('dictation', {});
+    const taskId = String(native.arguments.find(c => c.command === 'record.start')?.args.taskId);
+    native.emit('audioPreviewChunk', { taskId, segmentIndex: 0, pcm16Base64: Buffer.from([1, 2, 3, 4]).toString('base64') });
+    await new Promise(resolveDelay => setTimeout(resolveDelay, 40));
+
+    assert.equal(controller.state.liveTranscript, '实时预览');
+    assert.equal(controller.state.liveProvisional, '中');
+
+    await controller.finishRecording();
+    assert.equal(seenUrls.includes('/v1/audio/transcriptions/stream/chunk'), true);
+    assert.equal(seenUrls.includes('/v1/audio/transcriptions/stream/finish'), true);
+    assert.equal(seenUrls.includes('/v1/audio/transcriptions'), false);
+    assert.equal(seenUrls.includes('/v1/audio/transcriptions/stream/close'), false);
+    assert.equal(controller.state.draft, '实时预览完成！');
+    assert.equal(stages.includes('transcribing'), false);
+    assert.ok(stages.includes('polishing'));
+    assert.equal(polishingLiveTranscript, '实时预览完成。');
+    assert.equal(seenLiveTranscripts.some(text => text.includes('实时预览完成。实时预览')), false);
+
+    // voiceTranslation with streaming enters 'translating' directly without 'transcribing'
+    stages.length = 0;
+    await controller.perform('voiceTranslation', {});
+    const vtTaskId = String(native.arguments.filter(c => c.command === 'record.start').at(-1)?.args.taskId);
+    native.emit('audioPreviewChunk', { taskId: vtTaskId, segmentIndex: 0, pcm16Base64: Buffer.from([1, 2, 3, 4]).toString('base64') });
+    await new Promise(resolveDelay => setTimeout(resolveDelay, 40));
+    await controller.finishRecording();
+    assert.equal(stages.includes('transcribing'), false);
+    assert.ok(stages.includes('translating'));
+  } finally {
+    await controller.shutdown();
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

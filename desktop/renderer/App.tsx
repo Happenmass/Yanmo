@@ -297,7 +297,7 @@ function Dictionary({ state }: { state: AppState }) {
         </div> : <div className="empty-state"><p>{query ? '没有找到匹配的词语。' : tab !== 'all' ? '此类别还没有词条。' : '从一个熟悉的名字开始。'}</p></div>}
       </div>
     </fieldset>
-    <p className="dictionary-note">全局词可用于所有应用。应用组词会在对应场景生效。备注和常见误识别用于整理时消歧。</p>
+    <p className="dictionary-note">全局词可用于所有应用。应用组词会在对应场景的语音识别中生效。</p>
   </section>;
 }
 
@@ -372,7 +372,7 @@ function Preferences({ state }: { state: AppState }) {
     <PreferenceSection title="麦克风"><label className="inline-setting"><span>输入设备</span><select aria-label="输入设备" value={settings.microphone} onChange={event => patch({ microphone: event.target.value })}><option value="">跟随系统</option>{state.native.devices.map(device => <option key={device.id} value={device.id}>{device.name}</option>)}</select></label><p className="fine-print">仅选择言墨使用的输入设备，不更改系统默认麦克风。录音无提示音，不回放麦克风声音。</p></PreferenceSection>
     <AcpmSection state={state}/>
     <SyncSection state={state}/>
-    <PreferenceSection title="API 服务"><p className="fine-print">可按需为语音识别或文字处理单独切换为兼容 OpenAI 的在线 API；未启用时默认使用 AcpmRuntime。文字请求可包含转写、词库和已启用的光标上下文。{state.platform === 'mac' && '语音写入后 10 秒内按 Enter，当前输入框的可读正文可能与上一段口述一起交给同一文字服务提取词条。'}只有启用在线语音识别时才会发送音频。API Key 加密保存。</p>{(Object.keys(CAPABILITIES) as Capability[]).map(capability => <OnlineSetting key={capability} capability={capability} state={state}/>)}</PreferenceSection>
+    <PreferenceSection title="API 服务"><p className="fine-print">可按需为语音识别或文字处理单独切换为兼容 OpenAI 的在线 API；未启用时默认使用 AcpmRuntime。文字请求可包含转写和已启用的光标上下文。{state.platform === 'mac' && '语音写入后 10 秒内按 Enter，当前输入框的可读正文可能与上一段口述一起交给同一文字服务提取词条。'}只有启用在线语音识别时才会发送音频和热词。API Key 加密保存。</p>{(Object.keys(CAPABILITIES) as Capability[]).map(capability => <OnlineSetting key={capability} capability={capability} state={state}/>)}</PreferenceSection>
     <PreferenceSection title="文字与隐私">
       <CheckSetting title="识别后自动整理" checked={settings.polishEnabled} onChange={value => patch({ polishEnabled: value })}/>
       <p className="fine-print">关闭自动整理，或 AcpmRuntime 文字模型与在线 API 均不可用时，直接写入语音识别结果。</p>
@@ -438,9 +438,27 @@ function Overlay({ state }: { state: AppState }) {
   if (!view) return null;
   const names: Record<string, string> = { preparing: '准备中…', transcribing: '识别中…', polishing: '整理中…', translating: '翻译中…', inserting: '写入中…' };
   const phase = view.stage === 'recording' || view.stage === 'success' || view.stage === 'failure' ? view.stage : 'busy';
-  const preview = (view.liveTranscript || '').trim();
-  const previewText = preview.length > 34 ? '…' + preview.slice(-34) : preview;
-  return <div className="overlay-shell"><div className="overlay-stack">{previewText && (phase === 'recording' || phase === 'busy') ? <div className={'overlay-preview' + (shown ? '' : ' leaving')} role="status">{previewText}</div> : null}<div key={entry.current} className={'voice-overlay' + (shown ? '' : ' leaving')} title={ACTIONS[view.action] + ' · 完成后写入当前输入位置；Esc 取消'} aria-label="完成后写入当前输入位置"><div className="overlay-phase" key={phase}>
+  const confirmed = (view.liveTranscript || '').trim();
+  const provisional = (view.liveProvisional || '').trim();
+  const gap = confirmed && provisional && /[A-Za-z0-9]$/.test(confirmed) && /^[A-Za-z0-9]/.test(provisional) ? ' ' : '';
+  const fullPreview = confirmed + gap + provisional;
+  const maxPreviewChars = 34;
+  let confirmedVisible = '';
+  let provisionalVisible = '';
+  if (fullPreview) {
+    if (fullPreview.length > maxPreviewChars) {
+      const start = fullPreview.length - maxPreviewChars;
+      const tailConfirmed = confirmed.length > start ? confirmed.slice(start) : '';
+      const tailGap = confirmed.length >= start ? gap : (confirmed.length + gap.length > start ? gap.slice(start - confirmed.length) : '');
+      const provStart = Math.max(0, start - confirmed.length - gap.length);
+      confirmedVisible = '…' + tailConfirmed + tailGap;
+      provisionalVisible = provisional.slice(provStart);
+    } else {
+      confirmedVisible = confirmed + gap;
+      provisionalVisible = provisional;
+    }
+  }
+  return <div className="overlay-shell"><div className="overlay-stack">{(confirmedVisible || provisionalVisible) && (phase === 'recording' || phase === 'busy') ? <div className={'overlay-preview' + (shown ? '' : ' leaving')} role="status">{confirmedVisible}{provisionalVisible ? <span className="overlay-provisional">{provisionalVisible}</span> : null}</div> : null}<div key={entry.current} className={'voice-overlay' + (shown ? '' : ' leaving')} title={ACTIONS[view.action] + ' · 完成后写入当前输入位置；Esc 取消'} aria-label="完成后写入当前输入位置"><div className="overlay-phase" key={phase}>
     {phase === 'success' ? <span className="overlay-result"><BrushCheck/>已写入</span>
       : phase === 'failure' ? (view.seconds > 0 && view.draft
         ? <button className="overlay-failure" onClick={() => void api('revealDraft')}>未完成 · 查看文稿</button>

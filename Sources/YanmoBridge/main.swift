@@ -47,9 +47,12 @@ final class Bridge {
         keys.onReturn = { [weak self] in self?.correction?.returnPressed() }
     }
 
-    func send(_ value: [String: Any]) {
+    private nonisolated static let stdoutLock = NSLock()
+    nonisolated func send(_ value: [String: Any]) {
         guard JSONSerialization.isValidJSONObject(value),
               let data = try? JSONSerialization.data(withJSONObject: value, options: .withoutEscapingSlashes) else { return }
+        Self.stdoutLock.lock()
+        defer { Self.stdoutLock.unlock() }
         do {
             try FileHandle.standardOutput.write(contentsOf: data)
             try FileHandle.standardOutput.write(contentsOf: Data([10]))
@@ -278,7 +281,7 @@ final class Bridge {
                                        "characters": characterCount, "confirmed": false])
                         }
                         guard let observationID else { return }
-                        self.correction = CorrectionObservation(text: text, transcript: transcript) { [weak self] original, final, transcript in
+                        self.correction = CorrectionObservation(text: text, transcript: transcript, targetPID: application.processIdentifier) { [weak self] original, final, transcript in
                             var event = ["event": "correction", "observationId": observationID, "original": original, "text": final]
                             if let transcript { event["transcript"] = transcript }
                             self?.send(event)
@@ -295,18 +298,45 @@ final class Bridge {
                 correction?.stop(); correction = nil; lastRecording = nil
                 let generation = UUID(); recordingGeneration = generation
                 let taskId = args["taskId"] as? String ?? ""
-                var onSegment: (@Sendable (Data, Int) -> Void)?
+                var onSegment: (@Sendable (Data, Int, Data?) -> Void)?
+                var onPreviewChunk: (@Sendable (Data, Int) -> Void)?
                 if args["streamingVad"] as? Bool == true {
-                    onSegment = { [weak self] wav, index in
+                    onSegment = { [weak self] wav, index, tailPreviewPcm16 in
                         let encoded = wav.base64EncodedString()
+                        let encodedTailPcm = tailPreviewPcm16.flatMap { $0.isEmpty ? nil : $0.base64EncodedString() }
                         DispatchQueue.main.async {
                             MainActor.assumeIsolated {
-                                self?.emitAudioSegment(taskId: taskId, generation: generation, index: index, audioBase64: encoded)
+                                self?.emitAudioSegment(
+                                    taskId: taskId,
+                                    generation: generation,
+                                    index: index,
+                                    audioBase64: encoded,
+                                    tailPreviewPcm16Base64: encodedTailPcm
+                                )
+                            }
+                        }
+                    }
+                    if args["livePreview"] as? Bool == true {
+                        onPreviewChunk = { [weak self] pcm16Data, segmentIndex in
+                            let encoded = pcm16Data.base64EncodedString()
+                            DispatchQueue.main.async {
+                                MainActor.assumeIsolated {
+                                    self?.emitAudioPreviewChunk(
+                                        taskId: taskId,
+                                        generation: generation,
+                                        segmentIndex: segmentIndex,
+                                        pcm16Base64: encoded
+                                    )
+                                }
                             }
                         }
                     }
                 }
-                try await recorder.start(deviceUID: args["device"] as? String ?? "", onSegment: onSegment)
+                try await recorder.start(
+                    deviceUID: args["device"] as? String ?? "",
+                    onSegment: onSegment,
+                    onPreviewChunk: onPreviewChunk
+                )
                 guard recordingGeneration == generation else { throw EngineError(message: "录音已取消。") }
                 recordingID = taskId
                 meter?.invalidate()
@@ -326,6 +356,9 @@ final class Bridge {
                 ]
                 if let tail = recording.tailData, !tail.isEmpty {
                     finishResult["tailAudioBase64"] = await Task.detached(priority: .userInitiated) { tail.base64EncodedString() }.value
+                }
+                if let tailPreview = recording.tailPreviewPcm16, !tailPreview.isEmpty {
+                    finishResult["tailPreviewPcm16Base64"] = await Task.detached(priority: .userInitiated) { tailPreview.base64EncodedString() }.value
                 }
                 result = finishResult
             case "record.cancel":
@@ -367,9 +400,29 @@ final class Bridge {
         } catch { send(["id": id, "ok": false, "error": error.localizedDescription]) }
     }
 
-    private func emitAudioSegment(taskId: String, generation: UUID, index: Int, audioBase64: String) {
+    private func emitAudioSegment(
+        taskId: String,
+        generation: UUID,
+        index: Int,
+        audioBase64: String,
+        tailPreviewPcm16Base64: String?
+    ) {
         guard recordingGeneration == generation, recordingID == taskId else { return }
-        send(["event": "audioSegment", "taskId": taskId, "index": index, "audioBase64": audioBase64])
+        var payload: [String: Any] = [
+            "event": "audioSegment",
+            "taskId": taskId,
+            "index": index,
+            "audioBase64": audioBase64,
+        ]
+        if let tailPreviewPcm16Base64 {
+            payload["tailPreviewPcm16Base64"] = tailPreviewPcm16Base64
+        }
+        send(payload)
+    }
+
+    private func emitAudioPreviewChunk(taskId: String, generation: UUID, segmentIndex: Int, pcm16Base64: String) {
+        guard recordingGeneration == generation, recordingID == taskId else { return }
+        send(["event": "audioPreviewChunk", "taskId": taskId, "segmentIndex": segmentIndex, "pcm16Base64": pcm16Base64])
     }
 
     func shutdown() {

@@ -108,6 +108,42 @@ export async function startAcpmMock(initial: AcpmMockOptions = {}): Promise<Acpm
         }));
         return;
       }
+      if (req.url === '/v1/audio/transcriptions/stream/start') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ session_id: 'mock-stream-1', model: 'qwen3-asr-1.7b', sample_rate: 16000 }));
+        return;
+      }
+      if (req.url === '/v1/audio/transcriptions/stream/chunk') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          session_id: 'mock-stream-1',
+          confirmed_text: options.transcript ?? '预算三千五百元',
+          provisional_text: '',
+          language: options.language ?? 'zh',
+          decode_ms: 12,
+        }));
+        return;
+      }
+      if (req.url === '/v1/audio/transcriptions/stream/reset') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ session_id: 'mock-stream-1', status: 'ok' }));
+        return;
+      }
+      if (req.url === '/v1/audio/transcriptions/stream/finish') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          session_id: 'mock-stream-1',
+          text: options.transcript ?? '预算三千五百元，周五交付，不是周四。',
+          language: options.language ?? 'zh',
+          decode_ms: 15,
+        }));
+        return;
+      }
+      if (req.url === '/v1/audio/transcriptions/stream/close') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ session_id: 'mock-stream-1', status: 'closed' }));
+        return;
+      }
       if (req.url === '/v1/chat/completions') {
         const parsed = JSON.parse(body) as { prompt_cache_key?: string; messages?: { role: string; content: string }[] };
         const userContent = parsed.messages?.at(-1)?.content ?? '';

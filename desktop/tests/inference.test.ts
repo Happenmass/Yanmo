@@ -85,7 +85,7 @@ test('InferenceService 调度 AcpmRuntime VAD / ASR / LLM、记录用量与归�
       if (req.url === '/v1/chat/completions') {
         const parsed = JSON.parse(body);
         const content = parsed.prompt_cache_key === 'yanmo-correction-terms'
-          ? '["沈砚"]'
+          ? '["沈砚","原文已有词"]'
           : parsed.prompt_cache_key === 'yanmo-translate-selection'
             ? parsed.messages[1].content.includes('⟦YANMO_CODE_0⟧')
               ? 'Keep ⟦YANMO_CODE_0⟧ here.'
@@ -220,8 +220,14 @@ test('InferenceService 调度 AcpmRuntime VAD / ASR / LLM、记录用量与归�
     assert.match(truncated.at(-1)!.message!, /长度上限/);
     chatFinish = 'stop';
 
-    // 9. Correction terms extraction
-    const terms = await service.extractCorrectionTerms('联系沈言', '联系沈砚', defaultSettings(), { online: {}, acpmToken: '' });
+    // 9. Correction terms extraction: short-circuits non-substantive edits & filters terms already verbatim in original
+    const skippedCallsBefore = calls.length;
+    assert.deepEqual(
+      await service.extractCorrectionTerms('明天联系沈砚。', '\u200B明天联系沈砚。\n补充一句', defaultSettings(), { online: {}, acpmToken: '' }),
+      [],
+    );
+    assert.equal(calls.length, skippedCallsBefore);
+    const terms = await service.extractCorrectionTerms('原文已有词 联系沈言', '原文已有词 联系沈砚', defaultSettings(), { online: {}, acpmToken: '' });
     assert.deepEqual(terms, ['沈砚']);
 
     // 10. Abort/cancel emits cancelled
@@ -326,5 +332,191 @@ test('InferenceService.transcribeSegment 拼接前置上下文、执行 Pyannote
     assert.match(transcribeCalls[0].prompt!, /编辑器前缀前一段已识别/);
   } finally {
     server.close();
+  }
+});
+
+test('InferenceService 仅向 ASR 传入热词，所有文字后处理均清空词库', async () => {
+  const asrPrompts: (string | null)[] = [];
+  const chatPayloads: Record<string, unknown>[] = [];
+  const service = new InferenceService({
+    promptsDir,
+    fetchImpl: (async (url, init) => {
+      const urlString = String(url);
+      if (urlString.endsWith('/audio/transcriptions')) {
+        const form = init?.body as FormData;
+        const prompt = form.get('prompt');
+        asrPrompts.push(typeof prompt === 'string' ? prompt : null);
+        return new Response(JSON.stringify({ text: '测试言墨识别' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (urlString.endsWith('/chat/completions')) {
+        const parsed = JSON.parse(String(init?.body));
+        chatPayloads.push(JSON.parse(String(parsed.messages[1].content)));
+        return new Response(JSON.stringify({
+          choices: [{ index: 0, message: { content: '测试输出' }, finish_reason: 'stop' }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      throw new Error(`Unexpected URL: ${urlString}`);
+    }) as typeof fetch,
+  });
+
+  const online = {
+    asr: { base_url: 'https://api.example.com/v1', model: 'whisper-1', api_key: 'sk' },
+    text: { base_url: 'https://api.example.com/v1', model: 'qwen-plus', api_key: 'sk' },
+  };
+  const contextWithLexicon = {
+    application: '备忘录',
+    category: 'document',
+    lexicon: [{ term: '言墨', hint: '本地语音输入法', aliases: ['研墨'] }],
+    before: '',
+    after: '',
+  };
+
+  // 1. dictation (polish)
+  await service.run(baseRequest({
+    task_id: 't-dictation-polish',
+    operation: 'dictation',
+    style: '自然整理',
+    asr_hotwords: ['言墨'],
+    acpmTextReady: false,
+    online,
+    context: contextWithLexicon,
+  }), Buffer.from('RIFF_WAV'), () => {});
+
+  // 2. dictation (verbatim)
+  await service.run(baseRequest({
+    task_id: 't-dictation-verbatim',
+    operation: 'dictation',
+    style: '保留原话',
+    pretranscribed: true,
+    text: '原文',
+    asr_hotwords: ['言墨'],
+    acpmTextReady: false,
+    online: { text: online.text },
+    context: contextWithLexicon,
+  }), undefined, () => {});
+
+  // 3. manual polish
+  await service.run(baseRequest({
+    task_id: 't-polish',
+    operation: 'polish',
+    text: '原文',
+    asr_hotwords: ['言墨'],
+    acpmTextReady: false,
+    online: { text: online.text },
+    context: contextWithLexicon,
+  }), undefined, () => {});
+
+  // 4. voiceTranslation
+  await service.run(baseRequest({
+    task_id: 't-voice-trans',
+    operation: 'voiceTranslation',
+    pretranscribed: true,
+    text: '你好',
+    target_language: 'en',
+    asr_hotwords: ['言墨'],
+    acpmTextReady: false,
+    online: { text: online.text },
+    context: contextWithLexicon,
+  }), undefined, () => {});
+
+  // 5. selectionTranslation
+  await service.run(baseRequest({
+    task_id: 't-selection-trans',
+    operation: 'selectionTranslation',
+    text: '你好',
+    target_language: 'en',
+    acpmTextReady: false,
+    online: { text: online.text },
+    context: contextWithLexicon,
+  }), undefined, () => {});
+
+  assert.equal(asrPrompts.length, 1);
+  assert.match(asrPrompts[0]!, /Hotwords: 言墨/);
+  assert.equal(chatPayloads.length, 5);
+  assert.equal(Object.hasOwn(chatPayloads[0].AUDIO_CONTEXT as object, 'lexicon'), false);
+  assert.deepEqual((chatPayloads[1].CONTEXT as { lexicon: unknown[] }).lexicon, []);
+  assert.equal(Object.hasOwn(chatPayloads[2].AUDIO_CONTEXT as object, 'lexicon'), false);
+  assert.deepEqual((chatPayloads[3].CONTEXT as { lexicon: unknown[] }).lexicon, []);
+  assert.deepEqual((chatPayloads[4].GLOSSARY), []);
+});
+
+test('InferenceService 流式 ASR 预览在旧版 404 或在线 ASR 下优雅降级并始终传 language=auto', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'yanmo-stream-infer-'));
+  let return404 = true;
+  const requests: { url: string; body: Record<string, unknown> }[] = [];
+  const server = createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
+      requests.push({ url: req.url!, body });
+      if (return404) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Not found', request_id: 'r1', stage: 'HTTP_ADMISSION', detail: '404', elapsed_ms: 0, retryable: false } }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (req.url === '/v1/audio/transcriptions/stream/start') {
+        res.end(JSON.stringify({ session_id: 's-live', model: 'qwen3-asr-1.7b', sample_rate: 16000 }));
+      } else if (req.url === '/v1/audio/transcriptions/stream/chunk') {
+        res.end(JSON.stringify({ session_id: 's-live', confirmed_text: '早上', provisional_text: '好', language: 'Chinese', decode_ms: 9 }));
+      } else if (req.url === '/v1/audio/transcriptions/stream/finish') {
+        res.end(JSON.stringify({ session_id: 's-live', text: '早上好用言墨。', language: 'Chinese', decode_ms: 12 }));
+      } else {
+        res.end(JSON.stringify({ session_id: 's-live', status: 'ok' }));
+      }
+    });
+  });
+
+  try {
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const port = (server.address() as { port: number }).port;
+    const service = new InferenceService({ promptsDir });
+    const req = baseRequest({
+      acpm: { mode: 'remote', remoteBaseURL: `http://127.0.0.1:${port}`, asrModel: 'qwen3-asr-1.7b', textModel: 'yanmo-correct-4b-cot', vadEnabled: true },
+      acpmToken: 'tok',
+      online: {},
+      context: { application: 'Notes', category: 'document', lexicon: [], before: '会议纪要', after: '' },
+      asr_hotwords: ['言墨', 'AcpmRuntime'],
+    });
+
+    // Online ASR skips local stream preview & finish
+    const onlineReq = baseRequest({ ...req, online: { asr: { base_url: 'https://api.example.com/v1', model: 'whisper-1', api_key: 'k' } } });
+    assert.equal(await service.startAsrStream(onlineReq), null);
+    assert.equal(await service.finishAsrStream(onlineReq, 's-live'), null);
+
+    // Older AcpmRuntime returning 404 degrades gracefully to null
+    assert.equal(await service.startAsrStream(req), null);
+    assert.equal(await service.finishAsrStream(req, 's-live'), null);
+
+    // Newer AcpmRuntime succeeds and passes language: 'auto' + Hotwords/before prompt
+    return404 = false;
+    const started = await service.startAsrStream(req, '');
+    assert.deepEqual(started, { sessionId: 's-live', model: 'qwen3-asr-1.7b' });
+    const chunk = await service.feedAsrStreamChunk(req, 's-live', 'AAAA');
+    assert.deepEqual(chunk, { confirmedText: '早上', provisionalText: '好' });
+    await service.resetAsrStream(req, 's-live', '前一段识别正文');
+    const finished = await service.finishAsrStream(req, 's-live', { pcm16Base64: 'BBBB', closeAfter: true });
+    assert.deepEqual(finished, {
+      text: '早上好用言墨。',
+      engine: 'qwen3-asr-1.7b',
+      language: 'Chinese',
+      languageSource: 'detected',
+    });
+    await service.closeAsrStream(req, 's-live');
+    const startReq = requests.filter(r => r.url === '/v1/audio/transcriptions/stream/start').at(-1);
+    const resetReq = requests.filter(r => r.url === '/v1/audio/transcriptions/stream/reset').at(-1);
+    assert.equal(startReq?.body.language, 'auto');
+    assert.match(String(startReq?.body.prompt), /会议纪要/);
+    assert.match(String(startReq?.body.prompt), /Hotwords: 言墨, AcpmRuntime/);
+    assert.match(String(resetReq?.body.prompt), /前一段识别正文/);
+    assert.match(String(resetReq?.body.prompt), /Hotwords: 言墨, AcpmRuntime/);
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
   }
 });

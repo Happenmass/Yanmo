@@ -79,7 +79,7 @@ let overlayHide: NodeJS.Timeout | undefined;
 function showOverlay() {
   if (quitting || overlay.isDestroyed()) return;
   clearTimeout(overlayHide); overlayHide = undefined;
-  const hasPreview = Boolean(controller.state.liveTranscript && busy(controller.state.stage));
+  const hasPreview = Boolean((controller.state.liveTranscript || controller.state.liveProvisional) && busy(controller.state.stage));
   const width = controller.state.learnedTerms?.length ? 440 : hasPreview ? 380 : overlaySize.width;
   const height = hasPreview && !controller.state.learnedTerms?.length ? 116 : overlaySize.height;
   const [curW, curH] = overlay.getSize();

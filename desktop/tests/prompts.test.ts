@@ -10,7 +10,9 @@ import {
   buildVerbatimPrompt,
   buildVoiceTranslationPrompt,
   detectLanguageHint,
+  hasCorrectionDiff,
   loadPromptTemplates,
+  normalizeCorrectionText,
   normalizeLexicon,
   parseCorrectionTerms,
   protectMarkdownCode,
@@ -56,6 +58,7 @@ test('buildPolishPayload 与 buildAsrPrompt 保持字段布局与上下文截断
     asr_results: [{ engine_name: 'qwen3-asr-1.7b', transcript: '你好' }],
   });
   assert.deepEqual(Object.keys(polish), ['INSTRUCTION', 'AUDIO_CONTEXT', 'context', 'ASR_RESULTS']);
+  assert.deepEqual(Object.keys(polish.AUDIO_CONTEXT), ['application', 'background_screen_text']);
   assert.equal(polish.context.text_before_cursor.length, 300);
   assert.equal(polish.context.text_after_cursor.length, 300);
   assert.deepEqual(polish.AUDIO_CONTEXT.application, { categories: ['messaging'], name: '微信' });
@@ -116,6 +119,34 @@ test('buildTranslationPayload、detectLanguageHint 与 parseCorrectionTerms 边�
     parseCorrectionTerms('["沈砚","PostgreSQL","沈砚","不在原文里","多\\n行"]', '明天联系沈砚，检查 PostgreSQL 的索引。'),
     ['沈砚', 'PostgreSQL'],
   );
+  assert.deepEqual(
+    parseCorrectionTerms(
+      '["AcpmRuntime","沈砚","PostgreSQL"]',
+      '用 AcpmRuntime 联系沈砚，检查 PostgreSQL。',
+      '用 AcpmRuntime 联系沈言，检查 postgresql。',
+    ),
+    ['沈砚', 'PostgreSQL'],
+  );
+  assert.deepEqual(
+    parseCorrectionTerms(
+      '["沈砚"]',
+      '沈砚说请明天联系沈砚。',
+      '沈砚说请明天联系沈言。',
+    ),
+    ['沈砚'],
+  );
   assert.throws(() => parseCorrectionTerms('not-json', 'x'), /格式无效/);
   assert.throws(() => parseCorrectionTerms(JSON.stringify(Array.from({ length: 11 }, (_, i) => `t${i}`)), 'x'), /格式无效/);
+
+  assert.equal(normalizeCorrectionText('\u200B第一行\r\n第二行\u00A0 '), '第一行\n第二行');
+  assert.equal(hasCorrectionDiff('明天联系沈砚。', '\u200B明天联系\uFEFF沈砚。\uFFFC'), false);
+  assert.equal(hasCorrectionDiff('明天联系沈砚。', '明天联系沈砚'), false);
+  assert.equal(hasCorrectionDiff('明天联系沈砚。', '@张三 明天联系沈砚。'), false);
+  assert.equal(hasCorrectionDiff('明天联系沈砚。', '请问明天联系沈砚。'), false);
+  assert.equal(hasCorrectionDiff('明天联系沈砚。', '明天联系沈砚。\n顺便发我'), false);
+  assert.equal(hasCorrectionDiff('明天联系沈言。', '明天联系沈砚。'), true);
+  assert.equal(hasCorrectionDiff('明天联系沈言确认方案。', '草稿：明天联系沈砚确认方案。'), true);
+  assert.equal(hasCorrectionDiff('检查 Postgre', '检查 PostgreSQL'), true);
+  assert.equal(hasCorrectionDiff('联系沈', '联系沈砚'), true);
+  assert.equal(hasCorrectionDiff('看下 v1.', '看下 v1.2'), true);
 });

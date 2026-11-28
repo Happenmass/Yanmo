@@ -272,6 +272,51 @@ struct Checks {
             print("PASS: AdaptiveVad balanced thresholds, contiguous split, quiet tracking and tail flush")
         }
 
-        print("14 core checks passed")
+        do {
+            // 7. LinearResampler16k & AdaptiveVad.hasActiveSpeech
+            var resampler48 = LinearResampler16k(inputSampleRate: 48000)
+            let ramp48 = (0..<4800).map { Float($0) / 4800.0 }
+            let out48A = resampler48.process(Array(ramp48[..<2400]))
+            let out48B = resampler48.process(Array(ramp48[2400...]))
+            try require(out48A.count + out48B.count == 1600, "48kHz -> 16kHz exact 3:1 output sample count")
+            try require(abs(out48B[0] - 0.5) < 0.001, "48kHz chunk boundary preserves fractional continuity")
+
+            var resampler441 = LinearResampler16k(inputSampleRate: 44100)
+            let sig441 = (0..<4410).map { sin(Float($0) * 0.01) }
+            let out441 = resampler441.process(Array(sig441[..<1024])) + resampler441.process(Array(sig441[1024...]))
+            try require((1598...1601).contains(out441.count), "44.1kHz -> 16kHz expected sample count")
+
+            let vad = AdaptiveVad(sampleRate: 16000)
+            try require(!vad.hasActiveSpeech, "idle VAD starts inactive")
+            _ = vad.feed(frameRms: 0.0007, frameStartSample: 0, frameEndSample: 320)
+            try require(!vad.hasActiveSpeech, "silence does not activate speech preview")
+            _ = vad.feed(frameRms: 0.02, frameStartSample: 320, frameEndSample: 640)
+            try require(vad.hasActiveSpeech, "speech onset activates speech preview")
+
+            print("PASS: LinearResampler16k and AdaptiveVad.hasActiveSpeech")
+        }
+
+        do {
+            // 8. CorrectionDiff normalization, safe-boundary containment, and substantive changes
+            try require(!CorrectionDiff.hasSubstantiveChange(original: "明天联系沈砚。", draft: "\u{200B}明天联系\u{FEFF}沈砚。\u{FFFC}"), "Invisible AX chars must be ignored")
+            try require(!CorrectionDiff.hasSubstantiveChange(original: "第一行\n第二行", draft: "第一行\r\n第二行\u{00A0} "), "Line-ending and NBSP normalization must match")
+            try require(!CorrectionDiff.hasSubstantiveChange(original: "明天联系沈砚。", draft: "明天联系沈砚"), "Trailing sentence punctuation removal must skip")
+            try require(!CorrectionDiff.hasSubstantiveChange(original: "明天联系沈砚", draft: "明天联系沈砚！"), "Trailing sentence punctuation addition must skip")
+            try require(!CorrectionDiff.hasSubstantiveChange(original: "明天联系沈砚。", draft: "@张三 明天联系沈砚。"), "Pre-existing prefix with untouched original must skip")
+            try require(!CorrectionDiff.hasSubstantiveChange(original: "明天联系沈砚。", draft: "请问明天联系沈砚。"), "Pre-existing CJK prefix with longer untouched sentence must skip")
+            try require(!CorrectionDiff.hasSubstantiveChange(original: "明天联系沈砚。", draft: "明天联系沈砚。\n顺便发我"), "Trailing continuation with untouched original must skip")
+            try require(!CorrectionDiff.hasSubstantiveChange(original: "明天联系沈砚。", draft: "   "), "Empty or whitespace-only draft must skip")
+
+            try require(CorrectionDiff.hasSubstantiveChange(original: "明天联系沈言。", draft: "明天联系沈砚。"), "Chinese character correction must trigger")
+            try require(CorrectionDiff.hasSubstantiveChange(original: "明天联系沈言确认方案。", draft: "草稿：明天联系沈砚确认方案。"), "Correction inside prefixed draft must trigger")
+            try require(CorrectionDiff.hasSubstantiveChange(original: "检查 post grass QL", draft: "检查 PostgreSQL"), "Spacing and case correction must trigger")
+            try require(CorrectionDiff.hasSubstantiveChange(original: "检查 Postgre", draft: "检查 PostgreSQL"), "Latin word completion must not be swallowed by containment")
+            try require(CorrectionDiff.hasSubstantiveChange(original: "联系沈", draft: "联系沈砚"), "Short CJK phrase completion must not be swallowed by containment")
+            try require(CorrectionDiff.hasSubstantiveChange(original: "看下 v1.", draft: "看下 v1.2"), "Version suffix edit must trigger")
+
+            print("PASS: CorrectionDiff normalization and substantive edit guards")
+        }
+
+        print("16 core checks passed")
     }
 }

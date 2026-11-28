@@ -31,6 +31,7 @@ public final class AdaptiveVad {
 
     public let sampleRate: Int
     public private(set) var emittedCount = 0
+    public var hasActiveSpeech: Bool { hasSpeech }
 
     private let postPadFrames: Int
     private let silentCapKeepFrames: Int

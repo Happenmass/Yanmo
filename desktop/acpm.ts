@@ -180,6 +180,32 @@ export interface AcpmTranscriptionResponse {
   segments?: { start_ms: number; end_ms: number; text: string }[];
 }
 
+export interface AcpmAsrStreamStartResponse {
+  session_id: string;
+  model: string;
+  sample_rate: number;
+}
+
+export interface AcpmAsrStreamChunkResponse {
+  session_id: string;
+  confirmed_text: string;
+  provisional_text: string;
+  language?: string | null;
+  decode_ms: number;
+}
+
+export interface AcpmAsrStreamStatusResponse {
+  session_id: string;
+  status: string;
+}
+
+export interface AcpmAsrStreamFinishResponse {
+  session_id: string;
+  text: string;
+  language?: string | null;
+  decode_ms: number;
+}
+
 export interface AcpmChatCompletionResponse {
   id?: string;
   object?: string;
@@ -842,6 +868,85 @@ export class AcpmClient {
     return this.request<AcpmTranscriptionResponse>('POST', '/v1/audio/transcriptions', {
       formData: form,
       priority: 'interactive',
+      signal,
+    });
+  }
+
+  async startAsrStream(
+    options: { model: string; language?: string; prompt?: string },
+    signal?: AbortSignal,
+  ): Promise<AcpmAsrStreamStartResponse> {
+    const body: Record<string, unknown> = {
+      model: options.model,
+      language: options.language ?? 'auto',
+    };
+    if (options.prompt?.trim()) body.prompt = options.prompt.trim();
+    return this.request<AcpmAsrStreamStartResponse>('POST', '/v1/audio/transcriptions/stream/start', {
+      json: body,
+      priority: 'interactive',
+      signal,
+    });
+  }
+
+  async feedAsrStreamChunk(
+    options: { model: string; sessionId: string; pcm16Base64: string },
+    signal?: AbortSignal,
+  ): Promise<AcpmAsrStreamChunkResponse> {
+    return this.request<AcpmAsrStreamChunkResponse>('POST', '/v1/audio/transcriptions/stream/chunk', {
+      json: {
+        model: options.model,
+        session_id: options.sessionId,
+        pcm16_base64: options.pcm16Base64,
+      },
+      priority: 'interactive',
+      signal,
+    });
+  }
+
+  async resetAsrStream(
+    options: { model: string; sessionId: string; language?: string; prompt?: string },
+    signal?: AbortSignal,
+  ): Promise<AcpmAsrStreamStatusResponse> {
+    const body: Record<string, unknown> = {
+      model: options.model,
+      session_id: options.sessionId,
+      language: options.language ?? 'auto',
+    };
+    if (options.prompt?.trim()) body.prompt = options.prompt.trim();
+    return this.request<AcpmAsrStreamStatusResponse>('POST', '/v1/audio/transcriptions/stream/reset', {
+      json: body,
+      priority: 'interactive',
+      signal,
+    });
+  }
+
+  async finishAsrStream(
+    options: { model: string; sessionId: string; pcm16Base64?: string; closeAfter?: boolean },
+    signal?: AbortSignal,
+  ): Promise<AcpmAsrStreamFinishResponse> {
+    const body: Record<string, unknown> = {
+      model: options.model,
+      session_id: options.sessionId,
+      close_after: options.closeAfter ?? true,
+    };
+    if (options.pcm16Base64) body.pcm16_base64 = options.pcm16Base64;
+    return this.request<AcpmAsrStreamFinishResponse>('POST', '/v1/audio/transcriptions/stream/finish', {
+      json: body,
+      priority: 'interactive',
+      signal,
+    });
+  }
+
+  async closeAsrStream(
+    options: { model: string; sessionId: string },
+    signal?: AbortSignal,
+  ): Promise<AcpmAsrStreamStatusResponse> {
+    return this.request<AcpmAsrStreamStatusResponse>('POST', '/v1/audio/transcriptions/stream/close', {
+      json: {
+        model: options.model,
+        session_id: options.sessionId,
+      },
+      priority: 'normal',
       signal,
     });
   }

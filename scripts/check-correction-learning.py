@@ -73,10 +73,11 @@ try:
  status=call('status')
  assert status['accessibility'] and status['eventTap'], 'The test bridge needs macOS Accessibility and an active event tap'
  run('replacement','明天联系沈砚确认方案。',True)
+ run('unchanged-prefix','草稿：明天联系沈言确认方案。',False)
  if not options.replacement_only:
   run('focus-switch','草稿：明天联系沈砚确认方案。',True,focus=True)
   with tempfile.TemporaryDirectory(prefix='yanmo-correction-other-') as other_folder:
-   run('app-switch','草稿：明天联系沈砚确认方案。',True,target=pathlib.Path(other_folder))
+   run('app-switch','草稿：明天联系沈砚确认方案。',False,target=pathlib.Path(other_folder))
   run('cancel-observation','明天联系沈砚确认方案。',False,stop=True)
   run('undo-edit','明天联系沈言确认方案。',False)
   run('no-enter','明天联系沈砚确认方案。',False,send=False)

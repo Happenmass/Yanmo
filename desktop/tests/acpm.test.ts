@@ -187,3 +187,68 @@ test('normalizeAsrLanguage 统一标准化语种标签', () => {
   assert.equal(normalizeAsrLanguage(''), null);
   assert.equal(normalizeAsrLanguage(null), null);
 });
+
+test('AcpmClient 支持流式 ASR 预览 start/chunk/reset/finish/close 协议及 prompt/priority', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'yanmo-acpm-stream-'));
+  const seen: { url: string; priority: string | string[] | undefined; body: Record<string, unknown> }[] = [];
+  const server = createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => {
+      const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
+      seen.push({ url: req.url!, priority: req.headers['x-ai-priority'], body: parsed });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (req.url === '/v1/audio/transcriptions/stream/start') {
+        res.end(JSON.stringify({ session_id: 'sess-1', model: 'qwen3-asr-1.7b', sample_rate: 16000 }));
+      } else if (req.url === '/v1/audio/transcriptions/stream/chunk') {
+        res.end(JSON.stringify({ session_id: 'sess-1', confirmed_text: '明天', provisional_text: '开会', language: 'Chinese', decode_ms: 14.2 }));
+      } else if (req.url === '/v1/audio/transcriptions/stream/reset') {
+        res.end(JSON.stringify({ session_id: 'sess-1', status: 'ok' }));
+      } else if (req.url === '/v1/audio/transcriptions/stream/finish') {
+        res.end(JSON.stringify({ session_id: 'sess-1', text: '明天开会。', language: 'Chinese', decode_ms: 8.5 }));
+      } else {
+        res.end(JSON.stringify({ session_id: 'sess-1', status: 'closed' }));
+      }
+    });
+  });
+  try {
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const port = (server.address() as { port: number }).port;
+    const client = new AcpmClient({ mode: 'remote', remoteBaseURL: `http://127.0.0.1:${port}`, remoteToken: 'tok' });
+
+    const started = await client.startAsrStream({ model: 'qwen3-asr-1.7b', language: 'auto', prompt: 'Hotwords: 言墨' });
+    assert.equal(started.session_id, 'sess-1');
+    assert.equal(started.sample_rate, 16000);
+
+    const chunk = await client.feedAsrStreamChunk({ model: 'qwen3-asr-1.7b', sessionId: 'sess-1', pcm16Base64: 'AAA=' });
+    assert.equal(chunk.confirmed_text, '明天');
+    assert.equal(chunk.provisional_text, '开会');
+
+    const reset = await client.resetAsrStream({ model: 'qwen3-asr-1.7b', sessionId: 'sess-1', language: 'auto', prompt: 'Context: 前文\nHotwords: 言墨' });
+    assert.equal(reset.status, 'ok');
+
+    const finished = await client.finishAsrStream({ model: 'qwen3-asr-1.7b', sessionId: 'sess-1', pcm16Base64: 'BBB=', closeAfter: true });
+    assert.equal(finished.text, '明天开会。');
+    assert.equal(finished.language, 'Chinese');
+
+    const closed = await client.closeAsrStream({ model: 'qwen3-asr-1.7b', sessionId: 'sess-1' });
+    assert.equal(closed.status, 'closed');
+
+    assert.equal(seen.length, 5);
+    assert.equal(seen[0].priority, 'interactive');
+    assert.equal(seen[1].priority, 'interactive');
+    assert.equal(seen[2].priority, 'interactive');
+    assert.equal(seen[3].priority, 'interactive');
+    assert.equal(seen[4].priority, 'normal');
+    assert.equal(seen[0].body.language, 'auto');
+    assert.equal(seen[0].body.prompt, 'Hotwords: 言墨');
+    assert.equal(seen[1].body.pcm16_base64, 'AAA=');
+    assert.equal(seen[2].body.prompt, 'Context: 前文\nHotwords: 言墨');
+    assert.equal(seen[3].body.pcm16_base64, 'BBB=');
+    assert.equal(seen[3].body.close_after, true);
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

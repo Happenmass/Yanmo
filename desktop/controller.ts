@@ -6,9 +6,9 @@ import { InferenceClient, InferenceTaskPayload, OnlineSecrets } from './inferenc
 import { AppInputEvent, LibraryStore, ManuscriptMedia } from './store';
 import { decideRuntime } from './precheck';
 import { matchedTermIDs, scopedTerms, selectASRHotwords, termGroup, termKey } from './hotwords';
-import { joinTranscript, joinTranscriptDelta } from './prompts';
+import { hasCorrectionDiff, joinTranscript, joinTranscriptDelta } from './prompts';
 
-interface FinishedRecording { path?: string; audioBase64?: string; seconds?: number; emittedSegments?: number; tailAudioBase64?: string }
+interface FinishedRecording { path?: string; audioBase64?: string; seconds?: number; emittedSegments?: number; tailAudioBase64?: string; tailPreviewPcm16Base64?: string }
 
 interface Task {
   id: string; action: Action; settings: Settings; destination: Destination; lexicon: Term[];
@@ -26,6 +26,20 @@ interface Task {
   streamLanguageSource?: ASRResult['language_source'];
   streamError?: string;
   pretranscribed?: boolean;
+  previewEnabled?: boolean;
+  previewSessionId?: string | null;
+  previewReady?: Promise<string | null>;
+  previewSegmentIndex?: number;
+  previewAbort?: AbortController;
+  previewPendingChunks?: Buffer[];
+  previewPendingBytes?: number;
+  previewDraining?: boolean;
+  previewDrainPromise?: Promise<void>;
+  previewFedAudio?: boolean;
+  previewFinishing?: boolean;
+  previewClosed?: boolean;
+  previewConfirmed?: string;
+  previewProvisional?: string;
 }
 
 export class Controller extends EventEmitter {
@@ -49,7 +63,7 @@ export class Controller extends EventEmitter {
     super();
     this.state = {
       page: 'desk', stage: 'idle', action: 'dictation', settings: store.settings, library: store.library,
-      selectedID: null, draft: '', original: '', liveTranscript: '', asrResults: [], notice: store.error, seconds: 0, level: 0,
+      selectedID: null, draft: '', original: '', liveTranscript: '', liveProvisional: '', asrResults: [], notice: store.error, seconds: 0, level: 0,
       destinationName: '言墨文稿', checking: false, modelsChecked: false, overlayVisible: false,
       acpm: defaultAcpmInfo(store.settings.acpm.mode), acpmTokenSaved: false,
       native: { accessibility: false, eventTap: false, microphone: 0, devices: [] },
@@ -68,12 +82,117 @@ export class Controller extends EventEmitter {
     native.on('meter', ({ taskId, level }: { taskId: string; level: number }) => {
       if (this.task?.id === taskId && this.state.stage === 'recording') { this.state.level = Math.min(1, Math.max(0, Number(level) || 0)); this.emit('meter', { level: this.state.level, seconds: this.state.seconds }); }
     });
-    native.on('audioSegment', ({ taskId, audioBase64 }: { taskId: string; audioBase64?: string }) => {
+    native.on('audioSegment', ({ taskId, audioBase64, tailPreviewPcm16Base64 }: { taskId: string; audioBase64?: string; tailPreviewPcm16Base64?: string }) => {
       const task = this.task;
-      if (!task || task.id !== taskId || this.state.stage !== 'recording' || !this.inference.transcribeSegment || !audioBase64) return;
+      if (!task || task.id !== taskId || this.state.stage !== 'recording' || !audioBase64) return;
+      if (!this.inference.transcribeSegment && !this.inference.finishAsrStream) return;
       task.emittedSegments = (task.emittedSegments ?? 0) + 1;
+      task.previewSegmentIndex = (task.previewSegmentIndex ?? 0) + 1;
+      const pendingChunks = task.previewPendingChunks?.splice(0) ?? [];
+      task.previewPendingBytes = 0;
+      if (tailPreviewPcm16Base64) {
+        const extra = Buffer.from(tailPreviewPcm16Base64, 'base64');
+        if (extra.length) pendingChunks.push(extra);
+      }
+      const segTailPcm = pendingChunks.length ? Buffer.concat(pendingChunks) : undefined;
+      task.previewConfirmed = '';
+      task.previewProvisional = '';
+      this.state.liveTranscript = task.original;
+      this.state.liveProvisional = '';
       const wav = Buffer.from(audioBase64, 'base64');
+      const operation = task.action === 'voiceTranslation' ? 'voiceTranslation' : 'dictation';
+
+      if (task.previewEnabled && this.inference.finishAsrStream) {
+        const prevReady = task.previewReady;
+        const prevDrain = task.previewDrainPromise;
+        let releaseNextSegment!: (id: string | null) => void;
+        task.previewReady = new Promise<string | null>(resolve => { releaseNextSegment = resolve; });
+        task.segmentChain = (task.segmentChain ?? Promise.resolve()).then(async () => {
+          try {
+            const sessionId = await prevReady;
+            await prevDrain;
+            const hadAudio = Boolean(task.previewFedAudio || (segTailPcm?.length ?? 0) > 0);
+            task.previewFedAudio = false;
+            if (!this.valid(task) || task.abort.signal.aborted) {
+              releaseNextSegment(null);
+              return;
+            }
+            let finalized = false;
+            if (sessionId && task.previewEnabled && hadAudio) {
+              try {
+                const seg = await this.inference.finishAsrStream!(
+                  this.payload(task, operation),
+                  sessionId,
+                  {
+                    pcm16Base64: segTailPcm?.length ? segTailPcm.toString('base64') : undefined,
+                    closeAfter: false,
+                  },
+                  task.abort.signal,
+                );
+                if (seg?.text) {
+                  await this.commitSegmentResult(task, seg);
+                  finalized = true;
+                }
+              } catch {
+                // Fall back to full-segment WAV transcription below.
+              }
+            }
+            if (!this.valid(task) || task.abort.signal.aborted) {
+              releaseNextSegment(null);
+              return;
+            }
+            if (!finalized) {
+              await this.handleAudioSegment(task, wav);
+            }
+            if (!this.valid(task) || task.abort.signal.aborted || !sessionId || !task.previewEnabled) {
+              releaseNextSegment(null);
+              return;
+            }
+            if (this.inference.resetAsrStream) {
+              try {
+                await this.inference.resetAsrStream(this.payload(task, operation), sessionId, task.original, task.abort.signal);
+                releaseNextSegment(sessionId);
+                return;
+              } catch {
+                task.previewEnabled = false;
+                releaseNextSegment(null);
+                return;
+              }
+            }
+            releaseNextSegment(sessionId);
+          } catch {
+            releaseNextSegment(null);
+          }
+        });
+        return;
+      }
+
+      task.previewAbort?.abort();
+      task.previewAbort = new AbortController();
+      if (task.previewEnabled && this.inference.resetAsrStream) {
+        const prevReady = task.previewReady;
+        task.previewReady = Promise.resolve(prevReady).then(async sessionId => {
+          if (!sessionId || !task.previewEnabled || !this.valid(task) || task.abort.signal.aborted) return sessionId ?? null;
+          await this.inference.resetAsrStream!(this.payload(task, operation), sessionId, task.original, task.abort.signal).catch(() => {});
+          return sessionId;
+        });
+      }
       task.segmentChain = (task.segmentChain ?? Promise.resolve()).then(() => this.handleAudioSegment(task, wav));
+    });
+    native.on('audioPreviewChunk', ({ taskId, segmentIndex, pcm16Base64 }: { taskId?: string; segmentIndex?: number; pcm16Base64?: string }) => {
+      const task = this.task;
+      if (!task || task.id !== taskId || this.state.stage !== 'recording' || !task.previewEnabled || task.previewFinishing || !pcm16Base64) return;
+      if ((segmentIndex ?? 0) !== (task.previewSegmentIndex ?? 0)) return;
+      const chunk = Buffer.from(pcm16Base64, 'base64');
+      if (!chunk.length) return;
+      task.previewPendingChunks ??= [];
+      task.previewPendingBytes = (task.previewPendingBytes ?? 0) + chunk.length;
+      task.previewPendingChunks.push(chunk);
+      while ((task.previewPendingBytes ?? 0) > 256_000 && task.previewPendingChunks.length > 1) {
+        const dropped = task.previewPendingChunks.shift()!;
+        task.previewPendingBytes = (task.previewPendingBytes ?? 0) - dropped.length;
+      }
+      void this.drainPreviewChunks(task);
     });
     native.on('shortcutCaptured', ({ shortcut }: { shortcut?: Shortcut }) => {
       if (!shortcut) void this.endCapture();
@@ -229,7 +348,7 @@ export class Controller extends EventEmitter {
     if (this.state.platform === 'mac') void this.native.call('correction.stop').catch(() => {});
     clearTimeout(this.dismiss);
     const task: Task = { id: randomUUID(), action, abort: new AbortController(), settings: structuredClone(this.state.settings), destination: {}, lexicon: structuredClone(this.state.library.lexicon), started: Date.now(), manuscriptID: randomUUID(), original: '', asrResults: [] };
-    this.task = task; this.state.action = action; this.state.stage = 'preparing'; this.state.notice = ''; this.state.liveTranscript = ''; this.state.level = 0; this.state.seconds = 0; this.state.overlayVisible = showOverlay && action !== 'selectionTranslation';
+    this.task = task; this.state.action = action; this.state.stage = 'preparing'; this.state.notice = ''; this.state.liveTranscript = ''; this.state.liveProvisional = ''; this.state.level = 0; this.state.seconds = 0; this.state.overlayVisible = showOverlay && action !== 'selectionTranslation';
     this.changed();
     try {
       await this.cancelling;
@@ -243,42 +362,143 @@ export class Controller extends EventEmitter {
     } catch (error) { if (this.valid(task)) await this.fail(task, (error as Error).message); }
   }
   private valid(task: Task) { return this.task?.id === task.id; }
+  private async commitSegmentResult(
+    task: Task,
+    seg: { text: string; engine: string; language: string | null; languageSource: ASRResult['language_source'] },
+  ) {
+    if (!this.valid(task) || task.abort.signal.aborted || !seg.text) return;
+    const delta = joinTranscriptDelta(task.original, seg.text);
+    task.original = joinTranscript(task.original, seg.text);
+    task.streamEngine = seg.engine;
+    if (seg.language) {
+      task.streamLanguage = seg.language;
+      task.streamLanguageSource = seg.languageSource;
+    }
+    task.asrResults = [{
+      engine_name: task.streamEngine || task.settings.acpm.asrModel,
+      transcript: task.original,
+      language: task.streamLanguage ?? null,
+      language_source: task.streamLanguageSource ?? 'unknown',
+    }];
+    this.state.original = task.original;
+    this.state.liveTranscript = joinTranscript(task.original, task.previewConfirmed || '');
+    const directCommit = task.writeToFocus === true && task.action === 'dictation' && !task.settings.polishEnabled;
+    if (directCommit && delta) {
+      const resp = await this.native.call<{ delivery?: string; name?: string; appKey?: string }>('insert', { text: delta });
+      if (this.valid(task)) {
+        task.committedStreamText = (task.committedStreamText ?? '') + delta;
+        if (resp.name) task.streamDestinationName = resp.name;
+        if (resp.appKey) task.streamAppKey = resp.appKey;
+        if (resp.delivery === 'confirmed') task.streamConfirmed = true;
+      }
+    }
+    if (this.valid(task)) this.changed();
+  }
+
   private async handleAudioSegment(task: Task, wav: Buffer<ArrayBuffer>) {
     if (!this.valid(task) || task.abort.signal.aborted || !this.inference.transcribeSegment || !wav.length) return;
     try {
       const operation = task.action === 'voiceTranslation' ? 'voiceTranslation' : 'dictation';
       const seg = await this.inference.transcribeSegment(this.payload(task, operation), wav, task.original, task.abort.signal);
-      if (!this.valid(task) || task.abort.signal.aborted || !seg.text) return;
-      const delta = joinTranscriptDelta(task.original, seg.text);
-      task.original = joinTranscript(task.original, seg.text);
-      task.streamEngine = seg.engine;
-      if (seg.language) {
-        task.streamLanguage = seg.language;
-        task.streamLanguageSource = seg.languageSource;
-      }
-      task.asrResults = [{
-        engine_name: task.streamEngine || task.settings.acpm.asrModel,
-        transcript: task.original,
-        language: task.streamLanguage ?? null,
-        language_source: task.streamLanguageSource ?? 'unknown',
-      }];
-      this.state.original = task.original;
-      this.state.liveTranscript = task.original;
-      const directCommit = task.writeToFocus === true && task.action === 'dictation' && !task.settings.polishEnabled;
-      if (directCommit && delta) {
-        const resp = await this.native.call<{ delivery?: string; name?: string; appKey?: string }>('insert', { text: delta });
-        if (this.valid(task)) {
-          task.committedStreamText = (task.committedStreamText ?? '') + delta;
-          if (resp.name) task.streamDestinationName = resp.name;
-          if (resp.appKey) task.streamAppKey = resp.appKey;
-          if (resp.delivery === 'confirmed') task.streamConfirmed = true;
-        }
-      }
-      if (this.valid(task)) this.changed();
+      await this.commitSegmentResult(task, seg);
     } catch (error) {
       if (task.abort.signal.aborted || !this.valid(task)) return;
       task.streamError = error instanceof Error ? error.message : '语音识别失败。';
     }
+  }
+
+  private drainPreviewChunks(task: Task): Promise<void> {
+    if (task.previewDraining || !task.previewEnabled || task.previewFinishing || !this.inference.feedAsrStreamChunk) {
+      return task.previewDrainPromise ?? Promise.resolve();
+    }
+    task.previewDraining = true;
+    const run = (async () => {
+      try {
+        while (
+          task.previewEnabled
+          && !task.previewFinishing
+          && this.valid(task)
+          && this.state.stage === 'recording'
+          && (task.previewPendingChunks?.length ?? 0) > 0
+        ) {
+          const sessionId = await task.previewReady;
+          if (!sessionId || !this.valid(task) || this.state.stage !== 'recording' || !task.previewEnabled || task.previewFinishing) {
+            task.previewPendingChunks = [];
+            task.previewPendingBytes = 0;
+            break;
+          }
+          if ((task.previewPendingChunks?.length ?? 0) === 0) break;
+          const segIdx = task.previewSegmentIndex ?? 0;
+          const signal = (task.previewAbort ?? task.abort).signal;
+          const combined = Buffer.concat(task.previewPendingChunks!.splice(0));
+          task.previewPendingBytes = 0;
+          const operation = task.action === 'voiceTranslation' ? 'voiceTranslation' : 'dictation';
+          let res: { confirmedText: string; provisionalText: string } | null = null;
+          try {
+            task.previewFedAudio = true;
+            res = await this.inference.feedAsrStreamChunk!(
+              this.payload(task, operation),
+              sessionId,
+              combined.toString('base64'),
+              signal,
+            );
+          } catch {
+            if (signal.aborted || task.abort.signal.aborted || !this.valid(task) || this.state.stage !== 'recording') {
+              if (segIdx !== (task.previewSegmentIndex ?? 0) && task.previewEnabled && !task.previewFinishing && !task.abort.signal.aborted) {
+                continue;
+              }
+              break;
+            }
+            task.previewEnabled = false;
+            task.previewPendingChunks = [];
+            task.previewPendingBytes = 0;
+            break;
+          }
+          if (task.previewFinishing || segIdx !== (task.previewSegmentIndex ?? 0)) break;
+          if (!res || !this.valid(task) || this.state.stage !== 'recording' || !task.previewEnabled) break;
+          task.previewConfirmed = res.confirmedText;
+          task.previewProvisional = res.provisionalText;
+          this.state.liveTranscript = joinTranscript(task.original, task.previewConfirmed);
+          this.state.liveProvisional = task.previewProvisional;
+          this.changed();
+        }
+      } finally {
+        task.previewDraining = false;
+        task.previewDrainPromise = undefined;
+        if (
+          !task.previewFinishing
+          && task.previewEnabled
+          && this.valid(task)
+          && this.state.stage === 'recording'
+          && (task.previewPendingChunks?.length ?? 0) > 0
+        ) {
+          void this.drainPreviewChunks(task);
+        }
+      }
+    })();
+    task.previewDrainPromise = run;
+    return run;
+  }
+
+  private stopPreviewStream(task: Task) {
+    task.previewEnabled = false;
+    task.previewFinishing = false;
+    task.previewAbort?.abort();
+    task.previewPendingChunks = [];
+    task.previewPendingBytes = 0;
+    task.previewConfirmed = '';
+    task.previewProvisional = '';
+    this.state.liveProvisional = '';
+    if (this.valid(task)) this.state.liveTranscript = task.original;
+    if (!this.inference.closeAsrStream || task.previewClosed) return;
+    task.previewClosed = true;
+    const operation = task.action === 'voiceTranslation' ? 'voiceTranslation' : 'dictation';
+    const payload = this.payload(task, operation);
+    const closePromise = task.previewSessionId
+      ? this.inference.closeAsrStream(payload, task.previewSessionId)
+      : Promise.resolve(task.previewReady).then(id => (id ? this.inference.closeAsrStream!(payload, id) : undefined));
+    task.previewSessionId = null;
+    void closePromise.catch(() => {});
   }
 
   async perform(action: Action, destination?: Destination) {
@@ -287,14 +507,47 @@ export class Controller extends EventEmitter {
     if (this.state.stage === 'recording') { if (action === 'dictation' || this.state.action === action) return this.finishRecording(); return; }
     const task = await this.begin(action, destination); if (!task) return;
     task.writeToFocus = true;
-    this.state.selectedID = null; this.state.draft = ''; this.state.original = ''; this.state.liveTranscript = ''; this.state.asrResults = []; this.userEdited = false;
+    this.state.selectedID = null; this.state.draft = ''; this.state.original = ''; this.state.liveTranscript = ''; this.state.liveProvisional = ''; this.state.asrResults = []; this.userEdited = false;
+    const livePreview = Boolean(
+      this.inference.startAsrStream
+      && this.inference.feedAsrStreamChunk
+      && this.state.runtime.capabilities.asr === 'acpm',
+    );
     try {
       await this.native.call('record.start', {
         device: task.settings.microphone,
         taskId: task.id,
         streamingVad: Boolean(this.inference.transcribeSegment),
+        livePreview,
       });
       if (!this.valid(task)) return;
+      if (livePreview) {
+        task.previewEnabled = true;
+        task.previewSegmentIndex = 0;
+        task.previewAbort = new AbortController();
+        task.previewPendingChunks = [];
+        task.previewPendingBytes = 0;
+        const operation = task.action === 'voiceTranslation' ? 'voiceTranslation' : 'dictation';
+        task.previewReady = this.inference.startAsrStream!(this.payload(task, operation), '', task.abort.signal)
+          .then(res => {
+            task.previewSessionId = res?.sessionId ?? null;
+            if (!res?.sessionId) {
+              task.previewEnabled = false;
+              task.previewPendingChunks = [];
+              task.previewPendingBytes = 0;
+            } else if (this.valid(task) && this.state.stage === 'recording' && (task.previewPendingChunks?.length ?? 0) > 0) {
+              void this.drainPreviewChunks(task);
+            }
+            return task.previewSessionId;
+          })
+          .catch(() => {
+            task.previewEnabled = false;
+            task.previewSessionId = null;
+            task.previewPendingChunks = [];
+            task.previewPendingBytes = 0;
+            return null;
+          });
+      }
       task.started = Date.now(); this.state.stage = 'recording'; this.changed();
       const prewarmAcpm = this.state.runtime.capabilities.asr === 'acpm'
         || (this.state.runtime.capabilities.text === 'acpm' && (action !== 'dictation' || task.settings.polishEnabled));
@@ -308,19 +561,33 @@ export class Controller extends EventEmitter {
   }
   async finishRecording() {
     const task = this.task; if (!task || this.state.stage !== 'recording') return;
+    const canStreamFinish = Boolean(task.previewEnabled && this.inference.finishAsrStream);
+    if (canStreamFinish) {
+      task.previewFinishing = true;
+      task.previewProvisional = '';
+      this.state.liveProvisional = '';
+    } else {
+      this.stopPreviewStream(task);
+    }
     task.recordingEndedAtMs = Date.now();
     const seconds = (task.recordingEndedAtMs - task.started) / 1000;
     clearInterval(this.clock); this.state.seconds = seconds;
-    this.state.stage = 'transcribing'; this.state.level = 0; this.changed();
+    this.state.stage = canStreamFinish
+      ? (task.action === 'voiceTranslation' ? 'translating' : 'polishing')
+      : 'transcribing';
+    this.state.liveTranscript = canStreamFinish ? joinTranscript(task.original, task.previewConfirmed || '') : task.original;
+    this.state.level = 0; this.changed();
     let screenshot: Promise<Buffer | undefined> | undefined;
     try {
       let emittedSegments = 0;
       let tailAudioBase64: string | undefined;
+      let tailPreviewPcm16Base64: string | undefined;
       const recording = this.native.call<FinishedRecording>('record.finish').then(result => {
         // Keep any legacy path even on cancellation so finally can remove that file.
         task.audio = result.path;
         emittedSegments = result.emittedSegments ?? 0;
         tailAudioBase64 = result.tailAudioBase64;
+        tailPreviewPcm16Base64 = result.tailPreviewPcm16Base64;
         if (!this.valid(task)) return;
         if (!task.audio && typeof result.audioBase64 === 'string') {
           if (!result.audioBase64.length || result.audioBase64.length > Math.ceil(maxAudioBytes / 3) * 4) {
@@ -341,15 +608,63 @@ export class Controller extends EventEmitter {
       if (!this.valid(task)) return;
       await task.segmentChain;
       if (!this.valid(task)) return;
+      let streamTailFinalized = false;
+      if (canStreamFinish) {
+        await task.previewDrainPromise;
+        if (!this.valid(task)) return;
+        const pendingChunks = task.previewPendingChunks?.splice(0) ?? [];
+        task.previewPendingBytes = 0;
+        if (tailPreviewPcm16Base64) {
+          const extra = Buffer.from(tailPreviewPcm16Base64, 'base64');
+          if (extra.length) pendingChunks.push(extra);
+        }
+        const finalTailPcm = pendingChunks.length ? Buffer.concat(pendingChunks) : undefined;
+        const sessionId = await Promise.resolve(task.previewReady).catch(() => null);
+        if (this.valid(task) && task.previewEnabled && sessionId && (task.previewFedAudio || (finalTailPcm?.length ?? 0) > 0)) {
+          const operation = task.action === 'voiceTranslation' ? 'voiceTranslation' : 'dictation';
+          try {
+            const seg = await this.inference.finishAsrStream!(
+              this.payload(task, operation),
+              sessionId,
+              {
+                pcm16Base64: finalTailPcm?.length ? finalTailPcm.toString('base64') : undefined,
+                closeAfter: true,
+              },
+              task.abort.signal,
+            );
+            if (seg) {
+              task.previewClosed = true;
+              task.previewSessionId = null;
+              task.previewEnabled = false;
+              task.previewConfirmed = '';
+              task.previewProvisional = '';
+              this.state.liveProvisional = '';
+              if (seg.text) {
+                await this.commitSegmentResult(task, seg);
+                streamTailFinalized = true;
+              }
+            }
+          } catch {
+            // Fall back to WAV transcription below.
+          }
+        }
+        this.stopPreviewStream(task);
+      }
+      if (!this.valid(task)) return;
       const streamedCount = Math.max(emittedSegments, task.emittedSegments ?? 0);
-      if (streamedCount > 0) {
-        if (tailAudioBase64 && this.inference.transcribeSegment) {
+      if (streamedCount > 0 || streamTailFinalized) {
+        if (!streamTailFinalized && tailAudioBase64 && this.inference.transcribeSegment) {
           await this.handleAudioSegment(task, Buffer.from(tailAudioBase64, 'base64'));
         }
         if (!this.valid(task)) return;
-        if (task.streamError && !task.original.trim()) throw new Error(task.streamError);
-        if (!task.original.trim()) throw new Error('没有识别到语音，请靠近麦克风后重试。');
-        task.pretranscribed = true;
+        if (task.original.trim()) {
+          task.pretranscribed = true;
+        } else if (streamedCount > 0) {
+          if (task.streamError) throw new Error(task.streamError);
+          throw new Error('没有识别到语音，请靠近麦克风后重试。');
+        } else if (this.state.seconds < 0.35) {
+          throw new Error('录音太短，请再说一句。');
+        }
       } else if (this.state.seconds < 0.35) {
         throw new Error('录音太短，请再说一句。');
       }
@@ -372,15 +687,15 @@ export class Controller extends EventEmitter {
     finally { await this.deleteAudio(task); }
   }
   private payload(task: Task, operation: InferenceTaskPayload['operation'], text = '', language?: Language): InferenceTaskPayload {
-    const scope = scopedTerms(task.lexicon, task.destination.category);
     const voice = operation === 'dictation' || operation === 'voiceTranslation';
+    const scope = voice ? scopedTerms(task.lexicon, task.destination.category) : undefined;
     return {
       task_id: task.id, operation, text: task.pretranscribed ? task.original : text, target_language: language ?? task.settings.voiceTarget,
       asr_results: (operation === 'polish' || task.pretranscribed) ? task.asrResults : [],
       ...(task.pretranscribed ? { pretranscribed: true } : {}),
       polish: task.settings.polishEnabled, style: task.settings.style,
       archive_audio: task.settings.keepHistory && voice,
-      ...(voice ? { asr_hotwords: selectASRHotwords(scope) } : {}),
+      ...(scope ? { asr_hotwords: selectASRHotwords(scope) } : {}),
       acpm: task.settings.acpm,
       acpmToken: this.acpmToken,
       acpmTextReady: this.state.runtime.capabilities.text === 'acpm',
@@ -391,7 +706,7 @@ export class Controller extends EventEmitter {
       context: {
         application: task.destination.name || '言墨',
         category: task.destination.category || 'general',
-        lexicon: [...scope.application, ...scope.global].map(({ term, hint, aliases }) => ({ term, hint: hint || '', aliases: aliases || [] })),
+        lexicon: [],
         before: task.settings.readContext ? (task.destination.before || '').slice(-300) : '',
         after: task.settings.readContext ? (task.destination.after || '').slice(0, 300) : '',
         ...(task.userText ? { user_text: task.userText } : {}),
@@ -588,7 +903,7 @@ export class Controller extends EventEmitter {
     if (!this.valid(task)) return;
     const saved = !task.original || this.saveTask(task, task.original, false);
     const notice = saved ? message : message + ' ' + this.state.notice;
-    this.state.stage = 'failure'; this.state.notice = notice; this.state.liveTranscript = ''; this.state.level = 0;
+    this.state.stage = 'failure'; this.state.notice = notice; this.state.liveTranscript = ''; this.state.liveProvisional = ''; this.state.level = 0;
     await this.finishTask(task); this.scheduleDismiss(3500); this.changed();
   }
   private scheduleDismiss(ms: number) {
@@ -597,7 +912,7 @@ export class Controller extends EventEmitter {
   }
   private async finishTask(task: Task) {
     if (!this.valid(task)) return;
-    clearInterval(this.clock); this.task = undefined; this.state.liveTranscript = '';
+    clearInterval(this.clock); this.task = undefined; this.state.liveTranscript = ''; this.state.liveProvisional = '';
     await this.native.call('active', { value: false }).catch(() => {});
   }
   private async deleteAudio(task: Task) {
@@ -608,8 +923,9 @@ export class Controller extends EventEmitter {
   async cancel() {
     clearTimeout(this.dismiss);
     const task = this.task;
-    if (!task) { this.state.stage = 'idle'; this.state.liveTranscript = ''; this.state.overlayVisible = false; this.changed(); return; }
-    this.task = undefined; task.abort.abort(); clearInterval(this.clock); this.state.level = 0; this.state.stage = 'idle'; this.state.liveTranscript = ''; this.state.overlayVisible = false;
+    if (!task) { this.state.stage = 'idle'; this.state.liveTranscript = ''; this.state.liveProvisional = ''; this.state.overlayVisible = false; this.changed(); return; }
+    this.stopPreviewStream(task);
+    this.task = undefined; task.abort.abort(); clearInterval(this.clock); this.state.level = 0; this.state.stage = 'idle'; this.state.liveTranscript = ''; this.state.liveProvisional = ''; this.state.overlayVisible = false;
     if (task.action === 'selectionTranslation') { this.state.translation.loading = false; this.state.translation.error = '已取消翻译。'; }
     else if (task.manual) this.state.notice = '已停止整理，当前文稿已保留。';
     else if (task.original) { const saved = this.saveTask(task, task.original, false); this.state.notice = saved ? '已停止整理，识别原文已保留。' : '已停止整理。' + this.state.notice; }
@@ -687,7 +1003,7 @@ export class Controller extends EventEmitter {
     const observation = this.observation;
     if (!observation || value.observationId !== observation.id) return;
     this.observation = undefined;
-    if (typeof value.original !== 'string' || typeof value.text !== 'string' || value.original === value.text || !value.text.trim()) return;
+    if (typeof value.original !== 'string' || typeof value.text !== 'string' || !hasCorrectionDiff(value.original, value.text)) return;
     if (this.state.runtime.capabilities.text === 'unavailable' || this.shuttingDown) return;
     let candidates: string[];
     try {

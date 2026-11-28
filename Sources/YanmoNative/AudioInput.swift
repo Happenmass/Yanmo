@@ -38,12 +38,20 @@ public struct RecordedWAV: Sendable {
     public let seconds: Double
     public let emittedSegments: Int
     public let tailData: Data?
+    public let tailPreviewPcm16: Data?
 
-    public init(data: Data, seconds: Double, emittedSegments: Int = 0, tailData: Data? = nil) {
+    public init(
+        data: Data,
+        seconds: Double,
+        emittedSegments: Int = 0,
+        tailData: Data? = nil,
+        tailPreviewPcm16: Data? = nil
+    ) {
         self.data = data
         self.seconds = seconds
         self.emittedSegments = emittedSegments
         self.tailData = tailData
+        self.tailPreviewPcm16 = tailPreviewPcm16
     }
 }
 
@@ -54,7 +62,11 @@ public final class AudioRecorder: @unchecked Sendable {
     @MainActor private var generation = UUID()
     @MainActor public var level: Double { session?.capture.level ?? 0 }
 
-    @MainActor public func start(deviceUID: String = "", onSegment: (@Sendable (Data, Int) -> Void)? = nil) async throws {
+    @MainActor public func start(
+        deviceUID: String = "",
+        onSegment: (@Sendable (Data, Int, Data?) -> Void)? = nil,
+        onPreviewChunk: (@Sendable (Data, Int) -> Void)? = nil
+    ) async throws {
         cancel()
         let ticket = generation
         let allowed = await AVCaptureDevice.requestAccess(for: .audio)
@@ -76,7 +88,7 @@ public final class AudioRecorder: @unchecked Sendable {
         // Capture through an input tap only. An input-only device does not need
         // a mixer or output node, and the microphone never routes to speakers.
         let format = input.outputFormat(forBus: 0)
-        let capture = try WAVCapture(format: format, onSegment: onSegment)
+        let capture = try WAVCapture(format: format, onSegment: onSegment, onPreviewChunk: onPreviewChunk)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
             capture.append(buffer)
         }
@@ -173,7 +185,15 @@ final class WAVCapture: @unchecked Sendable {
     private let framesLimit: Int
     private let bytesLimit = 120 * 1024 * 1024
     private let vad: AdaptiveVad
-    private let onSegment: (@Sendable (Data, Int) -> Void)?
+    private let onSegment: (@Sendable (Data, Int, Data?) -> Void)?
+    private let onPreviewChunk: (@Sendable (Data, Int) -> Void)?
+    private let previewQueue = DispatchQueue(label: "yanmo.audio.preview", qos: .utility)
+    private static let previewPreRollMaxSamples = 5760
+    private static let previewChunkSamples = 5120
+    private var previewResampler: LinearResampler16k
+    private var previewPreRoll = [Float]()
+    private var previewPending = [Float]()
+    private var previewWasSpeaking = false
     private let segmentFrameSamples: Int
     private var vadAccumSq = 0.0
     private var vadAccumCount = 0
@@ -186,7 +206,11 @@ final class WAVCapture: @unchecked Sendable {
     private var closed = false
     private var power = 0.0
 
-    init(format: AVAudioFormat, onSegment: (@Sendable (Data, Int) -> Void)? = nil) throws {
+    init(
+        format: AVAudioFormat,
+        onSegment: (@Sendable (Data, Int, Data?) -> Void)? = nil,
+        onPreviewChunk: (@Sendable (Data, Int) -> Void)? = nil
+    ) throws {
         let sampleRate = format.sampleRate.rounded()
         let channels = Int(format.channelCount)
         guard sampleRate.isFinite, sampleRate >= 1, sampleRate <= Double(UInt32.max),
@@ -201,6 +225,8 @@ final class WAVCapture: @unchecked Sendable {
         framesLimit = 300 * Int(self.sampleRate)
         self.vad = AdaptiveVad(sampleRate: Int(self.sampleRate))
         self.onSegment = onSegment
+        self.onPreviewChunk = onPreviewChunk
+        self.previewResampler = LinearResampler16k(inputSampleRate: Double(self.sampleRate))
         self.segmentFrameSamples = max(1, Int((Double(self.sampleRate) * 0.02).rounded()))
         data = Data(count: headerSize)
     }
@@ -208,7 +234,8 @@ final class WAVCapture: @unchecked Sendable {
     var level: Double { lock.withLock { power } }
 
     func append(_ buffer: AVAudioPCMBuffer) {
-        var pendingSegments: [(Data, Int)] = []
+        var pendingSegments: [(Data, Int, Data?)] = []
+        var pendingPreviewChunks: [(Data, Int)] = []
         lock.withLock {
             guard failure == nil, !closed, frames < framesLimit, buffer.frameLength > 0 else { return }
             guard Int(buffer.format.channelCount) == channels, buffer.format.sampleRate.rounded() == Double(sampleRate),
@@ -246,7 +273,11 @@ final class WAVCapture: @unchecked Sendable {
             }
             power = min(1, pow(sqrt(square / Double(count)), 0.65) * 2)
 
-            if onSegment != nil {
+            let resampled16k = onPreviewChunk != nil
+                ? previewResampler.process(first, count: count, stride: stride)
+                : []
+
+            if onSegment != nil || onPreviewChunk != nil {
                 for frame in 0..<count {
                     let sample = Double(first[frame * stride])
                     vadAccumSq += sample * sample
@@ -254,11 +285,20 @@ final class WAVCapture: @unchecked Sendable {
                     if vadAccumCount >= segmentFrameSamples {
                         let rms = sqrt(vadAccumSq / Double(segmentFrameSamples))
                         let endSample = vadFrameStartSample + segmentFrameSamples
-                        if let seg = vad.feed(frameRms: rms, frameStartSample: vadFrameStartSample, frameEndSample: endSample),
-                           let segWav = sliceWAV(startFrame: seg.startFrame, endFrame: seg.endFrame) {
-                            let idx = segmentIndex
-                            segmentIndex += 1
-                            pendingSegments.append((segWav, idx))
+                        if let seg = vad.feed(frameRms: rms, frameStartSample: vadFrameStartSample, frameEndSample: endSample) {
+                            let segTailPcm: Data? = (onPreviewChunk != nil && !previewPending.isEmpty)
+                                ? Self.encodePCM16LE(previewPending[...])
+                                : nil
+                            previewPending.removeAll(keepingCapacity: true)
+                            previewPreRoll.removeAll(keepingCapacity: true)
+                            previewWasSpeaking = false
+                            if onSegment != nil, let segWav = sliceWAV(startFrame: seg.startFrame, endFrame: seg.endFrame) {
+                                let idx = segmentIndex
+                                segmentIndex += 1
+                                pendingSegments.append((segWav, idx, segTailPcm))
+                            } else if onSegment == nil {
+                                segmentIndex += 1
+                            }
                         }
                         vadFrameStartSample = endSample
                         vadAccumSq = 0
@@ -266,22 +306,77 @@ final class WAVCapture: @unchecked Sendable {
                     }
                 }
             }
+
+            if onPreviewChunk != nil, !resampled16k.isEmpty {
+                if vad.hasActiveSpeech {
+                    if !previewWasSpeaking {
+                        previewWasSpeaking = true
+                        if !previewPreRoll.isEmpty {
+                            previewPending.append(contentsOf: previewPreRoll)
+                            previewPreRoll.removeAll(keepingCapacity: true)
+                        }
+                    }
+                    previewPending.append(contentsOf: resampled16k)
+                    while previewPending.count >= Self.previewChunkSamples {
+                        let slice = previewPending.prefix(Self.previewChunkSamples)
+                        previewPending.removeFirst(Self.previewChunkSamples)
+                        pendingPreviewChunks.append((Self.encodePCM16LE(slice), segmentIndex))
+                    }
+                } else {
+                    previewWasSpeaking = false
+                    previewPreRoll.append(contentsOf: resampled16k)
+                    if previewPreRoll.count > Self.previewPreRollMaxSamples {
+                        previewPreRoll.removeFirst(previewPreRoll.count - Self.previewPreRollMaxSamples)
+                    }
+                }
+            }
         }
         if let onSegment, !pendingSegments.isEmpty {
-            for (wav, idx) in pendingSegments {
-                onSegment(wav, idx)
+            for (wav, idx, tailPcm) in pendingSegments {
+                onSegment(wav, idx, tailPcm)
+            }
+        }
+        if let onPreviewChunk, !pendingPreviewChunks.isEmpty {
+            let chunks = pendingPreviewChunks
+            previewQueue.async {
+                for (pcm, idx) in chunks {
+                    onPreviewChunk(pcm, idx)
+                }
             }
         }
     }
 
+    private static func encodePCM16LE(_ samples: ArraySlice<Float>) -> Data {
+        var pcm = Data(capacity: samples.count * 2)
+        for sample in samples {
+            let clamped = max(-1.0 as Float, min(1.0 as Float, sample))
+            let scaled = Int16((clamped * 32767.0).rounded())
+            var le = scaled.littleEndian
+            withUnsafeBytes(of: &le) { pcm.append(contentsOf: $0) }
+        }
+        return pcm
+    }
+
     func fail(_ message: String) {
-        lock.withLock { failure = EngineError(message: message); power = 0 }
+        lock.withLock {
+            failure = EngineError(message: message)
+            power = 0
+            previewPending.removeAll(keepingCapacity: true)
+            previewPreRoll.removeAll(keepingCapacity: true)
+            previewWasSpeaking = false
+        }
     }
 
     func finish() throws -> RecordedWAV {
         try lock.withLock {
             guard !closed else { throw EngineError(message: "录音已经结束。") }
             closed = true
+            let tailPreviewPcm16: Data? = (onPreviewChunk != nil && !previewPending.isEmpty)
+                ? Self.encodePCM16LE(previewPending[...])
+                : nil
+            previewPending.removeAll()
+            previewPreRoll.removeAll()
+            previewWasSpeaking = false
             defer { data = Data() }
             if let failure { throw failure }
             guard frames > 0 else { throw EngineError(message: "录音没有生成，请重试。") }
@@ -296,7 +391,8 @@ final class WAVCapture: @unchecked Sendable {
                 data: data,
                 seconds: Double(frames) / Double(sampleRate),
                 emittedSegments: emitted,
-                tailData: tailData
+                tailData: tailData,
+                tailPreviewPcm16: tailPreviewPcm16
             )
         }
     }

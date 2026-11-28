@@ -1,12 +1,12 @@
 # 双路识别与正文生成
 
-更新：2026-11-13。开发版默认在本机运行语音识别，权重复用用户级全局缓存。文字整理、保留原话和翻译共用用户启用的文字处理 API。本地 LLM 保留供独立评测使用。
+更新：2026-11-27。桌面默认通过 AcpmRuntime 运行语音识别和文字处理，权重复用用户级全局缓存。用户也可以为各能力启用对应的在线 API。
 
 ## 流程
 
-1. Qwen3-ASR-1.7B-8bit 识别音频，返回原始转写及实际检测到的语言。
-2. 语言为中文或英文时，用同一份 SenseVoice Small 多语言权重按 `zh` 或 `en` 再识别一次；其他或未知语言跳过。
-3. 文字 API 根据完整候选、词库和已开启的输入框上下文生成正文。两路地位相同，任一路均可纠正另一路，包括数字。
+1. 常规本地听写使用选定的 Qwen3-ASR 规格，返回原始转写及实际检测到的语言。
+2. 对已有多个识别结果的文稿，重新整理时保留各路候选。历史双路记录包含同段音频的 Qwen3-ASR 与 SenseVoice Small 转写。
+3. 文字模型根据完整候选和已开启的输入框上下文生成正文。两路地位相同，任一路均可纠正另一路，包括数字。词库热词交给语音识别。
 4. 保存正文与原始识别对照；口述任务向写入时的当前焦点粘贴一次，导入音频只生成文稿。
 
 ## 自然整理提示词与输入
@@ -18,13 +18,13 @@
 消息只有两条：固定 `system = polish.txt`，最后一条 `user = JSON`。不向system插入应用、语言、时间或随机ID。JSON序列化保留固定字段顺序：
 
 1. `INSTRUCTION`：自然整理为空；即时消息/文档段落仅填写所选格式，不注入旧版“仅删除填充和重复”等要求。
-2. `AUDIO_CONTEXT`：统一词库 `lexicon`（含 `term`、`hint`、`aliases`）、`application.categories/name`、`background_screen_text`。当前桌面只提供应用及词库，不采集屏幕文本，后者为空数组；不把光标上下文冒充屏幕内容。
+2. `AUDIO_CONTEXT`：`application.categories/name`、`background_screen_text`。当前桌面传入应用信息，屏幕文字为空数组。
 3. `context`：`text_before_cursor`、`text_after_cursor`，各最多300字，读取关闭或不可用时为空。
 4. `ASR_RESULTS`：保留各路 `engine_name` 与 `transcript`，正文置于JSON末尾。手动编辑后仅将当前正文作为一个候选输入，历史双路仍保存在文稿中，不再参与覆盖用户修改。
 
 模型输出正文原样采用，不追加内容清洗、语义检查、数字改写或原文回退。仅空输出、生成截断、取消和运行失败按技术错误处理。在线每次固定4096输出token上限；当前DeepSeek启用thinking、reasoning_effort=low，仅使用最终content。缓存复用沿用现有API，结构稳定可增加相同前缀，实际命中由服务端usage计数核验，不保证固定命中率或提速。
 
-`保留原话`与翻译使用独立任务及原有提示词，不叠加到自然整理。`保留原话`通过 `build_fusion_payload`，翻译通过 `translation_payload`，自然整理通过 `build_polish_payload`；三者与 ASR 上下文均通过 `normalize_lexicon` 统一词库结构。划词翻译保留既有Markdown代码保护。
+`保留原话`与翻译使用独立任务及原有提示词。`保留原话`通过 `buildFusionPayload`，翻译通过 `buildTranslationPayload`，自然整理通过 `buildPolishPayload`。划词翻译保留既有 Markdown 代码保护。
 
 ## 本次验证
 

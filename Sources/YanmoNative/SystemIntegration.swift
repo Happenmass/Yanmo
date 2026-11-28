@@ -100,9 +100,10 @@ public struct InputDestination {
 
     /// Read before Return reaches the app. This lookup does not need a selection.
     @MainActor
-    static func correctionDraft() -> String? {
+    static func correctionDraft(expectedPID: pid_t? = nil) -> String? {
         let timeout: Float = 0.025
         guard !IsSecureEventInputEnabled(), let app = NSWorkspace.shared.frontmostApplication,
+              expectedPID == nil || app.processIdentifier == expectedPID,
               let field = focusedElement(in: app, timeout: timeout) else { return nil }
         AXUIElementSetMessagingTimeout(field, timeout)
         func attribute(_ name: String) -> CFTypeRef? {
@@ -117,8 +118,18 @@ public struct InputDestination {
             var range = CFRange()
             if AXValueGetValue(marker as! AXValue, .cfRange, &range), range.length > 0 { return nil }
         }
+        if let characterCount = attribute(kAXNumberOfCharactersAttribute) as? NSNumber,
+           characterCount.intValue == 0 {
+            return nil
+        }
         guard let text = attribute(kAXValueAttribute) as? String, text.utf16.count <= 4000,
               NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier else { return nil }
+        if let placeholder = attribute("AXPlaceholderValue") as? String {
+            let normalizedPlaceholder = CorrectionDiff.normalize(placeholder)
+            if !normalizedPlaceholder.isEmpty, normalizedPlaceholder == CorrectionDiff.normalize(text) {
+                return nil
+            }
+        }
         return text
     }
 
