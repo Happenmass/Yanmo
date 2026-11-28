@@ -38,7 +38,6 @@ def write_manifest(path, speech_package):
     root = xml.getroot()
     app = root.find("application")
     unused_permissions = {
-        "android.permission.REQUEST_INSTALL_PACKAGES",
         "android.permission.READ_CONTACTS", "android.permission.RECEIVE_SMS",
         "android.permission.READ_MEDIA_IMAGES", "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
         "android.permission.READ_EXTERNAL_STORAGE", "android.permission.ACCESS_WIFI_STATE", "android.permission.WAKE_LOCK",
@@ -57,6 +56,7 @@ def write_manifest(path, speech_package):
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.CHANGE_WIFI_MULTICAST_STATE",
+        "android.permission.REQUEST_INSTALL_PACKAGES",
         speech_package + ".permission.SPEECH",
     )
     for perm in required_permissions:

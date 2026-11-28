@@ -46,11 +46,18 @@ import kotlinx.coroutines.delay
 internal val LocalYanmoDictationStage = compositionLocalOf { VoiceSession.IDLE }
 
 internal object YanmoDictationPreview {
-    val text = mutableStateOf("")
+    val confirmed = mutableStateOf("")
+    val provisional = mutableStateOf("")
 
     @JvmStatic
     fun update(value: String?) {
-        text.value = value?.trim().orEmpty()
+        update(value, "")
+    }
+
+    @JvmStatic
+    fun update(confirmedValue: String?, provisionalValue: String?) {
+        confirmed.value = confirmedValue?.trim().orEmpty()
+        provisional.value = provisionalValue?.replace(Regex("[\\t\\r\\n]+"), " ")?.trim().orEmpty()
     }
 }
 
@@ -98,8 +105,20 @@ internal fun YanmoDictationBar(stage: Int, background: Color, foreground: Color)
         else -> "正在识别"
     }
     var seconds by remember(stage) { mutableLongStateOf(0L) }
-    val preview by YanmoDictationPreview.text
-    val previewTail = if (preview.length > 24) "…" + preview.takeLast(24) else preview
+    val confirmed by YanmoDictationPreview.confirmed
+    val provisional by YanmoDictationPreview.provisional
+    val combined = confirmed + provisional
+    val maxTailChars = 26
+    val tailText = remember(confirmed, provisional) {
+        if (combined.isEmpty()) null
+        else {
+            val truncated = combined.length > maxTailChars
+            val window = if (truncated) combined.takeLast(maxTailChars) else combined
+            val cut = combined.length - window.length
+            val confirmedLenInWindow = (confirmed.length - cut).coerceIn(0, window.length)
+            Triple(if (truncated) "…" else "", window.substring(0, confirmedLenInWindow), window.substring(confirmedLenInWindow))
+        }
+    }
     LaunchedEffect(recording) {
         if (recording) {
             val start = SystemClock.elapsedRealtime()
@@ -124,18 +143,51 @@ internal fun YanmoDictationBar(stage: Int, background: Color, foreground: Color)
         if (recording) {
             Text(String.format(Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60),
                 color = foreground, fontSize = 13.sp, maxLines = 1)
+            if (tailText != null) {
+                val (prefix, conf, prov) = tailText
+                val styled = buildAnnotatedString {
+                    if (prefix.isNotEmpty()) {
+                        withStyle(SpanStyle(color = foreground.copy(alpha = 0.65f))) { append(prefix) }
+                    }
+                    if (conf.isNotEmpty()) {
+                        withStyle(SpanStyle(color = foreground.copy(alpha = 0.92f))) { append(conf) }
+                    }
+                    if (prov.isNotEmpty()) {
+                        withStyle(SpanStyle(color = foreground.copy(alpha = 0.52f))) { append(prov) }
+                    }
+                }
+                Text(
+                    styled,
+                    fontSize = 12.sp,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                Text(
+                    "上滑取消 · 松手结束",
+                    color = foreground.copy(alpha = 0.75f),
+                    fontSize = 12.sp,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        } else if (tailText != null) {
+            val (prefix, conf, prov) = tailText
+            val styled = buildAnnotatedString {
+                if (prefix.isNotEmpty()) {
+                    withStyle(SpanStyle(color = foreground.copy(alpha = 0.65f))) { append(prefix) }
+                }
+                if (conf.isNotEmpty()) {
+                    withStyle(SpanStyle(color = foreground.copy(alpha = 0.88f))) { append(conf) }
+                }
+                if (prov.isNotEmpty()) {
+                    withStyle(SpanStyle(color = foreground.copy(alpha = 0.52f))) { append(prov) }
+                }
+            }
             Text(
-                if (previewTail.isNotEmpty()) previewTail else "上滑取消 · 松手结束",
-                color = foreground.copy(alpha = if (previewTail.isNotEmpty()) 0.92f else 0.75f),
-                fontSize = 12.sp,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        } else if (previewTail.isNotEmpty()) {
-            Text(
-                previewTail,
-                color = foreground.copy(alpha = 0.88f),
+                styled,
                 fontSize = 12.sp,
                 modifier = Modifier.weight(1f),
                 maxLines = 1,

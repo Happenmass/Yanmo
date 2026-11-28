@@ -68,6 +68,10 @@ final class AdaptiveVad {
         return emittedCount;
     }
 
+    boolean hasActiveSpeech() {
+        return hasSpeech || inSpeech;
+    }
+
     Segment feedPcmFrame(byte[] pcm, int offset, int length, int pcmStartByte) {
         if (length < FRAME_BYTES) return null;
         int samples = length / FRAME_BYTES;

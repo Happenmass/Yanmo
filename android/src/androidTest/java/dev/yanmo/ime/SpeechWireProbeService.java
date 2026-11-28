@@ -33,6 +33,8 @@ public final class SpeechWireProbeService extends Service {
     private final Messenger endpoint = new Messenger(new Handler(Looper.getMainLooper(), this::receive));
     private int windows;
     private boolean ready;
+    private boolean streamEnabled;
+    private String activeStreamId;
 
     static byte[] pcm() {
         byte[] pcm = new byte[FIRST_BYTES + TAIL_BYTES];
@@ -41,6 +43,7 @@ public final class SpeechWireProbeService extends Service {
     }
 
     @Override public IBinder onBind(Intent intent) {
+        streamEnabled = intent != null && intent.getBooleanExtra("asrStream", false);
         return endpoint.getBinder();
     }
 
@@ -55,6 +58,44 @@ public final class SpeechWireProbeService extends Service {
                     ready = true;
                     response.putString("asr", "READY");
                     response.putBoolean("asrHints", true);
+                    response.putBoolean("asrStream", streamEnabled);
+                    break;
+                case 8: // ASR_STREAM_START
+                    require(ready && streamEnabled, "unexpected stream start");
+                    activeStreamId = "probe-stream-1";
+                    response.putString("streamSessionId", activeStreamId);
+                    response.putDouble("prepareMs", 1);
+                    response.putDouble("modelLoadMs", 0);
+                    break;
+                case 9: // ASR_STREAM_CHUNK
+                    require(ready && activeStreamId != null && activeStreamId.equals(data.getString("streamSessionId")),
+                            "invalid stream chunk session");
+                    try (ParcelFileDescriptor chunkAudio = data.getParcelable("audio")) {
+                        require(chunkAudio != null && chunkAudio.getStatSize() > 44, "invalid chunk audio");
+                    }
+                    response.putString("confirmedText", "我我明天");
+                    response.putString("provisionalText", "跟");
+                    break;
+                case 10: // ASR_STREAM_FINISH
+                    require(ready && activeStreamId != null && activeStreamId.equals(data.getString("streamSessionId")),
+                            "invalid stream finish session");
+                    ParcelFileDescriptor tailAudio = data.getParcelable("audio");
+                    if (tailAudio != null) tailAudio.close();
+                    response.putString("text", TEXT[Math.min(windows++, TEXT.length - 1)]);
+                    response.putDouble("prepareMs", 0);
+                    response.putDouble("audioTransferMs", 2);
+                    response.putDouble("inferenceMs", 25);
+                    response.putDouble("modelLoadMs", 0);
+                    response.putDouble("frontendMs", 6);
+                    response.putDouble("decodeMs", 12);
+                    if (data.getBoolean("closeAfter", true)) activeStreamId = null;
+                    break;
+                case 11: // ASR_STREAM_RESET
+                    require(ready && activeStreamId != null && activeStreamId.equals(data.getString("streamSessionId")),
+                            "invalid stream reset session");
+                    break;
+                case 12: // ASR_STREAM_CLOSE
+                    activeStreamId = null;
                     break;
                 case 2: // ASR
                     try (ParcelFileDescriptor audio = data.getParcelable("audio")) {

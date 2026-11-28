@@ -36,6 +36,11 @@ final class LocalAsr implements AutoCloseable {
     private static final int STATUS = 1;
     private static final int ASR = 2;
     private static final int CANCEL = 4;
+    private static final int ASR_STREAM_START = 8;
+    private static final int ASR_STREAM_CHUNK = 9;
+    private static final int ASR_STREAM_FINISH = 10;
+    private static final int ASR_STREAM_RESET = 11;
+    private static final int ASR_STREAM_CLOSE = 12;
     private static final Pattern CODE = Pattern.compile("[A-Z0-9_]{1,64}");
     private static final Pattern DETAIL = Pattern.compile("[A-Z0-9_]{1,64}|QNN [a-zA-Z0-9_ ]{1,60}|[A-Za-z0-9_]{1,55}(?:Exception|Error)");
     private static final Pattern NATIVE = Pattern.compile("0x[0-9a-f]{1,16}|(?:errno|exit) -?[0-9]{1,10}");
@@ -54,6 +59,17 @@ final class LocalAsr implements AutoCloseable {
     private volatile boolean disconnected;
     private boolean bound;
     private boolean acceptsHints;
+    private boolean supportsStream;
+
+    static final class StreamChunk {
+        final String confirmed;
+        final String provisional;
+
+        StreamChunk(String confirmed, String provisional) {
+            this.confirmed = confirmed == null ? "" : confirmed;
+            this.provisional = provisional == null ? "" : provisional;
+        }
+    }
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder binder) {
@@ -120,6 +136,7 @@ final class LocalAsr implements AutoCloseable {
     void requireReady() throws Failure {
         Bundle result = request(STATUS, new Bundle(), 5);
         acceptsHints = result.getBoolean("asrHints");
+        supportsStream = result.getBoolean("asrStream");
         String status = result.getString("asr");
         if (!"READY".equals(status)) {
             throw new Failure(status == null ? "INVALID_REPLY" : code(status),
@@ -129,17 +146,106 @@ final class LocalAsr implements AutoCloseable {
 
     boolean acceptsHints() { return acceptsHints; }
 
+    boolean supportsStream() { return supportsStream; }
+
+    String startStream(List<String> hotwords, EditorContext context) throws Failure {
+        Bundle input = new Bundle();
+        appendHints(input, hotwords, context);
+        Bundle reply = request(ASR_STREAM_START, input, 30);
+        String sessionId = reply.getString("streamSessionId");
+        if (sessionId == null || sessionId.isEmpty()) {
+            throw new Failure("INVALID_REPLY", "stage=BINDER_REPLY request=" + reply.getString("id", "-"));
+        }
+        return sessionId;
+    }
+
+    StreamChunk feedStreamChunk(String sessionId, byte[] pcm16) throws IOException {
+        byte[] wav = wrapPcmAsWav(pcm16);
+        String transport = "fd=FILE wavBytes=" + wav.length;
+        try (ParcelFileDescriptor audio = openUnlinkedAudio(wav)) {
+            Bundle input = new Bundle();
+            input.putString("streamSessionId", sessionId);
+            input.putParcelable("audio", audio);
+            Bundle reply = request(ASR_STREAM_CHUNK, input, 30);
+            return new StreamChunk(reply.getString("confirmedText"), reply.getString("provisionalText"));
+        } catch (Failure failure) {
+            throw failure;
+        } catch (IOException failure) {
+            throw new Failure("AUDIO_DESCRIPTOR_IO", "stage=AUDIO_DESCRIPTOR " + transport
+                    + " throwable=" + failure.getClass().getSimpleName());
+        }
+    }
+
+    String finishStream(String sessionId, byte[] tailPcm16, boolean closeAfter) throws IOException {
+        long started = SystemClock.elapsedRealtime();
+        boolean hasAudio = tailPcm16 != null && tailPcm16.length > 0;
+        byte[] wav = hasAudio ? wrapPcmAsWav(tailPcm16) : null;
+        String transport = hasAudio ? ("fd=FILE wavBytes=" + wav.length) : "fd=NONE";
+        try (ParcelFileDescriptor audio = hasAudio ? openUnlinkedAudio(wav) : null) {
+            Bundle input = new Bundle();
+            input.putString("streamSessionId", sessionId);
+            input.putBoolean("closeAfter", closeAfter);
+            if (audio != null) input.putParcelable("audio", audio);
+            long sent = SystemClock.elapsedRealtime();
+            try {
+                Bundle reply = request(ASR_STREAM_FINISH, input, 120);
+                logTiming(reply, sent - started, SystemClock.elapsedRealtime() - sent, transport);
+                String text = reply.getString("text");
+                if (text == null) {
+                    throw new Failure("INVALID_REPLY", "stage=BINDER_REPLY request=" + reply.getString("id", "-"));
+                }
+                return text;
+            } catch (Failure failure) {
+                diagnostics.accept("流式识别结束耗时 " + (SystemClock.elapsedRealtime() - sent) + " ms");
+                throw new Failure(failure.reason, failure.details + " " + transport + " fdMs=" + (sent - started));
+            }
+        } catch (Failure failure) {
+            throw failure;
+        } catch (IOException failure) {
+            throw new Failure("AUDIO_DESCRIPTOR_IO", "stage=AUDIO_DESCRIPTOR " + transport
+                    + " throwable=" + failure.getClass().getSimpleName());
+        }
+    }
+
+    void resetStream(String sessionId, List<String> hotwords, EditorContext context) throws Failure {
+        Bundle input = new Bundle();
+        input.putString("streamSessionId", sessionId);
+        appendHints(input, hotwords, context);
+        request(ASR_STREAM_RESET, input, 10);
+    }
+
+    void closeStream(String sessionId) {
+        if (sessionId == null || sessionId.isEmpty() || disconnected) return;
+        Bundle input = new Bundle();
+        input.putString("streamSessionId", sessionId);
+        try {
+            request(ASR_STREAM_CLOSE, input, 5);
+        } catch (Failure ignored) {
+            // Closing the active stream on teardown is best-effort.
+        }
+    }
+
+    private void appendHints(Bundle input, List<String> hotwords, EditorContext context) {
+        if (!acceptsHints) return;
+        if (!hotwords.isEmpty()) input.putStringArrayList("hotwords", new ArrayList<>(hotwords));
+        if (!context.before.isEmpty()) input.putString("textBeforeCursor", context.before);
+        if (!context.after.isEmpty()) input.putString("textAfterCursor", context.after);
+    }
+
+    private static byte[] wrapPcmAsWav(byte[] pcm16) {
+        byte[] wav = new byte[44 + pcm16.length];
+        System.arraycopy(pcm16, 0, wav, 44, pcm16.length);
+        VoiceSession.writeHeader(wav);
+        return wav;
+    }
+
     String transcribeWindow(byte[] window, List<String> hotwords, EditorContext context) throws IOException {
         long started = SystemClock.elapsedRealtime();
         String transport = "fd=FILE wavBytes=" + window.length;
         try (ParcelFileDescriptor audio = openUnlinkedAudio(window)) {
             Bundle input = new Bundle();
             input.putParcelable("audio", audio);
-            if (acceptsHints) {
-                if (!hotwords.isEmpty()) input.putStringArrayList("hotwords", new ArrayList<>(hotwords));
-                if (!context.before.isEmpty()) input.putString("textBeforeCursor", context.before);
-                if (!context.after.isEmpty()) input.putString("textAfterCursor", context.after);
-            }
+            appendHints(input, hotwords, context);
             long sent = SystemClock.elapsedRealtime();
             try {
                 Bundle reply = request(ASR, input, 120);
@@ -227,7 +333,7 @@ final class LocalAsr implements AutoCloseable {
             received = true;
             String error = reply.getString("error");
             if (error != null) {
-                if (operation == ASR) {
+                if (isAsrOperation(operation)) {
                     String phase = reply.getString("asrPhase", "");
                     switch (phase) {
                         case "prepare": diagnostics.accept("SDK 中断于权重准备"); break;
@@ -265,8 +371,23 @@ final class LocalAsr implements AutoCloseable {
         }
     }
 
+    private static boolean isAsrOperation(int operation) {
+        return operation == ASR || operation == ASR_STREAM_START || operation == ASR_STREAM_CHUNK
+                || operation == ASR_STREAM_FINISH;
+    }
+
     private static String requestDetails(int operation, String requestId, String stage, long started) {
-        String op = operation == ASR ? "ASR" : operation == STATUS ? "STATUS" : "SPEAKERS";
+        String op;
+        switch (operation) {
+            case ASR: op = "ASR"; break;
+            case STATUS: op = "STATUS"; break;
+            case ASR_STREAM_START: op = "ASR_STREAM_START"; break;
+            case ASR_STREAM_CHUNK: op = "ASR_STREAM_CHUNK"; break;
+            case ASR_STREAM_FINISH: op = "ASR_STREAM_FINISH"; break;
+            case ASR_STREAM_RESET: op = "ASR_STREAM_RESET"; break;
+            case ASR_STREAM_CLOSE: op = "ASR_STREAM_CLOSE"; break;
+            default: op = "SPEAKERS"; break;
+        }
         return "operation=" + op + " stage=" + stage + " request=" + requestId
                 + " roundTripMs=" + (SystemClock.elapsedRealtime() - started);
     }

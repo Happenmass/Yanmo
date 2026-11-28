@@ -25,11 +25,11 @@ public final class YanmoInputMethodService extends XimeInputMethodService {
                 new VoiceSession.Listener() {
                     @Override public void onVoiceState(int state) {
                         updateYanmoDictationStage(state);
-                        if (state == VoiceSession.IDLE) YanmoDictationPreview.update("");
+                        if (state == VoiceSession.IDLE) YanmoDictationPreview.update("", "");
                     }
 
-                    @Override public void onVoicePreview(String text) {
-                        YanmoDictationPreview.update(text);
+                    @Override public void onVoicePreview(String confirmed, String provisional) {
+                        YanmoDictationPreview.update(confirmed, provisional);
                     }
                 },
                 this::yanmoComposing);

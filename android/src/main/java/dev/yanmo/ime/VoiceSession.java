@@ -46,10 +46,17 @@ public final class VoiceSession {
     private static final int FRAME_BYTES = 2;
     private static final int WAV_HEADER = 44;
     private static final int WINDOW_BYTES = SAMPLE_RATE * FRAME_BYTES * 24;
+    static final int PRE_ROLL_BYTES = SAMPLE_RATE * FRAME_BYTES * 200 / 1000;
+    static final int STREAM_CHUNK_BYTES = SAMPLE_RATE * FRAME_BYTES * 320 / 1000;
 
     public interface Listener {
         void onVoiceState(int state);
         default void onVoicePreview(String text) {}
+        default void onVoicePreview(String confirmed, String provisional) {
+            String safeConfirmed = confirmed == null ? "" : confirmed;
+            String safeProvisional = provisional == null ? "" : provisional;
+            onVoicePreview(safeProvisional.isEmpty() ? safeConfirmed : safeConfirmed + safeProvisional);
+        }
     }
 
     interface Recorder {
@@ -134,7 +141,7 @@ public final class VoiceSession {
             active = recording;
             recording.event("录音开始");
             worker.execute(() -> process(recording));
-            listener.onVoicePreview("");
+            listener.onVoicePreview("", "");
             listener.onVoiceState(RECORDING);
             return true;
         } catch (RuntimeException error) {
@@ -158,7 +165,13 @@ public final class VoiceSession {
         } finally {
             recording.readyToSave.countDown();
         }
-        listener.onVoiceState(PROCESSING);
+        if (Polish.enabled(app) && recording.streamingActive) {
+            recording.polishing = true;
+            listener.onVoicePreview(recording.lastConfirmedPreview, "");
+            listener.onVoiceState(POLISHING);
+        } else {
+            listener.onVoiceState(PROCESSING);
+        }
     }
 
     public void cancel() {
@@ -169,6 +182,7 @@ public final class VoiceSession {
         if (recording.stopped) return;
         recording.stopped = true;
         recording.cancelled = true;
+        recording.polishing = false;
         recording.finishRecording = true;
         recording.readyToSave.countDown();
         listener.onVoiceState(PROCESSING);
@@ -252,11 +266,10 @@ public final class VoiceSession {
             String raw;
             byte[] wav;
             if (transcriber == null) {
-                LinkedBlockingQueue<byte[]> segmentQueue = new LinkedBlockingQueue<>();
-                byte[] endMarker = new byte[0];
+                LinkedBlockingQueue<StreamEvent> segmentQueue = new LinkedBlockingQueue<>();
                 Future<String> asrFuture = asrWorker.submit(
-                        () -> transcribeQueue(recording, segmentQueue, endMarker, hotwords, polishEnabled, saveRaw));
-                wav = collectStreaming(recording, segmentQueue, endMarker);
+                        () -> transcribeStreamQueue(recording, segmentQueue, hotwords, polishEnabled, saveRaw));
+                wav = collectStreaming(recording, segmentQueue);
                 if (recording.cancelled) {
                     asrFuture.cancel(true);
                     failure = "录音已取消";
@@ -296,7 +309,7 @@ public final class VoiceSession {
                     stage = "文字整理";
                     recording.event("开始文字整理");
                     main.post(() -> {
-                        if (active == recording && !destroyed && !recording.cancelled) {
+                        if (active == recording && !destroyed && !recording.cancelled && !recording.polishing) {
                             recording.polishing = true;
                             listener.onVoiceState(POLISHING);
                         }
@@ -389,7 +402,7 @@ public final class VoiceSession {
                 Manuscripts.end(app, recording.id);
                 active = null;
                 if (!destroyed) {
-                    listener.onVoicePreview("");
+                    listener.onVoicePreview("", "");
                     listener.onVoiceState(IDLE);
                 }
             }
@@ -414,11 +427,12 @@ public final class VoiceSession {
         return saveAudio(recording, output);
     }
 
-    private byte[] collectStreaming(Recording recording, BlockingQueue<byte[]> segmentQueue, byte[] endMarker)
+    private byte[] collectStreaming(Recording recording, BlockingQueue<StreamEvent> segmentQueue)
             throws IOException, InterruptedException {
         AdaptiveVad vad = new AdaptiveVad(SAMPLE_RATE);
-        VadAudioStream output = new VadAudioStream(vad, segmentQueue);
+        StreamingAudioStream output = new StreamingAudioStream(vad, segmentQueue);
         output.write(new byte[WAV_HEADER], 0, WAV_HEADER);
+        boolean finishSent = false;
         try {
             recorder.record(output, () -> recording.finishRecording);
             if (!recording.finishRecording) {
@@ -430,59 +444,205 @@ public final class VoiceSession {
                 });
             }
             if (!recording.cancelled) {
-                byte[] tail = output.finishTail();
-                if (tail != null) segmentQueue.offer(tail);
+                segmentQueue.offer(output.finishTail());
+                finishSent = true;
             }
         } finally {
-            segmentQueue.offer(endMarker);
+            if (!finishSent) {
+                segmentQueue.offer(StreamEvent.finish(null, null));
+            }
         }
         recording.readyToSave.await();
         return saveAudio(recording, output);
     }
 
-    private String transcribeQueue(
+    private String transcribeStreamQueue(
             Recording recording,
-            BlockingQueue<byte[]> segmentQueue,
-            byte[] endMarker,
+            BlockingQueue<StreamEvent> segmentQueue,
             List<String> hotwords,
             boolean polishEnabled,
             Consumer<String> saveRaw
     ) throws Exception {
         StringBuilder raw = new StringBuilder();
         try (LocalAsr client = openReadyAsr(recording, hotwords)) {
-            while (!recording.cancelled && !destroyed) {
-                byte[] segment = segmentQueue.take();
-                if (segment == endMarker) break;
-                if (segment.length <= WAV_HEADER) continue;
-                EditorContext segContext = EditorContext.of(
-                        AdaptiveVad.combineBeforeContext(recording.context.before, raw.toString(), 300),
-                        recording.context.after
-                );
-                String recognized = client.transcribeWindow(segment, hotwords, segContext);
-                if (!recognized.trim().isEmpty()) {
-                    String prior = raw.toString();
-                    String delta = AdaptiveVad.joinDelta(prior, recognized);
-                    String updated = AdaptiveVad.joinTranscript(prior, recognized);
-                    raw.setLength(0);
-                    raw.append(updated);
-                    saveRaw.accept(updated);
-                    main.post(() -> {
-                        if (active != recording || destroyed || recording.cancelled) return;
-                        listener.onVoicePreview(updated);
-                        if (!polishEnabled && !delta.isEmpty()) {
-                            InputConnection target = recording.editor;
-                            if (target != null && target == host.getCurrentInputConnection()
-                                    && target.commitText(delta, 1)) {
-                                synchronized (recording) {
-                                    recording.committedStream.append(delta);
-                                }
+            boolean streaming = client.supportsStream();
+            String sessionId = null;
+            boolean streamClosed = false;
+            if (streaming) {
+                try {
+                    sessionId = client.startStream(hotwords, recording.context);
+                    recording.streamingActive = true;
+                    recording.event("本地识别就绪 · 流式开启");
+                } catch (LocalAsr.Failure error) {
+                    streaming = false;
+                    recording.streamingActive = false;
+                    recording.event("流式开启失败，回退分段识别 · " + error.reason);
+                }
+            }
+            boolean fedAnyInSegment = false;
+            try {
+                while (!recording.cancelled && !destroyed) {
+                    StreamEvent event = segmentQueue.take();
+                    if (event.kind == EventKind.CHUNK) {
+                        if (!streaming) continue;
+                        ByteArrayOutputStream coalesced = new ByteArrayOutputStream();
+                        if (event.pcm16 != null && event.pcm16.length > 0) {
+                            coalesced.write(event.pcm16, 0, event.pcm16.length);
+                        }
+                        while (!recording.cancelled && !destroyed) {
+                            StreamEvent next = segmentQueue.peek();
+                            if (next == null || next.kind != EventKind.CHUNK) break;
+                            segmentQueue.poll();
+                            if (next.pcm16 != null && next.pcm16.length > 0) {
+                                coalesced.write(next.pcm16, 0, next.pcm16.length);
                             }
                         }
-                    });
+                        byte[] combined = coalesced.toByteArray();
+                        if (combined.length == 0) continue;
+                        try {
+                            LocalAsr.StreamChunk chunk = client.feedStreamChunk(sessionId, combined);
+                            fedAnyInSegment = true;
+                            String prior = raw.toString();
+                            String confirmedPreview = chunk.confirmed.isEmpty()
+                                    ? prior
+                                    : AdaptiveVad.joinTranscript(prior, chunk.confirmed);
+                            String provisionalPreview = chunk.provisional;
+                            recording.lastConfirmedPreview = confirmedPreview;
+                            main.post(() -> {
+                                if (active != recording || destroyed || recording.cancelled || recording.stopped) return;
+                                listener.onVoicePreview(confirmedPreview, provisionalPreview);
+                            });
+                        } catch (Exception error) {
+                            streaming = false;
+                            recording.streamingActive = false;
+                            client.closeStream(sessionId);
+                            streamClosed = true;
+                            recording.event("流式分块异常，切换分段回退 · " + error.getClass().getSimpleName());
+                        }
+                        continue;
+                    }
+
+                    EditorContext segContext = EditorContext.of(
+                            AdaptiveVad.combineBeforeContext(recording.context.before, raw.toString(), 300),
+                            recording.context.after
+                    );
+                    String recognized = "";
+                    if (event.kind == EventKind.SEGMENT_BOUNDARY) {
+                        if (streaming) {
+                            try {
+                                recognized = client.finishStream(sessionId, event.pcm16, false);
+                            } catch (Exception error) {
+                                streaming = false;
+                                recording.streamingActive = false;
+                                client.closeStream(sessionId);
+                                streamClosed = true;
+                                showFallbackProcessing(recording);
+                                if (event.fallbackWav != null && event.fallbackWav.length > WAV_HEADER) {
+                                    recognized = client.transcribeWindow(event.fallbackWav, hotwords, segContext);
+                                } else {
+                                    throw error;
+                                }
+                            }
+                        } else if (event.fallbackWav != null && event.fallbackWav.length > WAV_HEADER) {
+                            showFallbackProcessing(recording);
+                            recognized = client.transcribeWindow(event.fallbackWav, hotwords, segContext);
+                        }
+                        appendSegmentResult(recording, raw, recognized, polishEnabled, saveRaw);
+                        if (streaming) {
+                            EditorContext nextContext = EditorContext.of(
+                                    AdaptiveVad.combineBeforeContext(recording.context.before, raw.toString(), 300),
+                                    recording.context.after
+                            );
+                            try {
+                                client.resetStream(sessionId, hotwords, nextContext);
+                            } catch (Exception error) {
+                                streaming = false;
+                                recording.streamingActive = false;
+                                client.closeStream(sessionId);
+                                streamClosed = true;
+                                recording.event("流式段切换失败 · " + error.getClass().getSimpleName());
+                            }
+                        }
+                        fedAnyInSegment = false;
+                        continue;
+                    }
+
+                    // FINISH event
+                    if (streaming) {
+                        if (fedAnyInSegment || (event.pcm16 != null && event.pcm16.length > 0)) {
+                            try {
+                                recognized = client.finishStream(sessionId, event.pcm16, true);
+                                streamClosed = true;
+                            } catch (Exception error) {
+                                streaming = false;
+                                recording.streamingActive = false;
+                                client.closeStream(sessionId);
+                                streamClosed = true;
+                                showFallbackProcessing(recording);
+                                if (event.fallbackWav != null && event.fallbackWav.length > WAV_HEADER) {
+                                    recognized = client.transcribeWindow(event.fallbackWav, hotwords, segContext);
+                                } else {
+                                    throw error;
+                                }
+                            }
+                        } else {
+                            client.closeStream(sessionId);
+                            streamClosed = true;
+                        }
+                    } else if (event.fallbackWav != null && event.fallbackWav.length > WAV_HEADER) {
+                        showFallbackProcessing(recording);
+                        recognized = client.transcribeWindow(event.fallbackWav, hotwords, segContext);
+                    }
+                    appendSegmentResult(recording, raw, recognized, polishEnabled, saveRaw);
+                    break;
+                }
+            } finally {
+                recording.streamingActive = false;
+                if (sessionId != null && !streamClosed) {
+                    client.closeStream(sessionId);
                 }
             }
         }
         return raw.toString();
+    }
+
+    private void showFallbackProcessing(Recording recording) {
+        main.post(() -> {
+            if (active == recording && !destroyed && !recording.cancelled && recording.stopped && recording.polishing) {
+                recording.polishing = false;
+                listener.onVoiceState(PROCESSING);
+            }
+        });
+    }
+
+    private void appendSegmentResult(
+            Recording recording,
+            StringBuilder raw,
+            String recognized,
+            boolean polishEnabled,
+            Consumer<String> saveRaw
+    ) {
+        if (recognized == null || recognized.trim().isEmpty()) return;
+        String prior = raw.toString();
+        String delta = AdaptiveVad.joinDelta(prior, recognized);
+        String updated = AdaptiveVad.joinTranscript(prior, recognized);
+        raw.setLength(0);
+        raw.append(updated);
+        saveRaw.accept(updated);
+        recording.lastConfirmedPreview = updated;
+        main.post(() -> {
+            if (active != recording || destroyed || recording.cancelled) return;
+            listener.onVoicePreview(updated, "");
+            if (!polishEnabled && !delta.isEmpty()) {
+                InputConnection target = recording.editor;
+                if (target != null && target == host.getCurrentInputConnection()
+                        && target.commitText(delta, 1)) {
+                    synchronized (recording) {
+                        recording.committedStream.append(delta);
+                    }
+                }
+            }
+        });
     }
 
     private LocalAsr openReadyAsr(Recording recording, List<String> hotwords) throws LocalAsr.Failure {
@@ -511,12 +671,42 @@ public final class VoiceSession {
         }
     }
 
-    private static final class VadAudioStream extends ByteArrayOutputStream {
-        private final AdaptiveVad vad;
-        private final BlockingQueue<byte[]> queue;
-        private int vadOffsetBytes = 0;
+    enum EventKind { CHUNK, SEGMENT_BOUNDARY, FINISH }
 
-        VadAudioStream(AdaptiveVad vad, BlockingQueue<byte[]> queue) {
+    static final class StreamEvent {
+        final EventKind kind;
+        final byte[] pcm16;
+        final byte[] fallbackWav;
+
+        private StreamEvent(EventKind kind, byte[] pcm16, byte[] fallbackWav) {
+            this.kind = kind;
+            this.pcm16 = pcm16;
+            this.fallbackWav = fallbackWav;
+        }
+
+        static StreamEvent chunk(byte[] pcm16) {
+            return new StreamEvent(EventKind.CHUNK, pcm16, null);
+        }
+
+        static StreamEvent segmentBoundary(byte[] tailPcm16, byte[] fallbackWav) {
+            return new StreamEvent(EventKind.SEGMENT_BOUNDARY, tailPcm16, fallbackWav);
+        }
+
+        static StreamEvent finish(byte[] tailPcm16, byte[] fallbackWav) {
+            return new StreamEvent(EventKind.FINISH, tailPcm16, fallbackWav);
+        }
+    }
+
+    static final class StreamingAudioStream extends ByteArrayOutputStream {
+        private final AdaptiveVad vad;
+        private final BlockingQueue<StreamEvent> queue;
+        private int vadOffsetBytes = 0;
+        private int segmentStartByte = 0;
+        private int previewCursorByte = 0;
+        private boolean previewAnchored = false;
+        private boolean segmentSentAny = false;
+
+        StreamingAudioStream(AdaptiveVad vad, BlockingQueue<StreamEvent> queue) {
             this.vad = vad;
             this.queue = queue;
         }
@@ -529,16 +719,61 @@ public final class VoiceSession {
                         buf, WAV_HEADER + vadOffsetBytes, AdaptiveVad.FRAME_PCM_BYTES, vadOffsetBytes);
                 vadOffsetBytes += AdaptiveVad.FRAME_PCM_BYTES;
                 if (seg != null) {
-                    byte[] segWav = sliceWav(seg.startByte, seg.endByte);
-                    if (segWav != null) queue.offer(segWav);
+                    int tailStart = segmentSentAny ? Math.max(segmentStartByte, previewCursorByte) : seg.startByte;
+                    byte[] tailPcm = slicePcm(tailStart, seg.endByte);
+                    byte[] fallbackWav = sliceWav(seg.startByte, seg.endByte);
+                    if (fallbackWav != null || (tailPcm != null && tailPcm.length > 0)) {
+                        queue.offer(StreamEvent.segmentBoundary(tailPcm, fallbackWav));
+                    }
+                    segmentStartByte = seg.endByte;
+                    previewCursorByte = seg.endByte;
+                    previewAnchored = false;
+                    segmentSentAny = false;
+                } else if (vad.hasActiveSpeech()) {
+                    if (!previewAnchored) {
+                        previewCursorByte = Math.max(segmentStartByte, vadOffsetBytes - PRE_ROLL_BYTES);
+                        previewAnchored = true;
+                    }
+                    while (vadOffsetBytes - previewCursorByte >= STREAM_CHUNK_BYTES) {
+                        byte[] chunkPcm = slicePcm(previewCursorByte, previewCursorByte + STREAM_CHUNK_BYTES);
+                        if (chunkPcm != null && chunkPcm.length > 0) {
+                            queue.offer(StreamEvent.chunk(chunkPcm));
+                        }
+                        previewCursorByte += STREAM_CHUNK_BYTES;
+                        segmentSentAny = true;
+                    }
+                } else if (!segmentSentAny) {
+                    previewAnchored = false;
                 }
             }
         }
 
-        synchronized byte[] finishTail() {
+        synchronized StreamEvent finishTail() {
             int totalPcm = Math.max(0, count - WAV_HEADER);
             AdaptiveVad.Segment seg = vad.finish(totalPcm);
-            return seg == null ? null : sliceWav(seg.startByte, seg.endByte);
+            if (seg != null) {
+                int tailStart = segmentSentAny ? Math.max(segmentStartByte, previewCursorByte) : seg.startByte;
+                byte[] tailPcm = slicePcm(tailStart, seg.endByte);
+                byte[] fallbackWav = sliceWav(seg.startByte, seg.endByte);
+                return StreamEvent.finish(tailPcm, fallbackWav);
+            }
+            if (segmentSentAny) {
+                byte[] tailPcm = slicePcm(previewCursorByte, totalPcm);
+                byte[] fallbackWav = sliceWav(segmentStartByte, totalPcm);
+                return StreamEvent.finish(tailPcm, fallbackWav);
+            }
+            return StreamEvent.finish(null, null);
+        }
+
+        private byte[] slicePcm(int startPcmByte, int endPcmByte) {
+            int totalPcm = Math.max(0, count - WAV_HEADER);
+            int s = Math.max(0, Math.min(totalPcm, startPcmByte));
+            int e = Math.max(s, Math.min(totalPcm, endPcmByte));
+            int len = e - s;
+            if (len <= 0) return null;
+            byte[] pcm = new byte[len];
+            System.arraycopy(buf, WAV_HEADER + s, pcm, 0, len);
+            return pcm;
         }
 
         private byte[] sliceWav(int startPcmByte, int endPcmByte) {
@@ -697,6 +932,8 @@ public final class VoiceSession {
         InputConnection editor;
         boolean stopped;
         boolean polishing;
+        volatile boolean streamingActive;
+        volatile String lastConfirmedPreview = "";
         volatile boolean finishRecording;
         volatile boolean cancelled;
 

@@ -47,6 +47,7 @@ import androidx.activity.ComponentActivity;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 
+import java.io.File;
 import java.io.IOException;
 import java.text.DateFormat;
 import java.util.ArrayList;
@@ -74,6 +75,7 @@ public final class YanmoActivity extends ComponentActivity {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService storage = Executors.newSingleThreadExecutor();
+    private final ExecutorService updaterPool = Executors.newSingleThreadExecutor();
     private final Runnable permissionRefresh = this::refreshPermissions;
     private YanmoColors colors;
     private Screen screen;
@@ -91,6 +93,11 @@ public final class YanmoActivity extends ComponentActivity {
     private LinearLayout recent;
     private YanmoSettings settingsView;
     private YanmoSyncUi syncView;
+    private File pendingInstallApk;
+    private boolean updateBusy;
+    private boolean updateAvailable;
+    private String updateStatus = "";
+    private String updateSubtitle = "";
     private final ActivityResultLauncher<Intent> qrScanLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
             result -> {
@@ -149,6 +156,7 @@ public final class YanmoActivity extends ComponentActivity {
             trialCursor = drafts.cursor;
             dictionaryQuery = drafts.search;
         }
+        initUpdaterState();
         dictionaryGroup = state == null ? null : state.getString("dictionaryGroup");
         if (state != null) {
             restorePage(state);
@@ -230,6 +238,15 @@ public final class YanmoActivity extends ComponentActivity {
         refreshPermissions();
         if (recent != null && recent.getChildCount() > 0) loadRecent();
         SyncManager.get(this).onAppResumed();
+        if (pendingInstallApk != null && pendingInstallApk.isFile() && YanmoUpdater.canInstallPackages(this)) {
+            File apk = pendingInstallApk;
+            pendingInstallApk = null;
+            try {
+                YanmoUpdater.launchInstall(this, apk);
+            } catch (YanmoUpdater.UpdateException failure) {
+                toast(failure.getMessage());
+            }
+        }
     }
 
     @Override
@@ -249,6 +266,7 @@ public final class YanmoActivity extends ComponentActivity {
         SyncManager.get(this).removeListener(syncListener);
         releasePlayer();
         storage.shutdown();
+        updaterPool.shutdownNow();
         handler.removeCallbacks(permissionRefresh);
         super.onDestroy();
     }
@@ -394,9 +412,133 @@ public final class YanmoActivity extends ComponentActivity {
     private void showSettings() {
         openPage(Screen.SETTINGS, "", this::showHome);
         settingsView = new YanmoSettings(this, this::manageMicrophone, this::changeScreenshot,
-                this::showApiSettings, this::showSyncSettings);
+                this::showApiSettings, this::showSyncSettings, this::checkUpdates);
+        settingsView.setUpdateState(updateStatus, updateSubtitle, updateAvailable, updateBusy);
         page.addView(settingsView.getView(), new LinearLayout.LayoutParams(-1, 0, 1));
         actionRow(page, "最近听写失败", "", this::showVoiceFailures);
+    }
+
+    private void initUpdaterState() {
+        String current = YanmoUpdater.currentVersionName(this);
+        String cached = YanmoUpdater.cachedAvailableVersion(this);
+        if (!cached.isEmpty()) {
+            setUpdateState("有新版本", "发现 " + cached + "，点击更新", true, false);
+        } else {
+            setUpdateState("检查更新", "当前版本 " + current, false, false);
+        }
+        if (YanmoUpdater.shouldAutoCheck(this)) {
+            updaterPool.execute(() -> {
+                try {
+                    YanmoUpdater.ReleaseInfo info = YanmoUpdater.checkUpdate(this);
+                    handler.post(() -> {
+                        if (isDestroyed() || isFinishing() || updateBusy) return;
+                        if (info != null) {
+                            setUpdateState("有新版本", "发现 " + info.version + "，点击更新", true, false);
+                        } else {
+                            setUpdateState("检查更新", "当前版本 " + current, false, false);
+                        }
+                    });
+                } catch (Exception ignored) {
+                    // Background periodic check must stay silent on transient network errors.
+                }
+            });
+        }
+    }
+
+    private void setUpdateState(String status, String subtitle, boolean available, boolean busy) {
+        updateStatus = status;
+        updateSubtitle = subtitle;
+        updateAvailable = available;
+        updateBusy = busy;
+        if (settingsView != null) {
+            settingsView.setUpdateState(status, subtitle, available, busy);
+        }
+    }
+
+    private void checkUpdates() {
+        if (updateBusy) return;
+        String current = YanmoUpdater.currentVersionName(this);
+        setUpdateState("检查中", "正在检查 GitHub 最新版本…", updateAvailable, true);
+        updaterPool.execute(() -> {
+            try {
+                YanmoUpdater.ReleaseInfo info = YanmoUpdater.checkUpdate(this);
+                handler.post(() -> {
+                    if (isDestroyed() || isFinishing()) return;
+                    if (info == null) {
+                        setUpdateState("已是最新", "当前已是最新版本（" + current + "）", false, false);
+                        toast("当前已是最新版本");
+                        return;
+                    }
+                    setUpdateState("有新版本", "发现 " + info.version + "，点击更新", true, false);
+                    long mb = Math.max(1L, (long) Math.ceil(info.sizeBytes / (1024.0 * 1024.0)));
+                    String summary = info.notes.isEmpty() ? ""
+                            : (info.notes.length() > 400 ? info.notes.substring(0, 400) + "…" : info.notes);
+                    StringBuilder message = new StringBuilder("言墨 Android ").append(info.version)
+                            .append(" 可用，安装包约 ").append(mb).append(" MB。下载完成后将校验 SHA-256 与发布签名证书。");
+                    if (!summary.isEmpty()) {
+                        message.append("\n\n").append(summary);
+                    }
+                    new AlertDialog.Builder(this)
+                            .setTitle("言墨更新")
+                            .setMessage(message.toString())
+                            .setNegativeButton("稍后", null)
+                            .setPositiveButton("立即下载", (dialog, which) -> downloadAndInstallUpdate(info))
+                            .show();
+                });
+            } catch (Exception error) {
+                String msg = error instanceof YanmoUpdater.UpdateException && error.getMessage() != null
+                        ? error.getMessage()
+                        : "暂时无法检查 GitHub 上的版本，请稍后再试。";
+                handler.post(() -> {
+                    if (isDestroyed() || isFinishing()) return;
+                    setUpdateState(updateAvailable ? "有新版本" : "检查更新", msg, updateAvailable, false);
+                    toast(msg);
+                });
+            }
+        });
+    }
+
+    private void downloadAndInstallUpdate(YanmoUpdater.ReleaseInfo info) {
+        if (updateBusy) return;
+        setUpdateState("下载中", "正在下载 " + info.version + " (0%)…", true, true);
+        updaterPool.execute(() -> {
+            try {
+                File apkFile = YanmoUpdater.downloadAndVerify(this, info, percent -> handler.post(() -> {
+                    if (!isDestroyed() && !isFinishing() && updateBusy) {
+                        setUpdateState("下载中", "正在下载 " + info.version + " (" + percent + "%)…", true, true);
+                    }
+                }));
+                handler.post(() -> {
+                    if (isDestroyed() || isFinishing()) return;
+                    setUpdateState("可安装", "已校验 " + info.version + "，准备安装", true, false);
+                    if (!YanmoUpdater.canInstallPackages(this)) {
+                        pendingInstallApk = apkFile;
+                        new AlertDialog.Builder(this)
+                                .setTitle("允许安装应用")
+                                .setMessage("安装包已完成 SHA-256 与签名校验。请授予言墨「安装未知应用」权限，返回后将自动继续安装。")
+                                .setNegativeButton("取消", (d, w) -> pendingInstallApk = null)
+                                .setPositiveButton("去开启", (d, w) -> startActivity(YanmoUpdater.unknownSourcesSettingsIntent(this)))
+                                .show();
+                        return;
+                    }
+                    try {
+                        YanmoUpdater.launchInstall(this, apkFile);
+                    } catch (YanmoUpdater.UpdateException failure) {
+                        setUpdateState("有新版本", failure.getMessage(), true, false);
+                        toast(failure.getMessage());
+                    }
+                });
+            } catch (Exception error) {
+                String msg = error instanceof YanmoUpdater.UpdateException && error.getMessage() != null
+                        ? error.getMessage()
+                        : "下载或校验安装包失败，请稍后再试。";
+                handler.post(() -> {
+                    if (isDestroyed() || isFinishing()) return;
+                    setUpdateState("有新版本", msg, true, false);
+                    toast(msg);
+                });
+            }
+        });
     }
 
     private void showSyncSettings() {

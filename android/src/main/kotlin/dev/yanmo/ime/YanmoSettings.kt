@@ -20,6 +20,7 @@ import androidx.compose.material.icons.twotone.Description
 import androidx.compose.material.icons.twotone.Keyboard
 import androidx.compose.material.icons.twotone.Mic
 import androidx.compose.material.icons.twotone.Screenshot
+import androidx.compose.material.icons.twotone.SystemUpdate
 import androidx.compose.material.icons.twotone.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -62,11 +63,16 @@ internal class YanmoSettings(
     private val changeScreenshot: Consumer<Boolean>,
     private val openApi: Consumer<Boolean>,
     private val openSync: Runnable,
+    private val checkUpdates: Runnable,
 ) {
     private var keyboardStatus by mutableStateOf("")
     private var microphoneGranted by mutableStateOf(false)
     private var screenshotEnabled by mutableStateOf(false)
     private var syncEnabled by mutableStateOf(false)
+    private var updateStatus by mutableStateOf("")
+    private var updateSubtitle by mutableStateOf("")
+    private var updateAvailable by mutableStateOf(false)
+    private var updateBusy by mutableStateOf(false)
 
     val view: View = settingsView(activity) { Overview() }
 
@@ -81,6 +87,13 @@ internal class YanmoSettings(
         microphoneGranted = activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         screenshotEnabled = ScreenCapture.enabled(activity)
         syncEnabled = SyncManager.get(activity).isEnabledFast()
+    }
+
+    fun setUpdateState(status: String, subtitle: String, available: Boolean, busy: Boolean) {
+        updateStatus = status
+        updateSubtitle = subtitle
+        updateAvailable = available
+        updateBusy = busy
     }
 
     @Composable
@@ -176,6 +189,17 @@ internal class YanmoSettings(
                     status = if (syncEnabled) "已开启" else "未开启",
                     statusTone = if (syncEnabled) SettingsStatusTone.OK else SettingsStatusTone.WARNING,
                     onClick = openSync::run,
+                    showArrow = true,
+                )
+            }
+            SettingsSection("软件更新") {
+                SettingsItem(
+                    icon = Icons.TwoTone.SystemUpdate,
+                    title = "软件更新",
+                    subtitle = updateSubtitle.ifEmpty { "当前版本 " + YanmoUpdater.currentVersionName(activity) },
+                    status = updateStatus.ifEmpty { if (updateAvailable) "有新版本" else "检查更新" },
+                    statusTone = if (updateAvailable) SettingsStatusTone.WARNING else SettingsStatusTone.OK,
+                    onClick = { if (!updateBusy) checkUpdates.run() },
                     showArrow = true,
                 )
             }

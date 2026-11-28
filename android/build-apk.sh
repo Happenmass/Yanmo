@@ -88,7 +88,7 @@ python3 "$android_root/tools/prepare_source.py" "$checkout" --speech-package "$s
 # The light release already excludes these optional Japanese conversion assets.
 ANDROID_HOME="$sdk" ANDROID_SDK_ROOT="$sdk" "$checkout/gradlew" -p "$checkout" \
     -I "$checkout/scripts/phone-release-abi.gradle" \
-    -PversionCode=20261465 -PversionName=1.15.94-yanmo.18 \
+    -PversionCode=20261466 -PversionName=1.15.94-yanmo.19 \
     -x :app:prepareJapaneseDictionaries -x :app:prepareAzooKeyLibraries \
     :app:assembleRelease >&2
 apk=$(python3 - "$checkout/app/build/outputs/apk/release/output-metadata.json" <<'PY'
